@@ -4,6 +4,8 @@
 
 A project for the **Meta Global AI Developer Hackathon**.
 
+Live demo: [littletake.vercel.app](https://littletake.vercel.app).
+
 ## Why
 
 AI video models are powerful, but describing actions, camera movement, and relationships between objects through long prompts remains difficult. LittleTake lets everyday creators express those intentions through an editable 3D scene and a rough performance.
@@ -63,7 +65,7 @@ Desktop scope: mouse/keyboard authoring, text prompts and reference clips.
 
 | P | Module | Scope | Status |
 | --- | --- | --- | --- |
-| **P0** | **Vercel deployment** | Publish an HTTPS desktop web demo with Git-based production and preview deployments. | Todo |
+| **P0** | **Vercel deployment** | Publish an HTTPS desktop web demo with Git-based production and preview deployments. | Done |
 
 ## Development
 
@@ -73,5 +75,7 @@ npm run dev
 ```
 
 `npm test` checks scene data, motion interpolation and undo/redo. `npm run build` produces the deployable app in `dist/`.
+
+Vercel deploys `main` to production and creates previews for other branches and pull requests.
 
 The studio includes six primitives, transform tools, an independent shot preview, start/end motion tracks, local saves and JSON export. The in-app **Shortcuts** panel lists navigation controls. AI integration and previs image/video export remain planned.
