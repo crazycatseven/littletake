@@ -31,10 +31,10 @@ Desktop scope: mouse/keyboard authoring, text prompts and reference clips.
 
 | P | Module | Scope | Status |
 | --- | --- | --- | --- |
-| **P0** | **Scene & project model** | A shared editable representation of objects, actions, cameras and timing, with project storage. | Todo |
-| **P0** | **Desktop editor** | Mouse/keyboard tools for direct scene editing. | Todo |
+| **P0** | **Scene & project model** | A shared editable representation of objects, actions, cameras and timing, with project storage. | Done |
+| **P0** | **Desktop editor** | Mouse/keyboard tools for direct scene editing. | Done |
 | **P0** | **AI scene editing** | Edit layout, objects, motion and cameras through Muse text instructions and scene tools. | Todo |
-| **P0** | **Motion & camera authoring** | Basic object/character motion and independent camera moves. | Todo |
+| **P0** | **Motion & camera authoring** | Basic object/character motion and independent camera moves. | Done |
 | **P1** | **Advanced timing authoring** | Refine timing, sequencing and synchronization across actions and cameras. | Todo |
 
 ### Generation
@@ -48,7 +48,7 @@ Desktop scope: mouse/keyboard authoring, text prompts and reference clips.
 
 | P | Module | Scope | Status |
 | --- | --- | --- | --- |
-| **P0** | **Proxy asset system** | Low-poly geometry, asset recipes and semantic descriptions. | Todo |
+| **P0** | **Proxy asset system** | Low-poly geometry, asset recipes and semantic descriptions. | Partial |
 | **P1** | **Asset library & templates** | Reusable proxy assets, categories and prepared scenes. | Todo |
 | **P1** | **AI asset composition** | Compose missing proxy objects from simple 3D parts. | Todo |
 
@@ -56,5 +56,22 @@ Desktop scope: mouse/keyboard authoring, text prompts and reference clips.
 
 | P | Module | Scope | Status |
 | --- | --- | --- | --- |
-| **P0** | **Three.js runtime** | Scene rendering, camera evaluation and synchronized playback. | Todo |
+| **P0** | **Three.js runtime** | Scene rendering, camera evaluation and synchronized playback. | Done |
 | **P0** | **Previs rendering & export** | Render and export proxy frames and animation as visual guidance for final video generation. | Todo |
+
+### Deployment
+
+| P | Module | Scope | Status |
+| --- | --- | --- | --- |
+| **P0** | **Vercel deployment** | Publish an HTTPS desktop web demo with Git-based production and preview deployments. | Todo |
+
+## Development
+
+```sh
+npm install
+npm run dev
+```
+
+`npm test` checks scene data, motion interpolation and undo/redo. `npm run build` produces the deployable app in `dist/`.
+
+The studio includes six primitives, transform tools, an independent shot preview, start/end motion tracks, local saves and JSON export. The in-app **Shortcuts** panel lists navigation controls. AI integration and previs image/video export remain planned.
