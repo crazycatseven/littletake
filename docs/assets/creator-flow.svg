@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="548" viewBox="0 0 1440 548" role="img" aria-labelledby="title desc">
+  <title id="title">LittleTake Creator Flow</title>
+  <desc id="desc">A horizontal black-and-white workflow. Build from scratch, or import a reference clip for AI shot analysis and proxy setup. Both routes lead to proxy scene editing, animation preview, AI video generation guided by that preview, and review. Solid arrows show creation; the dashed return arrow shows refinement.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M1 1 L9 5 L1 9 Z" fill="#202020"/>
+    </marker>
+    <filter id="node-shadow" x="-10%" y="-15%" width="125%" height="140%">
+      <feDropShadow dx="3" dy="4" stdDeviation="2" flood-color="#000000" flood-opacity=".12"/>
+    </filter>
+  </defs>
+
+  <rect id="background" width="1440" height="548" fill="#FFFFFF"/>
+  <g id="typography-and-flow" font-family="Arial, Helvetica, sans-serif" fill="#1C1C1C">
+    <g id="heading">
+      <text x="720" y="82" text-anchor="middle" font-size="48" font-weight="600" letter-spacing="-1.5">From proxy to AI video</text>
+      <path d="M64 152 V130 Q64 114 80 114 H206 Q222 114 222 130 V152 Z" fill="#222222"/>
+      <text x="80" y="140" font-size="22" font-weight="600" fill="#FFFFFF">LittleTake</text>
+    </g>
+
+    <g id="flow-content" transform="translate(0,-32)">
+    <rect id="workflow-boundary" x="24" y="184" width="1392" height="370" rx="24" fill="#FFFFFF" stroke="#222222" stroke-width="1.8"/>
+
+    <g id="connectors" fill="none" stroke="#454545" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)">
+      <path id="manual-to-scene" d="M270 277 H444 Q460 277 460 293 V324 Q460 340 476 340 H499"/>
+      <path id="clip-to-analysis" d="M270 459 H307"/>
+      <path id="analysis-to-scene" d="M466 459 H474 Q484 459 484 449 V396 Q484 384 496 384 H499"/>
+      <path id="scene-to-preview" d="M740 361 H791"/>
+      <path id="preview-to-generation" d="M952 361 H1003"/>
+      <path id="generation-to-review" d="M1180 361 H1231"/>
+      <path id="review-to-edit" stroke="#777777" stroke-width="1.5" stroke-dasharray="6 6" d="M1316 406 V496 Q1316 510 1302 510 H634 Q620 510 620 496 V423"/>
+    </g>
+
+    <g id="manual-entry">
+      <rect x="60" y="236" width="210" height="82" rx="14" fill="#FFFFFF" stroke="#222222" stroke-width="1.25" filter="url(#node-shadow)"/>
+      <circle cx="94" cy="277" r="18" fill="#1C1C1C"/>
+      <g id="pencil-icon" fill="none" stroke="#FFFFFF" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M85 284 L88 276 L99 265 Q101 263 103 266 L104 267 Q105 269 103 271 L92 282 Z"/>
+        <path d="M88 276 L92 282 M98 266 L103 271 M85 284 L90 283"/>
+      </g>
+      <text x="126" y="270" font-size="23">Build from</text>
+      <text x="126" y="297" font-size="23">scratch</text>
+    </g>
+
+    <g id="reference-entry">
+      <rect x="60" y="418" width="210" height="82" rx="14" fill="#FFFFFF" stroke="#222222" stroke-width="1.25" filter="url(#node-shadow)"/>
+      <circle cx="94" cy="459" r="18" fill="#1C1C1C"/>
+      <g id="film-icon" fill="none" stroke="#FFFFFF" stroke-width="1.2" stroke-linejoin="round">
+        <rect x="83" y="451" width="22" height="16" rx="1.5"/>
+        <path d="M87 451 V467 M101 451 V467 M83 456 H87 M83 462 H87 M101 456 H105 M101 462 H105"/>
+        <path d="M92 455 L98 459 L92 463 Z" fill="#FFFFFF" stroke="none"/>
+      </g>
+      <text x="126" y="452" font-size="23">Reference</text>
+      <text x="126" y="479" font-size="23">clip</text>
+    </g>
+
+    <g id="reference-analysis">
+      <rect x="308" y="418" width="158" height="82" rx="12" fill="#FFFFFF" stroke="#222222" stroke-width="1.25"/>
+      <text x="387" y="451" text-anchor="middle" font-size="20">AI shot analysis</text>
+      <text x="387" y="478" text-anchor="middle" font-size="18" fill="#555555">Build proxy scene</text>
+    </g>
+
+    <g id="editable-proxy-scene">
+      <rect x="500" y="300" width="240" height="122" rx="16" fill="#1C1C1C" stroke="#1C1C1C" stroke-width="1.5" filter="url(#node-shadow)"/>
+      <text x="620" y="342" text-anchor="middle" font-size="28" font-weight="600" fill="#FFFFFF">Edit proxy</text>
+      <text x="620" y="375" text-anchor="middle" font-size="28" font-weight="600" fill="#FFFFFF">scene</text>
+      <text x="620" y="403" text-anchor="middle" font-size="18" fill="#E0E0E0">Layout · Action · Camera</text>
+    </g>
+
+    <g id="proxy-preview">
+      <rect x="792" y="316" width="160" height="90" rx="15" fill="#FFFFFF" stroke="#222222" stroke-width="1.25" filter="url(#node-shadow)"/>
+      <text x="872" y="354" text-anchor="middle" font-size="27">Preview</text>
+      <text x="872" y="384" text-anchor="middle" font-size="18" fill="#555555">Proxy animation</text>
+    </g>
+
+    <g id="ai-video-generation">
+      <rect x="1004" y="316" width="176" height="90" rx="15" fill="#FFFFFF" stroke="#222222" stroke-width="1.25" filter="url(#node-shadow)"/>
+      <text x="1092" y="354" text-anchor="middle" font-size="26">Generate</text>
+      <text x="1092" y="384" text-anchor="middle" font-size="26">AI video</text>
+    </g>
+
+    <g id="review-result">
+      <rect x="1232" y="316" width="168" height="90" rx="15" fill="#FFFFFF" stroke="#222222" stroke-width="1.25" filter="url(#node-shadow)"/>
+      <text x="1316" y="354" text-anchor="middle" font-size="27">Review</text>
+      <text x="1316" y="384" text-anchor="middle" font-size="18" fill="#555555">Keep or refine</text>
+    </g>
+
+    <g id="step-numbers" font-size="16" font-weight="600" text-anchor="middle">
+      <circle cx="514" cy="279" r="12" fill="#1C1C1C"/><text x="514" y="284.5" fill="#FFFFFF">1</text>
+      <circle cx="806" cy="295" r="12" fill="#1C1C1C"/><text x="806" y="300.5" fill="#FFFFFF">2</text>
+      <circle cx="1018" cy="295" r="12" fill="#1C1C1C"/><text x="1018" y="300.5" fill="#FFFFFF">3</text>
+      <circle cx="1246" cy="295" r="12" fill="#1C1C1C"/><text x="1246" y="300.5" fill="#FFFFFF">4</text>
+    </g>
+
+    <g id="visual-guidance-label">
+      <path d="M978 361 V427" fill="none" stroke="#777777" stroke-width="1.2"/>
+      <rect x="892" y="429" width="172" height="30" rx="6" fill="#FFFFFF" stroke="#777777" stroke-width="1"/>
+      <text x="978" y="450" text-anchor="middle" font-size="18">Visual guidance</text>
+    </g>
+
+    <g id="iteration-label">
+      <rect x="861" y="495" width="224" height="30" rx="6" fill="#1C1C1C"/>
+      <text x="973" y="516" text-anchor="middle" font-size="17" fill="#FFFFFF">Refine and regenerate</text>
+    </g>
+
+    </g>
+  </g>
+</svg>
