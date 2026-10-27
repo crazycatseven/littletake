@@ -1,9 +1,11 @@
-import type { SceneDocument } from '../types';
+import type { ProjectContent } from '../types';
 import type { EditPlan, SceneSnapshot, SceneView } from './operations';
+import type { ConversationHistory } from './conversations';
 
 export interface SceneEditInput {
-  scene: SceneDocument; prompt: string; selectedId: string | null; time: number;
+  project: ProjectContent; sceneId: string | null; shotId: string | null; prompt: string; selectedId: string | null; time: number;
   snapshots: SceneSnapshot[];
+  history?: ConversationHistory;
 }
 export type SceneEditResponse =
   | { status: 'needs_views'; requestedViews: SceneView[]; summary: string; provider: string; model: string }

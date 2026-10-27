@@ -15,13 +15,13 @@ export function topDownCamera(bounds: THREE.Box3, aspect = 1): THREE.Orthographi
 }
 
 /** Render on demand into a disposable target. The live canvas and camera stay intact. */
-export function renderSceneSnapshot(renderer: THREE.WebGLRenderer, scene: THREE.Scene, shotCamera: THREE.PerspectiveCamera, objects: SnapshotObject[], view: SceneView, time: number): SceneSnapshot {
+export function renderSceneSnapshot(renderer: THREE.WebGLRenderer, scene: THREE.Scene, shotCamera: THREE.PerspectiveCamera, objects: SnapshotObject[], view: SceneView, time: number, cameraId: string | null = 'camera'): SceneSnapshot {
   const width = 1024, height = view === 'top_down' ? 1024 : 576;
   scene.updateMatrixWorld(true);
   const bounds = new THREE.Box3();
   for (const item of objects) bounds.union(new THREE.Box3().setFromObject(item.root));
   if (bounds.isEmpty()) bounds.set(new THREE.Vector3(-2, 0, -2), new THREE.Vector3(2, 2, 2));
-  bounds.expandByPoint(shotCamera.position);
+  if (cameraId) bounds.expandByPoint(shotCamera.position);
   const camera = view === 'top_down' ? topDownCamera(bounds) : shotCamera;
   camera.updateMatrixWorld(true);
   const target = new THREE.WebGLRenderTarget(width, height);
@@ -61,11 +61,11 @@ export function renderSceneSnapshot(renderer: THREE.WebGLRenderer, scene: THREE.
     for (const item of objects) label(`${item.id} · ${item.name}`, new THREE.Box3().setFromObject(item.root).getCenter(new THREE.Vector3()), '#526b42');
     const cameraPoint = project(shotCamera.position), forward = shotCamera.getWorldDirection(new THREE.Vector3());
     forward.y = 0;
-    if (forward.lengthSq() > 0.0001) {
+    if (cameraId && forward.lengthSq() > 0.0001) {
       forward.normalize(); const targetPoint = project(shotCamera.position.clone().addScaledVector(forward, Math.max(0.5, bounds.getSize(new THREE.Vector3()).length() * 0.12)));
       ctx.strokeStyle = '#617fa6'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(cameraPoint.x, cameraPoint.y); ctx.lineTo(targetPoint.x, targetPoint.y); ctx.stroke();
     }
-    label('camera · Shot camera', shotCamera.position, '#617fa6');
+    if (cameraId) label(cameraId + ' · Camera view', shotCamera.position, '#617fa6');
     ctx.fillStyle = '#fbfcf7ee'; ctx.fillRect(16, 16, 235, 68); ctx.fillStyle = '#29362e';
     ctx.font = '600 17px system-ui, sans-serif'; ctx.fillText('TOP VIEW', 29, 43);
     ctx.font = '13px system-ui, sans-serif'; ctx.fillText('X →    −Z ↑    Y = height', 29, 67);

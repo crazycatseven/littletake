@@ -1,0 +1,2279 @@
+{
+  "format": "LittleTake.project",
+  "version": 3,
+  "name": "资产 toolkit 完整流程验收",
+  "scenes": [
+    {
+      "format": "LittleTake.scene",
+      "version": 3,
+      "id": "cabinet-accept",
+      "name": "柜子验收片场",
+      "duration": 8,
+      "objects": [
+        {
+          "id": "floor",
+          "name": "地面",
+          "kind": "plane",
+          "color": "#8E8E8E",
+          "transform": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0
+            ],
+            "scale": [
+              10,
+              1,
+              10
+            ]
+          },
+          "track": null
+        },
+        {
+          "id": "object-28b54f93-73f1-4bf6-922e-bcbcfd9a0d8b",
+          "name": "木质双开门柜",
+          "kind": "asset",
+          "color": "#ffffff",
+          "transform": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          },
+          "track": null,
+          "asset": {
+            "id": "asset-8db96dd0-708a-4931-bd07-1a33262b1959",
+            "version": 2
+          },
+          "components": []
+        },
+        {
+          "id": "object-44aa2f0b-2f53-4b5f-b983-e3d297cf375e",
+          "name": "复用柜",
+          "kind": "asset",
+          "color": "#ffffff",
+          "transform": {
+            "position": [
+              2.2,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          },
+          "track": null,
+          "asset": {
+            "id": "asset-8db96dd0-708a-4931-bd07-1a33262b1959",
+            "version": 2
+          },
+          "components": []
+        }
+      ],
+      "cameras": [
+        {
+          "id": "cam-main",
+          "name": "全景相机",
+          "fov": 40,
+          "transform": {
+            "position": [
+              0,
+              1.5,
+              3.6
+            ],
+            "rotation": [
+              -9.462322208025617,
+              0,
+              0
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          },
+          "track": null
+        }
+      ],
+      "shots": [
+        {
+          "id": "shot-main",
+          "name": "完整展示镜头",
+          "cameraId": "cam-main",
+          "start": 0,
+          "duration": 8
+        }
+      ]
+    }
+  ],
+  "activeSceneId": "cabinet-accept",
+  "activeShotId": null,
+  "revision": 21,
+  "conversations": {
+    "activeId": "7f5a010f-dc8b-40e9-a769-dac1700850df",
+    "threads": [
+      {
+        "id": "7f5a010f-dc8b-40e9-a769-dac1700850df",
+        "title": "请从 library 查找并读取已保存的「参数化双开门柜」v2，直接复用这个版本，在当前片场 x=2.2、y=0、z=0 再放一个实例，命名「复用柜」。保留现有",
+        "draft": "",
+        "messages": [
+          {
+            "id": "d276f872-57d4-4916-bf9c-ffc3cc8bf51a",
+            "role": "user",
+            "text": "请从 library 查找并读取已保存的「参数化双开门柜」v2，直接复用这个版本，在当前片场 x=2.2、y=0、z=0 再放一个实例，命名「复用柜」。保留现有地面、柜子、相机和镜头，不要重新生成资产，不要改变已有实例。片场最终恰好 3 个物体。",
+            "status": "answered",
+            "context": {
+              "sceneId": "cabinet-accept",
+              "shotId": null,
+              "selectedId": "object-28b54f93-73f1-4bf6-922e-bcbcfd9a0d8b",
+              "time": 0
+            }
+          },
+          {
+            "id": "8514832c-4ac5-4d44-bed6-f698afde358e",
+            "role": "assistant",
+            "text": "复用已保存的参数化双开门柜v2，在x=2.2,y=0,z=0放置实例「复用柜」，保留原有地面、柜子、相机镜头，未重新生成资产，最终3个物体。",
+            "model": "muse-spark-1.3-contributor",
+            "edit": {
+              "operations": [
+                {
+                  "type": "instantiate_asset",
+                  "sceneId": "cabinet-accept",
+                  "id": "object-44aa2f0b-2f53-4b5f-b983-e3d297cf375e",
+                  "name": "复用柜",
+                  "asset": {
+                    "name": "参数化双开门柜",
+                    "description": "1.4x1.8x0.6m wooden double-door cabinet, side/top/bottom/back frame, two outer-hinge doors, three equidistant shelves",
+                    "tags": [
+                      "cabinet",
+                      "wooden",
+                      "double-door",
+                      "wardrobe",
+                      "storage"
+                    ],
+                    "parts": [
+                      {
+                        "id": "side_l_grp",
+                        "name": "left side assembly",
+                        "parentId": null,
+                        "kind": "group",
+                        "position": [
+                          -0.585,
+                          0.9,
+                          0
+                        ],
+                        "rotation": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "size": [
+                          1,
+                          1,
+                          1
+                        ],
+                        "color": "#8B5A2B",
+                        "joint": null
+                      },
+                      {
+                        "id": "side_l_panel",
+                        "name": "left side panel",
+                        "parentId": "side_l_grp",
+                        "kind": "cube",
+                        "position": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "rotation": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "size": [
+                          0.03,
+                          1.8,
+                          0.5
+                        ],
+                        "color": "#8B5A2B",
+                        "joint": null
+                      },
+                      {
+                        "id": "top_panel",
+                        "name": "top panel",
+                        "parentId": null,
+                        "kind": "cube",
+                        "position": [
+                          0,
+                          1.785,
+                          0
+                        ],
+                        "rotation": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "size": [
+                          1.14,
+                          0.03,
+                          0.5
+                        ],
+                        "color": "#8B5A2B",
+                        "joint": null
+                      },
+                      {
+                        "id": "bottom_panel",
+                        "name": "bottom panel",
+                        "parentId": null,
+                        "kind": "cube",
+                        "position": [
+                          0,
+                          0.015,
+                          0
+                        ],
+                        "rotation": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "size": [
+                          1.14,
+                          0.03,
+                          0.5
+                        ],
+                        "color": "#7A4F26",
+                        "joint": null
+                      },
+                      {
+                        "id": "back_panel",
+                        "name": "back panel",
+                        "parentId": null,
+                        "kind": "cube",
+                        "position": [
+                          0,
+                          0.9,
+                          -0.24
+                        ],
+                        "rotation": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "size": [
+                          1.14,
+                          1.74,
+                          0.02
+                        ],
+                        "color": "#7A4F26",
+                        "joint": null
+                      },
+                      {
+                        "id": "door_l_grp",
+                        "name": "left door hinge assembly",
+                        "parentId": null,
+                        "kind": "group",
+                        "position": [
+                          -0.6,
+                          0.9,
+                          0.24
+                        ],
+                        "rotation": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "size": [
+                          1,
+                          1,
+                          1
+                        ],
+                        "color": "#A06A35",
+                        "joint": {
+                          "type": "hinge",
+                          "pivot": [
+                            0,
+                            0,
+                            0
+                          ],
+                          "axis": "y",
+                          "min": -100,
+                          "max": 0
+                        }
+                      },
+                      {
+                        "id": "door_l_panel",
+                        "name": "left door panel",
+                        "parentId": "door_l_grp",
+                        "kind": "cube",
+                        "position": [
+                          0.295,
+                          0,
+                          0
+                        ],
+                        "rotation": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "size": [
+                          0.59,
+                          1.76,
+                          0.02
+                        ],
+                        "color": "#A06A35",
+                        "joint": null
+                      },
+                      {
+                        "id": "shelf_grp",
+                        "name": "shelf assembly",
+                        "parentId": null,
+                        "kind": "group",
+                        "position": [
+                          0,
+                          0.465,
+                          -0.02
+                        ],
+                        "rotation": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "size": [
+                          1,
+                          1,
+                          1
+                        ],
+                        "color": "#8B5A2B",
+                        "joint": null
+                      },
+                      {
+                        "id": "shelf_panel",
+                        "name": "shelf board",
+                        "parentId": "shelf_grp",
+                        "kind": "cube",
+                        "position": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "rotation": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "size": [
+                          1.14,
+                          0.025,
+                          0.44
+                        ],
+                        "color": "#8B5A2B",
+                        "joint": null
+                      }
+                    ],
+                    "construction": {
+                      "parameters": [
+                        {
+                          "id": "width",
+                          "name": "cabinet width",
+                          "value": 1.4,
+                          "min": 0.5,
+                          "max": 2.5
+                        },
+                        {
+                          "id": "height",
+                          "name": "cabinet height",
+                          "value": 1.8,
+                          "min": 1,
+                          "max": 2.5
+                        },
+                        {
+                          "id": "depth",
+                          "name": "cabinet depth",
+                          "value": 0.6,
+                          "min": 0.3,
+                          "max": 1
+                        },
+                        {
+                          "id": "thick",
+                          "name": "panel thickness",
+                          "value": 0.03,
+                          "min": 0.015,
+                          "max": 0.06
+                        }
+                      ],
+                      "bindings": [
+                        {
+                          "partId": "side_l_grp",
+                          "property": "position.x",
+                          "expression": "-width/2+thick/2"
+                        },
+                        {
+                          "partId": "side_l_grp",
+                          "property": "position.y",
+                          "expression": "height/2"
+                        },
+                        {
+                          "partId": "side_l_panel",
+                          "property": "size.x",
+                          "expression": "thick"
+                        },
+                        {
+                          "partId": "side_l_panel",
+                          "property": "size.y",
+                          "expression": "height"
+                        },
+                        {
+                          "partId": "side_l_panel",
+                          "property": "size.z",
+                          "expression": "depth"
+                        },
+                        {
+                          "partId": "top_panel",
+                          "property": "size.x",
+                          "expression": "width-2*thick"
+                        },
+                        {
+                          "partId": "top_panel",
+                          "property": "size.y",
+                          "expression": "thick"
+                        },
+                        {
+                          "partId": "top_panel",
+                          "property": "size.z",
+                          "expression": "depth"
+                        },
+                        {
+                          "partId": "top_panel",
+                          "property": "position.y",
+                          "expression": "height-thick/2"
+                        },
+                        {
+                          "partId": "bottom_panel",
+                          "property": "size.x",
+                          "expression": "width-2*thick"
+                        },
+                        {
+                          "partId": "bottom_panel",
+                          "property": "size.y",
+                          "expression": "thick"
+                        },
+                        {
+                          "partId": "bottom_panel",
+                          "property": "size.z",
+                          "expression": "depth"
+                        },
+                        {
+                          "partId": "bottom_panel",
+                          "property": "position.y",
+                          "expression": "thick/2"
+                        },
+                        {
+                          "partId": "back_panel",
+                          "property": "size.x",
+                          "expression": "width-2*thick"
+                        },
+                        {
+                          "partId": "back_panel",
+                          "property": "size.y",
+                          "expression": "height-2*thick"
+                        },
+                        {
+                          "partId": "back_panel",
+                          "property": "position.y",
+                          "expression": "height/2"
+                        },
+                        {
+                          "partId": "back_panel",
+                          "property": "position.z",
+                          "expression": "-depth/2+0.01"
+                        },
+                        {
+                          "partId": "door_l_grp",
+                          "property": "position.x",
+                          "expression": "-width/2"
+                        },
+                        {
+                          "partId": "door_l_grp",
+                          "property": "position.y",
+                          "expression": "height/2"
+                        },
+                        {
+                          "partId": "door_l_grp",
+                          "property": "position.z",
+                          "expression": "depth/2-0.01"
+                        },
+                        {
+                          "partId": "door_l_panel",
+                          "property": "size.x",
+                          "expression": "width/2-0.01"
+                        },
+                        {
+                          "partId": "door_l_panel",
+                          "property": "size.y",
+                          "expression": "height-0.04"
+                        },
+                        {
+                          "partId": "door_l_panel",
+                          "property": "position.x",
+                          "expression": "width/4-0.005"
+                        },
+                        {
+                          "partId": "shelf_grp",
+                          "property": "position.y",
+                          "expression": "thick+(height-2*thick)/4"
+                        },
+                        {
+                          "partId": "shelf_grp",
+                          "property": "position.z",
+                          "expression": "-0.02"
+                        },
+                        {
+                          "partId": "shelf_panel",
+                          "property": "size.x",
+                          "expression": "width-2*thick"
+                        },
+                        {
+                          "partId": "shelf_panel",
+                          "property": "size.z",
+                          "expression": "depth-0.06"
+                        }
+                      ],
+                      "anchors": [
+                        {
+                          "id": "bottom_center",
+                          "name": "bottom center origin",
+                          "partId": null,
+                          "position": [
+                            0,
+                            0,
+                            0
+                          ]
+                        },
+                        {
+                          "id": "top_center",
+                          "name": "top center",
+                          "partId": null,
+                          "position": [
+                            0,
+                            "height",
+                            0
+                          ]
+                        }
+                      ],
+                      "constraints": [],
+                      "modifiers": [
+                        {
+                          "id": "mirror_side",
+                          "targetId": "side_l_grp",
+                          "enabled": true,
+                          "type": "mirror",
+                          "axes": [
+                            "x"
+                          ],
+                          "referenceId": null
+                        },
+                        {
+                          "id": "mirror_door",
+                          "targetId": "door_l_grp",
+                          "enabled": true,
+                          "type": "mirror",
+                          "axes": [
+                            "x"
+                          ],
+                          "referenceId": null
+                        },
+                        {
+                          "id": "array_shelf",
+                          "targetId": "shelf_grp",
+                          "enabled": true,
+                          "type": "array",
+                          "count": 3,
+                          "offset": [
+                            0,
+                            "(height-2*thick)/4",
+                            0
+                          ]
+                        }
+                      ],
+                      "excluded": [],
+                      "offset": [
+                        0,
+                        0,
+                        0
+                      ]
+                    },
+                    "id": "asset-8db96dd0-708a-4931-bd07-1a33262b1959",
+                    "version": 2,
+                    "source": "edited",
+                    "createdAt": "2026-10-27T23:22:25.221Z",
+                    "bounds": {
+                      "min": [
+                        -0.7,
+                        0,
+                        -0.3
+                      ],
+                      "max": [
+                        0.7,
+                        1.8,
+                        0.3
+                      ],
+                      "size": [
+                        1.4,
+                        1.8,
+                        0.6
+                      ]
+                    }
+                  },
+                  "transform": {
+                    "position": [
+                      2.2,
+                      0,
+                      0
+                    ],
+                    "rotation": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "scale": [
+                      1,
+                      1,
+                      1
+                    ]
+                  },
+                  "track": null
+                }
+              ],
+              "time": 0,
+              "sceneId": "cabinet-accept",
+              "shotId": null,
+              "revision": 20,
+              "status": "applied"
+            }
+          }
+        ]
+      },
+      {
+        "id": "a669cf00-1b7c-41ad-bd61-15249046f55f",
+        "title": "请从零建立一个名为「柜子验收片场」的场景，时长 8 秒，恰好 2 个物体：地面和一座木质双开门柜，另加一个能完整看到柜子的相机和镜头。先查资产库，没有合适的双开",
+        "draft": "",
+        "messages": [
+          {
+            "id": "4b4ebae0-917c-4528-84db-24a539b1e1db",
+            "role": "user",
+            "text": "请从零建立一个名为「柜子验收片场」的场景，时长 8 秒，恰好 2 个物体：地面和一座木质双开门柜，另加一个能完整看到柜子的相机和镜头。先查资产库，没有合适的双开门柜就交给资产建模专家生成入库，再放入场景。柜子宽 1.2m、高 1.8m、深 0.5m；左右柜门要能独立绕外侧铰链打开，三个层板等距。请让专家用 construction 的 width/height/depth 参数关联尺寸，Group + Mirror 复用左右对称部件，Array 复用三层层板，不要将这些部件拆成场景物体。生成后需要专家查看三视图和开门状态再评估。",
+            "status": "answered",
+            "context": {
+              "sceneId": null,
+              "shotId": null,
+              "selectedId": null,
+              "time": 0
+            }
+          },
+          {
+            "id": "3978385a-2ecc-40fb-9a2b-07c9fb32ca96",
+            "role": "assistant",
+            "text": "已建「柜子验收片场」(8秒，2物体)：地面+资产库新生成的1.2x1.8x0.5m木质双开门柜(外侧铰链双门独立开合、三层板Array等距、Group+Mirror复用、width/height/depth驱动，专家已三视图及开门评审)，配正面全景相机/镜头。",
+            "model": "muse-spark-1.3-contributor",
+            "edit": {
+              "operations": [
+                {
+                  "type": "add_scene",
+                  "sceneId": "cabinet-accept",
+                  "name": "柜子验收片场",
+                  "duration": 8
+                },
+                {
+                  "sceneId": "cabinet-accept",
+                  "type": "add_object",
+                  "object": {
+                    "id": "floor",
+                    "name": "地面",
+                    "kind": "plane",
+                    "color": "#8E8E8E",
+                    "transform": {
+                      "position": [
+                        0,
+                        0,
+                        0
+                      ],
+                      "rotation": [
+                        0,
+                        0,
+                        0
+                      ],
+                      "scale": [
+                        10,
+                        1,
+                        10
+                      ]
+                    },
+                    "track": null
+                  }
+                },
+                {
+                  "type": "instantiate_asset",
+                  "sceneId": "cabinet-accept",
+                  "id": "object-28b54f93-73f1-4bf6-922e-bcbcfd9a0d8b",
+                  "name": "木质双开门柜",
+                  "asset": {
+                    "name": "wooden_double_door_cabinet",
+                    "description": "1.2x1.8x0.5m wooden double-door cabinet, side/top/bottom/back frame, two outer-hinge doors, three equidistant shelves",
+                    "tags": [
+                      "cabinet",
+                      "wooden",
+                      "double-door",
+                      "wardrobe",
+                      "storage"
+                    ],
+                    "parts": [
+                      {
+                        "id": "side_l_grp",
+                        "name": "left side assembly",
+                        "parentId": null,
+                        "kind": "group",
+                        "position": [
+                          -0.585,
+                          0.9,
+                          0
+                        ],
+                        "rotation": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "size": [
+                          1,
+                          1,
+                          1
+                        ],
+                        "color": "#8B5A2B",
+                        "joint": null
+                      },
+                      {
+                        "id": "side_l_panel",
+                        "name": "left side panel",
+                        "parentId": "side_l_grp",
+                        "kind": "cube",
+                        "position": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "rotation": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "size": [
+                          0.03,
+                          1.8,
+                          0.5
+                        ],
+                        "color": "#8B5A2B",
+                        "joint": null
+                      },
+                      {
+                        "id": "top_panel",
+                        "name": "top panel",
+                        "parentId": null,
+                        "kind": "cube",
+                        "position": [
+                          0,
+                          1.785,
+                          0
+                        ],
+                        "rotation": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "size": [
+                          1.14,
+                          0.03,
+                          0.5
+                        ],
+                        "color": "#8B5A2B",
+                        "joint": null
+                      },
+                      {
+                        "id": "bottom_panel",
+                        "name": "bottom panel",
+                        "parentId": null,
+                        "kind": "cube",
+                        "position": [
+                          0,
+                          0.015,
+                          0
+                        ],
+                        "rotation": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "size": [
+                          1.14,
+                          0.03,
+                          0.5
+                        ],
+                        "color": "#7A4F26",
+                        "joint": null
+                      },
+                      {
+                        "id": "back_panel",
+                        "name": "back panel",
+                        "parentId": null,
+                        "kind": "cube",
+                        "position": [
+                          0,
+                          0.9,
+                          -0.24
+                        ],
+                        "rotation": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "size": [
+                          1.14,
+                          1.74,
+                          0.02
+                        ],
+                        "color": "#7A4F26",
+                        "joint": null
+                      },
+                      {
+                        "id": "door_l_grp",
+                        "name": "left door hinge assembly",
+                        "parentId": null,
+                        "kind": "group",
+                        "position": [
+                          -0.6,
+                          0.9,
+                          0.24
+                        ],
+                        "rotation": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "size": [
+                          1,
+                          1,
+                          1
+                        ],
+                        "color": "#A06A35",
+                        "joint": {
+                          "type": "hinge",
+                          "pivot": [
+                            0,
+                            0,
+                            0
+                          ],
+                          "axis": "y",
+                          "min": -100,
+                          "max": 0
+                        }
+                      },
+                      {
+                        "id": "door_l_panel",
+                        "name": "left door panel",
+                        "parentId": "door_l_grp",
+                        "kind": "cube",
+                        "position": [
+                          0.295,
+                          0,
+                          0
+                        ],
+                        "rotation": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "size": [
+                          0.59,
+                          1.76,
+                          0.02
+                        ],
+                        "color": "#A06A35",
+                        "joint": null
+                      },
+                      {
+                        "id": "shelf_grp",
+                        "name": "shelf assembly",
+                        "parentId": null,
+                        "kind": "group",
+                        "position": [
+                          0,
+                          0.465,
+                          -0.02
+                        ],
+                        "rotation": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "size": [
+                          1,
+                          1,
+                          1
+                        ],
+                        "color": "#8B5A2B",
+                        "joint": null
+                      },
+                      {
+                        "id": "shelf_panel",
+                        "name": "shelf board",
+                        "parentId": "shelf_grp",
+                        "kind": "cube",
+                        "position": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "rotation": [
+                          0,
+                          0,
+                          0
+                        ],
+                        "size": [
+                          1.14,
+                          0.025,
+                          0.44
+                        ],
+                        "color": "#8B5A2B",
+                        "joint": null
+                      }
+                    ],
+                    "construction": {
+                      "parameters": [
+                        {
+                          "id": "width",
+                          "name": "cabinet width",
+                          "value": 1.2,
+                          "min": 0.5,
+                          "max": 2.5
+                        },
+                        {
+                          "id": "height",
+                          "name": "cabinet height",
+                          "value": 1.8,
+                          "min": 1,
+                          "max": 2.5
+                        },
+                        {
+                          "id": "depth",
+                          "name": "cabinet depth",
+                          "value": 0.5,
+                          "min": 0.3,
+                          "max": 1
+                        },
+                        {
+                          "id": "thick",
+                          "name": "panel thickness",
+                          "value": 0.03,
+                          "min": 0.015,
+                          "max": 0.06
+                        }
+                      ],
+                      "bindings": [
+                        {
+                          "partId": "side_l_grp",
+                          "property": "position.x",
+                          "expression": "-width/2+thick/2"
+                        },
+                        {
+                          "partId": "side_l_grp",
+                          "property": "position.y",
+                          "expression": "height/2"
+                        },
+                        {
+                          "partId": "side_l_panel",
+                          "property": "size.x",
+                          "expression": "thick"
+                        },
+                        {
+                          "partId": "side_l_panel",
+                          "property": "size.y",
+                          "expression": "height"
+                        },
+                        {
+                          "partId": "side_l_panel",
+                          "property": "size.z",
+                          "expression": "depth"
+                        },
+                        {
+                          "partId": "top_panel",
+                          "property": "size.x",
+                          "expression": "width-2*thick"
+                        },
+                        {
+                          "partId": "top_panel",
+                          "property": "size.y",
+                          "expression": "thick"
+                        },
+                        {
+                          "partId": "top_panel",
+                          "property": "size.z",
+                          "expression": "depth"
+                        },
+                        {
+                          "partId": "top_panel",
+                          "property": "position.y",
+                          "expression": "height-thick/2"
+                        },
+                        {
+                          "partId": "bottom_panel",
+                          "property": "size.x",
+                          "expression": "width-2*thick"
+                        },
+                        {
+                          "partId": "bottom_panel",
+                          "property": "size.y",
+                          "expression": "thick"
+                        },
+                        {
+                          "partId": "bottom_panel",
+                          "property": "size.z",
+                          "expression": "depth"
+                        },
+                        {
+                          "partId": "bottom_panel",
+                          "property": "position.y",
+                          "expression": "thick/2"
+                        },
+                        {
+                          "partId": "back_panel",
+                          "property": "size.x",
+                          "expression": "width-2*thick"
+                        },
+                        {
+                          "partId": "back_panel",
+                          "property": "size.y",
+                          "expression": "height-2*thick"
+                        },
+                        {
+                          "partId": "back_panel",
+                          "property": "position.y",
+                          "expression": "height/2"
+                        },
+                        {
+                          "partId": "back_panel",
+                          "property": "position.z",
+                          "expression": "-depth/2+0.01"
+                        },
+                        {
+                          "partId": "door_l_grp",
+                          "property": "position.x",
+                          "expression": "-width/2"
+                        },
+                        {
+                          "partId": "door_l_grp",
+                          "property": "position.y",
+                          "expression": "height/2"
+                        },
+                        {
+                          "partId": "door_l_grp",
+                          "property": "position.z",
+                          "expression": "depth/2-0.01"
+                        },
+                        {
+                          "partId": "door_l_panel",
+                          "property": "size.x",
+                          "expression": "width/2-0.01"
+                        },
+                        {
+                          "partId": "door_l_panel",
+                          "property": "size.y",
+                          "expression": "height-0.04"
+                        },
+                        {
+                          "partId": "door_l_panel",
+                          "property": "position.x",
+                          "expression": "width/4-0.005"
+                        },
+                        {
+                          "partId": "shelf_grp",
+                          "property": "position.y",
+                          "expression": "thick+(height-2*thick)/4"
+                        },
+                        {
+                          "partId": "shelf_grp",
+                          "property": "position.z",
+                          "expression": "-0.02"
+                        },
+                        {
+                          "partId": "shelf_panel",
+                          "property": "size.x",
+                          "expression": "width-2*thick"
+                        },
+                        {
+                          "partId": "shelf_panel",
+                          "property": "size.z",
+                          "expression": "depth-0.06"
+                        }
+                      ],
+                      "anchors": [
+                        {
+                          "id": "bottom_center",
+                          "name": "bottom center origin",
+                          "partId": null,
+                          "position": [
+                            0,
+                            0,
+                            0
+                          ]
+                        },
+                        {
+                          "id": "top_center",
+                          "name": "top center",
+                          "partId": null,
+                          "position": [
+                            0,
+                            "height",
+                            0
+                          ]
+                        }
+                      ],
+                      "constraints": [],
+                      "modifiers": [
+                        {
+                          "id": "mirror_side",
+                          "targetId": "side_l_grp",
+                          "enabled": true,
+                          "type": "mirror",
+                          "axes": [
+                            "x"
+                          ],
+                          "referenceId": null
+                        },
+                        {
+                          "id": "mirror_door",
+                          "targetId": "door_l_grp",
+                          "enabled": true,
+                          "type": "mirror",
+                          "axes": [
+                            "x"
+                          ],
+                          "referenceId": null
+                        },
+                        {
+                          "id": "array_shelf",
+                          "targetId": "shelf_grp",
+                          "enabled": true,
+                          "type": "array",
+                          "count": 3,
+                          "offset": [
+                            0,
+                            "(height-2*thick)/4",
+                            0
+                          ]
+                        }
+                      ],
+                      "excluded": [],
+                      "offset": [
+                        0,
+                        0,
+                        0
+                      ]
+                    },
+                    "id": "asset-8db96dd0-708a-4931-bd07-1a33262b1959",
+                    "version": 1,
+                    "source": "generated",
+                    "createdAt": "2026-10-27T23:18:55.399Z",
+                    "bounds": {
+                      "min": [
+                        -0.6,
+                        0,
+                        -0.25
+                      ],
+                      "max": [
+                        0.6,
+                        1.8,
+                        0.25
+                      ],
+                      "size": [
+                        1.2,
+                        1.8,
+                        0.5
+                      ]
+                    }
+                  },
+                  "transform": {
+                    "position": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "rotation": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "scale": [
+                      1,
+                      1,
+                      1
+                    ]
+                  },
+                  "track": null
+                },
+                {
+                  "type": "add_camera",
+                  "sceneId": "cabinet-accept",
+                  "camera": {
+                    "id": "cam-main",
+                    "name": "全景相机",
+                    "fov": 40,
+                    "transform": {
+                      "position": [
+                        0,
+                        1.5,
+                        3.6
+                      ],
+                      "rotation": [
+                        0,
+                        0,
+                        0
+                      ],
+                      "scale": [
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "track": null
+                  }
+                },
+                {
+                  "sceneId": "cabinet-accept",
+                  "type": "aim_camera",
+                  "id": "cam-main",
+                  "pose": "static",
+                  "position": [
+                    0,
+                    1.5,
+                    3.6
+                  ],
+                  "target": [
+                    0,
+                    0.9,
+                    0
+                  ],
+                  "fov": 40
+                },
+                {
+                  "type": "add_shot",
+                  "sceneId": "cabinet-accept",
+                  "shot": {
+                    "id": "shot-main",
+                    "name": "完整展示镜头",
+                    "cameraId": "cam-main",
+                    "start": 0,
+                    "duration": 8
+                  }
+                }
+              ],
+              "time": 0,
+              "sceneId": null,
+              "shotId": null,
+              "revision": 18,
+              "status": "applied"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "assets": [
+    {
+      "name": "wooden_double_door_cabinet",
+      "description": "1.2x1.8x0.5m wooden double-door cabinet, side/top/bottom/back frame, two outer-hinge doors, three equidistant shelves",
+      "tags": [
+        "cabinet",
+        "wooden",
+        "double-door",
+        "wardrobe",
+        "storage"
+      ],
+      "parts": [
+        {
+          "id": "side_l_grp",
+          "name": "left side assembly",
+          "parentId": null,
+          "kind": "group",
+          "position": [
+            -0.585,
+            0.9,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            1,
+            1
+          ],
+          "color": "#8B5A2B",
+          "joint": null
+        },
+        {
+          "id": "side_l_panel",
+          "name": "left side panel",
+          "parentId": "side_l_grp",
+          "kind": "cube",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            0.03,
+            1.8,
+            0.5
+          ],
+          "color": "#8B5A2B",
+          "joint": null
+        },
+        {
+          "id": "top_panel",
+          "name": "top panel",
+          "parentId": null,
+          "kind": "cube",
+          "position": [
+            0,
+            1.785,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1.14,
+            0.03,
+            0.5
+          ],
+          "color": "#8B5A2B",
+          "joint": null
+        },
+        {
+          "id": "bottom_panel",
+          "name": "bottom panel",
+          "parentId": null,
+          "kind": "cube",
+          "position": [
+            0,
+            0.015,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1.14,
+            0.03,
+            0.5
+          ],
+          "color": "#7A4F26",
+          "joint": null
+        },
+        {
+          "id": "back_panel",
+          "name": "back panel",
+          "parentId": null,
+          "kind": "cube",
+          "position": [
+            0,
+            0.9,
+            -0.24
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1.14,
+            1.74,
+            0.02
+          ],
+          "color": "#7A4F26",
+          "joint": null
+        },
+        {
+          "id": "door_l_grp",
+          "name": "left door hinge assembly",
+          "parentId": null,
+          "kind": "group",
+          "position": [
+            -0.6,
+            0.9,
+            0.24
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            1,
+            1
+          ],
+          "color": "#A06A35",
+          "joint": {
+            "type": "hinge",
+            "pivot": [
+              0,
+              0,
+              0
+            ],
+            "axis": "y",
+            "min": -100,
+            "max": 0
+          }
+        },
+        {
+          "id": "door_l_panel",
+          "name": "left door panel",
+          "parentId": "door_l_grp",
+          "kind": "cube",
+          "position": [
+            0.295,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            0.59,
+            1.76,
+            0.02
+          ],
+          "color": "#A06A35",
+          "joint": null
+        },
+        {
+          "id": "shelf_grp",
+          "name": "shelf assembly",
+          "parentId": null,
+          "kind": "group",
+          "position": [
+            0,
+            0.465,
+            -0.02
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            1,
+            1
+          ],
+          "color": "#8B5A2B",
+          "joint": null
+        },
+        {
+          "id": "shelf_panel",
+          "name": "shelf board",
+          "parentId": "shelf_grp",
+          "kind": "cube",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1.14,
+            0.025,
+            0.44
+          ],
+          "color": "#8B5A2B",
+          "joint": null
+        }
+      ],
+      "construction": {
+        "parameters": [
+          {
+            "id": "width",
+            "name": "cabinet width",
+            "value": 1.2,
+            "min": 0.5,
+            "max": 2.5
+          },
+          {
+            "id": "height",
+            "name": "cabinet height",
+            "value": 1.8,
+            "min": 1,
+            "max": 2.5
+          },
+          {
+            "id": "depth",
+            "name": "cabinet depth",
+            "value": 0.5,
+            "min": 0.3,
+            "max": 1
+          },
+          {
+            "id": "thick",
+            "name": "panel thickness",
+            "value": 0.03,
+            "min": 0.015,
+            "max": 0.06
+          }
+        ],
+        "bindings": [
+          {
+            "partId": "side_l_grp",
+            "property": "position.x",
+            "expression": "-width/2+thick/2"
+          },
+          {
+            "partId": "side_l_grp",
+            "property": "position.y",
+            "expression": "height/2"
+          },
+          {
+            "partId": "side_l_panel",
+            "property": "size.x",
+            "expression": "thick"
+          },
+          {
+            "partId": "side_l_panel",
+            "property": "size.y",
+            "expression": "height"
+          },
+          {
+            "partId": "side_l_panel",
+            "property": "size.z",
+            "expression": "depth"
+          },
+          {
+            "partId": "top_panel",
+            "property": "size.x",
+            "expression": "width-2*thick"
+          },
+          {
+            "partId": "top_panel",
+            "property": "size.y",
+            "expression": "thick"
+          },
+          {
+            "partId": "top_panel",
+            "property": "size.z",
+            "expression": "depth"
+          },
+          {
+            "partId": "top_panel",
+            "property": "position.y",
+            "expression": "height-thick/2"
+          },
+          {
+            "partId": "bottom_panel",
+            "property": "size.x",
+            "expression": "width-2*thick"
+          },
+          {
+            "partId": "bottom_panel",
+            "property": "size.y",
+            "expression": "thick"
+          },
+          {
+            "partId": "bottom_panel",
+            "property": "size.z",
+            "expression": "depth"
+          },
+          {
+            "partId": "bottom_panel",
+            "property": "position.y",
+            "expression": "thick/2"
+          },
+          {
+            "partId": "back_panel",
+            "property": "size.x",
+            "expression": "width-2*thick"
+          },
+          {
+            "partId": "back_panel",
+            "property": "size.y",
+            "expression": "height-2*thick"
+          },
+          {
+            "partId": "back_panel",
+            "property": "position.y",
+            "expression": "height/2"
+          },
+          {
+            "partId": "back_panel",
+            "property": "position.z",
+            "expression": "-depth/2+0.01"
+          },
+          {
+            "partId": "door_l_grp",
+            "property": "position.x",
+            "expression": "-width/2"
+          },
+          {
+            "partId": "door_l_grp",
+            "property": "position.y",
+            "expression": "height/2"
+          },
+          {
+            "partId": "door_l_grp",
+            "property": "position.z",
+            "expression": "depth/2-0.01"
+          },
+          {
+            "partId": "door_l_panel",
+            "property": "size.x",
+            "expression": "width/2-0.01"
+          },
+          {
+            "partId": "door_l_panel",
+            "property": "size.y",
+            "expression": "height-0.04"
+          },
+          {
+            "partId": "door_l_panel",
+            "property": "position.x",
+            "expression": "width/4-0.005"
+          },
+          {
+            "partId": "shelf_grp",
+            "property": "position.y",
+            "expression": "thick+(height-2*thick)/4"
+          },
+          {
+            "partId": "shelf_grp",
+            "property": "position.z",
+            "expression": "-0.02"
+          },
+          {
+            "partId": "shelf_panel",
+            "property": "size.x",
+            "expression": "width-2*thick"
+          },
+          {
+            "partId": "shelf_panel",
+            "property": "size.z",
+            "expression": "depth-0.06"
+          }
+        ],
+        "anchors": [
+          {
+            "id": "bottom_center",
+            "name": "bottom center origin",
+            "partId": null,
+            "position": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "top_center",
+            "name": "top center",
+            "partId": null,
+            "position": [
+              0,
+              "height",
+              0
+            ]
+          }
+        ],
+        "constraints": [],
+        "modifiers": [
+          {
+            "id": "mirror_side",
+            "targetId": "side_l_grp",
+            "enabled": true,
+            "type": "mirror",
+            "axes": [
+              "x"
+            ],
+            "referenceId": null
+          },
+          {
+            "id": "mirror_door",
+            "targetId": "door_l_grp",
+            "enabled": true,
+            "type": "mirror",
+            "axes": [
+              "x"
+            ],
+            "referenceId": null
+          },
+          {
+            "id": "array_shelf",
+            "targetId": "shelf_grp",
+            "enabled": true,
+            "type": "array",
+            "count": 3,
+            "offset": [
+              0,
+              "(height-2*thick)/4",
+              0
+            ]
+          }
+        ],
+        "excluded": [],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      "id": "asset-8db96dd0-708a-4931-bd07-1a33262b1959",
+      "version": 1,
+      "source": "generated",
+      "createdAt": "2026-10-27T23:18:55.399Z",
+      "bounds": {
+        "min": [
+          -0.6,
+          0,
+          -0.25
+        ],
+        "max": [
+          0.6,
+          1.8,
+          0.25
+        ],
+        "size": [
+          1.2,
+          1.8,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "参数化双开门柜",
+      "description": "1.4x1.8x0.6m wooden double-door cabinet, side/top/bottom/back frame, two outer-hinge doors, three equidistant shelves",
+      "tags": [
+        "cabinet",
+        "wooden",
+        "double-door",
+        "wardrobe",
+        "storage"
+      ],
+      "parts": [
+        {
+          "id": "side_l_grp",
+          "name": "left side assembly",
+          "parentId": null,
+          "kind": "group",
+          "position": [
+            -0.585,
+            0.9,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            1,
+            1
+          ],
+          "color": "#8B5A2B",
+          "joint": null
+        },
+        {
+          "id": "side_l_panel",
+          "name": "left side panel",
+          "parentId": "side_l_grp",
+          "kind": "cube",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            0.03,
+            1.8,
+            0.5
+          ],
+          "color": "#8B5A2B",
+          "joint": null
+        },
+        {
+          "id": "top_panel",
+          "name": "top panel",
+          "parentId": null,
+          "kind": "cube",
+          "position": [
+            0,
+            1.785,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1.14,
+            0.03,
+            0.5
+          ],
+          "color": "#8B5A2B",
+          "joint": null
+        },
+        {
+          "id": "bottom_panel",
+          "name": "bottom panel",
+          "parentId": null,
+          "kind": "cube",
+          "position": [
+            0,
+            0.015,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1.14,
+            0.03,
+            0.5
+          ],
+          "color": "#7A4F26",
+          "joint": null
+        },
+        {
+          "id": "back_panel",
+          "name": "back panel",
+          "parentId": null,
+          "kind": "cube",
+          "position": [
+            0,
+            0.9,
+            -0.24
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1.14,
+            1.74,
+            0.02
+          ],
+          "color": "#7A4F26",
+          "joint": null
+        },
+        {
+          "id": "door_l_grp",
+          "name": "left door hinge assembly",
+          "parentId": null,
+          "kind": "group",
+          "position": [
+            -0.6,
+            0.9,
+            0.24
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            1,
+            1
+          ],
+          "color": "#A06A35",
+          "joint": {
+            "type": "hinge",
+            "pivot": [
+              0,
+              0,
+              0
+            ],
+            "axis": "y",
+            "min": -100,
+            "max": 0
+          }
+        },
+        {
+          "id": "door_l_panel",
+          "name": "left door panel",
+          "parentId": "door_l_grp",
+          "kind": "cube",
+          "position": [
+            0.295,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            0.59,
+            1.76,
+            0.02
+          ],
+          "color": "#A06A35",
+          "joint": null
+        },
+        {
+          "id": "shelf_grp",
+          "name": "shelf assembly",
+          "parentId": null,
+          "kind": "group",
+          "position": [
+            0,
+            0.465,
+            -0.02
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            1,
+            1
+          ],
+          "color": "#8B5A2B",
+          "joint": null
+        },
+        {
+          "id": "shelf_panel",
+          "name": "shelf board",
+          "parentId": "shelf_grp",
+          "kind": "cube",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1.14,
+            0.025,
+            0.44
+          ],
+          "color": "#8B5A2B",
+          "joint": null
+        }
+      ],
+      "construction": {
+        "parameters": [
+          {
+            "id": "width",
+            "name": "cabinet width",
+            "value": 1.4,
+            "min": 0.5,
+            "max": 2.5
+          },
+          {
+            "id": "height",
+            "name": "cabinet height",
+            "value": 1.8,
+            "min": 1,
+            "max": 2.5
+          },
+          {
+            "id": "depth",
+            "name": "cabinet depth",
+            "value": 0.6,
+            "min": 0.3,
+            "max": 1
+          },
+          {
+            "id": "thick",
+            "name": "panel thickness",
+            "value": 0.03,
+            "min": 0.015,
+            "max": 0.06
+          }
+        ],
+        "bindings": [
+          {
+            "partId": "side_l_grp",
+            "property": "position.x",
+            "expression": "-width/2+thick/2"
+          },
+          {
+            "partId": "side_l_grp",
+            "property": "position.y",
+            "expression": "height/2"
+          },
+          {
+            "partId": "side_l_panel",
+            "property": "size.x",
+            "expression": "thick"
+          },
+          {
+            "partId": "side_l_panel",
+            "property": "size.y",
+            "expression": "height"
+          },
+          {
+            "partId": "side_l_panel",
+            "property": "size.z",
+            "expression": "depth"
+          },
+          {
+            "partId": "top_panel",
+            "property": "size.x",
+            "expression": "width-2*thick"
+          },
+          {
+            "partId": "top_panel",
+            "property": "size.y",
+            "expression": "thick"
+          },
+          {
+            "partId": "top_panel",
+            "property": "size.z",
+            "expression": "depth"
+          },
+          {
+            "partId": "top_panel",
+            "property": "position.y",
+            "expression": "height-thick/2"
+          },
+          {
+            "partId": "bottom_panel",
+            "property": "size.x",
+            "expression": "width-2*thick"
+          },
+          {
+            "partId": "bottom_panel",
+            "property": "size.y",
+            "expression": "thick"
+          },
+          {
+            "partId": "bottom_panel",
+            "property": "size.z",
+            "expression": "depth"
+          },
+          {
+            "partId": "bottom_panel",
+            "property": "position.y",
+            "expression": "thick/2"
+          },
+          {
+            "partId": "back_panel",
+            "property": "size.x",
+            "expression": "width-2*thick"
+          },
+          {
+            "partId": "back_panel",
+            "property": "size.y",
+            "expression": "height-2*thick"
+          },
+          {
+            "partId": "back_panel",
+            "property": "position.y",
+            "expression": "height/2"
+          },
+          {
+            "partId": "back_panel",
+            "property": "position.z",
+            "expression": "-depth/2+0.01"
+          },
+          {
+            "partId": "door_l_grp",
+            "property": "position.x",
+            "expression": "-width/2"
+          },
+          {
+            "partId": "door_l_grp",
+            "property": "position.y",
+            "expression": "height/2"
+          },
+          {
+            "partId": "door_l_grp",
+            "property": "position.z",
+            "expression": "depth/2-0.01"
+          },
+          {
+            "partId": "door_l_panel",
+            "property": "size.x",
+            "expression": "width/2-0.01"
+          },
+          {
+            "partId": "door_l_panel",
+            "property": "size.y",
+            "expression": "height-0.04"
+          },
+          {
+            "partId": "door_l_panel",
+            "property": "position.x",
+            "expression": "width/4-0.005"
+          },
+          {
+            "partId": "shelf_grp",
+            "property": "position.y",
+            "expression": "thick+(height-2*thick)/4"
+          },
+          {
+            "partId": "shelf_grp",
+            "property": "position.z",
+            "expression": "-0.02"
+          },
+          {
+            "partId": "shelf_panel",
+            "property": "size.x",
+            "expression": "width-2*thick"
+          },
+          {
+            "partId": "shelf_panel",
+            "property": "size.z",
+            "expression": "depth-0.06"
+          }
+        ],
+        "anchors": [
+          {
+            "id": "bottom_center",
+            "name": "bottom center origin",
+            "partId": null,
+            "position": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "top_center",
+            "name": "top center",
+            "partId": null,
+            "position": [
+              0,
+              "height",
+              0
+            ]
+          }
+        ],
+        "constraints": [],
+        "modifiers": [
+          {
+            "id": "mirror_side",
+            "targetId": "side_l_grp",
+            "enabled": true,
+            "type": "mirror",
+            "axes": [
+              "x"
+            ],
+            "referenceId": null
+          },
+          {
+            "id": "mirror_door",
+            "targetId": "door_l_grp",
+            "enabled": true,
+            "type": "mirror",
+            "axes": [
+              "x"
+            ],
+            "referenceId": null
+          },
+          {
+            "id": "array_shelf",
+            "targetId": "shelf_grp",
+            "enabled": true,
+            "type": "array",
+            "count": 3,
+            "offset": [
+              0,
+              "(height-2*thick)/4",
+              0
+            ]
+          }
+        ],
+        "excluded": [],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      },
+      "id": "asset-8db96dd0-708a-4931-bd07-1a33262b1959",
+      "version": 2,
+      "source": "edited",
+      "createdAt": "2026-10-27T23:22:25.221Z",
+      "bounds": {
+        "min": [
+          -0.7,
+          0,
+          -0.3
+        ],
+        "max": [
+          0.7,
+          1.8,
+          0.3
+        ],
+        "size": [
+          1.4,
+          1.8,
+          0.6
+        ]
+      }
+    }
+  ]
+}

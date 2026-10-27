@@ -1,12 +1,16 @@
 import { Euler, MathUtils, Matrix4, Quaternion, Vector3 } from 'three';
-import type { PrimitiveKind, SceneDocument, SceneEntity, SceneObject, Transform, Vec3 } from './types.ts';
+import type { PrimitiveKind, SceneDocument, SceneEntity, SceneObject, SceneCamera, Shot, Transform, Vec3 } from './types.ts';
+import { assetReferenceSchema } from './assets/model.ts';
+import { componentsSchema } from './components/model.ts';
+import { samplesSchema } from './performance/motion.ts';
 
 const KINDS: readonly PrimitiveKind[] = ['cube', 'sphere', 'cylinder', 'cone', 'plane', 'human'];
 const COLORS = ['#f0a06d', '#80aaa0', '#9b99c8', '#d9bb72', '#9fb9cf', '#b98e97'];
-const MAX_JSON_LENGTH = 1_000_000;
+const MAX_JSON_LENGTH = 20_000_000;
+export const MAX_CAMERAS = 128;
 const copyTransform = (t: Transform): Transform => ({ position: [...t.position], rotation: [...t.rotation], scale: [...t.scale] });
 
-export function createObject(kind: PrimitiveKind, index: number): SceneObject {
+export function createObject<K extends Exclude<PrimitiveKind,'asset'>>(kind: K, index: number): SceneObject & {kind:K} {
   if (!KINDS.includes(kind) || !Number.isSafeInteger(index) || index < 1) throw new Error('Invalid primitive or object index.');
   return {
     id: `object-${index}`, name: `${kind[0].toUpperCase()}${kind.slice(1)} ${index}`, kind,
@@ -45,55 +49,58 @@ export function createDocument(): SceneDocument {
   const position: Vec3 = [6.5, 3.8, 8];
   const endPosition: Vec3 = [4.7, 2.8, 6.4];
   const transform: Transform = { position, rotation: facing(position, [0.3, 0.9, 0]), scale: [1, 1, 1] };
-  return {
-    format: 'LittleTake.scene', version: 1, name: 'A small entrance', duration: 5,
+  return validateDocument({
+    format: 'LittleTake.scene', version: 3, id: 'scene-1', name: 'A small entrance', duration: 5,
     objects: [subject, plinth, sphere],
-    camera: {
-      id: 'camera', name: 'Shot camera', fov: 44, transform,
+    cameras: [{ id: 'camera', name: 'Camera 1', fov: 44, transform,
       track: {
         start: 0, duration: 5, from: copyTransform(transform),
         to: { position: endPosition, rotation: facing(endPosition, [0.3, 0.9, 0]), scale: [1, 1, 1] },
       },
-    },
-  };
+    }],
+    shots: [{ id: 'shot-1', name: 'Shot 1', cameraId: 'camera', start: 0, duration: 5 }],
+  });
 }
 
-export function cloneDocument(doc: SceneDocument): SceneDocument {
-  const entity = <T extends SceneEntity>(value: T): T => ({
-    ...value, transform: copyTransform(value.transform),
-    track: value.track ? { ...value.track, from: copyTransform(value.track.from), to: copyTransform(value.track.to) } : null,
-  });
-  return { ...doc, objects: doc.objects.map(entity), camera: entity(doc.camera) };
-}
+export function cloneDocument(doc: SceneDocument): SceneDocument { return structuredClone(doc); }
 
 export function evaluateTransform(entity: SceneEntity, time: number): Transform {
   if (!Number.isFinite(time)) throw new Error('Playback time must be finite.');
   const track = entity.track;
   if (!track) return copyTransform(entity.transform);
-  const alpha = MathUtils.clamp((time - track.start) / track.duration, 0, 1);
+  let alpha = MathUtils.clamp((time - track.start) / track.duration, 0, 1);
   if (alpha === 0) return copyTransform(track.from);
   if (alpha === 1) return copyTransform(track.to);
+  let from = track.from, to = track.to;
+  if (track.samples?.length) {
+    let low = 0, high = track.samples.length;
+    while (low < high) { const mid = (low + high) >>> 1; if (track.samples[mid].at < alpha) low = mid + 1; else high = mid; }
+    const before = track.samples[low - 1], after = track.samples[low];
+    from = before?.transform ?? track.from; to = after?.transform ?? track.to;
+    alpha = (alpha - (before?.at ?? 0)) / ((after?.at ?? 1) - (before?.at ?? 0));
+  }
   const linear = (a: Vec3, b: Vec3): Vec3 => a.map((v, i) => MathUtils.lerp(v, b[i], alpha)) as Vec3;
   const quaternion = (rotation: Vec3) => new Quaternion().setFromEuler(new Euler(...rotation.map(MathUtils.degToRad) as Vec3, 'XYZ'));
-  const rotation = new Euler().setFromQuaternion(quaternion(track.from.rotation).slerp(quaternion(track.to.rotation), alpha), 'XYZ');
+  const rotation = new Euler().setFromQuaternion(quaternion(from.rotation).slerp(quaternion(to.rotation), alpha), 'XYZ');
   return {
-    position: linear(track.from.position, track.to.position),
+    position: linear(from.position, to.position),
     rotation: [rotation.x, rotation.y, rotation.z].map(MathUtils.radToDeg) as Vec3,
-    scale: linear(track.from.scale, track.to.scale),
+    scale: linear(from.scale, to.scale),
   };
 }
 
 function fail(path: string, detail: string): never { throw new Error(`${path}: ${detail}`); }
-function record(value: unknown, keys: string[], path: string): Record<string, unknown> {
+function record(value: unknown, keys: string[], path: string, optional: string[] = []): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail(path, 'expected an object');
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) fail(path, 'unsupported object prototype');
   const descriptors = Object.getOwnPropertyDescriptors(value);
   const actual = Reflect.ownKeys(descriptors);
-  if (actual.length !== keys.length || actual.some(key => typeof key !== 'string' || !keys.includes(key))) fail(path, 'unexpected or missing fields');
+  if (actual.some(key => typeof key !== 'string' || ![...keys, ...optional].includes(key))) fail(path, 'unexpected or missing fields');
   for (const key of keys) {
     if (!Object.hasOwn(descriptors, key) || !Object.hasOwn(descriptors[key], 'value')) fail(path, 'accessor fields are unsupported');
   }
+  for (const key of optional) if (Object.hasOwn(descriptors, key) && !Object.hasOwn(descriptors[key], 'value')) fail(path, 'accessor fields are unsupported');
   return value as Record<string, unknown>;
 }
 function number(value: unknown, min: number, max: number, path: string): number {
@@ -132,14 +139,14 @@ function transform(value: unknown, path: string): Transform {
 }
 function motion(value: unknown, duration: number, path: string): SceneEntity['track'] {
   if (value === null) return null;
-  const t = record(value, ['start', 'duration', 'from', 'to'], path);
+  const t = record(value, ['start', 'duration', 'from', 'to'], path, ['samples']);
   const start = number(t.start, 0, duration, `${path}.start`);
   const length = number(t.duration, 0.1, duration, `${path}.duration`);
   if (start + length > duration + 1e-9) fail(path, 'motion must finish within the scene');
-  return { start, duration: length, from: transform(t.from, `${path}.from`), to: transform(t.to, `${path}.to`) };
+  return { start, duration: length, from: transform(t.from, `${path}.from`), to: transform(t.to, `${path}.to`), ...(t.samples !== undefined ? { samples: samplesSchema.parse(t.samples) } : {}) };
 }
 
-export function validateDocument(value: unknown): SceneDocument {
+function validateLegacy(value: unknown) {
   const doc = record(value, ['format', 'version', 'name', 'duration', 'objects', 'camera'], 'scene');
   if (doc.format !== 'LittleTake.scene' || doc.version !== 1) fail('scene', 'unsupported format or version');
   const name = text(doc.name, 120, 'scene.name');
@@ -170,34 +177,135 @@ export function validateDocument(value: unknown): SceneDocument {
   };
 }
 
+export function createEmptyScene(id = 'scene-1', name = 'Untitled scene'): SceneDocument {
+  return { format: 'LittleTake.scene', version: 3, id, name, duration: 5, objects: [], cameras: [], shots: [] };
+}
+export function createCamera(id: string, name = 'Camera'): SceneCamera {
+  const position: Vec3 = [6.5, 3.8, 8];
+  return { id, name, fov: 44, transform: { position, rotation: facing(position, [0, 1, 0]), scale: [1, 1, 1] }, track: null };
+}
+export function createShot(camera: SceneCamera, id: string, duration: number, name = 'Shot'): Shot {
+  return { id, name, cameraId: camera.id, start: 0, duration };
+}
+export function sceneEntity(scene: SceneDocument, id: string | null): SceneEntity | undefined {
+  return [...scene.objects, ...scene.cameras].find(item => item.id === id);
+}
+export function shotCamera(scene: SceneDocument, shotId: string | null): SceneCamera | undefined {
+  const shot = scene.shots.find(item => item.id === shotId);
+  return scene.cameras.find(camera => camera.id === shot?.cameraId);
+}
+/** New shots and copies own an independent camera by default. */
+export function addIndependentShot(scene: SceneDocument, source?: Shot): Shot {
+  if (scene.shots.length >= 100 || scene.cameras.length >= MAX_CAMERAS) throw new Error('Scene camera or shot limit reached.');
+  const ids = new Set([...scene.objects, ...scene.cameras, ...scene.shots].map(item => item.id));
+  const next = (prefix: string) => { let n = 1; while (ids.has(`${prefix}-${n}`)) n++; const id = `${prefix}-${n}`; ids.add(id); return id; };
+  const original = source ? shotCamera(scene, source.id) : undefined;
+  if (source && !original) throw new Error('Shot camera is missing.');
+  const camera = original ? structuredClone(original) : createCamera(next('camera'), `Camera ${scene.cameras.length + 1}`);
+  if (original) { camera.id = next('camera'); camera.name = `${original.name.slice(0, 110)} copy`; }
+  const shot = source ? { ...source, id: next('shot'), name: `${source.name.slice(0, 110)} copy`, cameraId: camera.id }
+    : createShot(camera, next('shot'), scene.duration, `Shot ${scene.shots.length + 1}`);
+  scene.cameras.push(camera); scene.shots.push(shot);
+  return shot;
+}
+export function validateDocument(value: unknown): SceneDocument {
+  if (value && typeof value === 'object' && Object.getOwnPropertyDescriptor(value, 'version')?.value === 1) {
+    const old = validateLegacy(value);
+    const camera: SceneCamera = { ...old.camera, id: 'camera' };
+    let shotIndex = 1;
+    while (old.objects.some(object => object.id === `shot-${shotIndex}`)) shotIndex++;
+    return { format: 'LittleTake.scene', version: 3, id: 'scene-1', name: old.name, duration: old.duration, objects: old.objects,
+      cameras: [camera], shots: [createShot(camera, `shot-${shotIndex}`, old.duration, 'Shot 1')] };
+  }
+  const doc = record(value, ['format', 'version', 'id', 'name', 'duration', 'objects', 'cameras', 'shots'], 'scene');
+  if (doc.format !== 'LittleTake.scene' || (doc.version !== 2 && doc.version !== 3)) fail('scene', 'unsupported format or version');
+  const legacy = doc.version === 2;
+  const duration = number(doc.duration, 1, 60, 'scene.duration');
+  const ids = new Set<string>();
+  const identifier = (value: unknown, path: string, unique = true) => {
+    const id = text(value, 64, path);
+    if (!/^[A-Za-z0-9_-]+$/.test(id) || ['__proto__', 'constructor', 'prototype'].includes(id) || (unique && ids.has(id))) fail(path, 'invalid or duplicate ID');
+    if (unique) ids.add(id);
+    return id;
+  };
+  const objects: SceneObject[] = list(doc.objects, 100, 'scene.objects').map((value, index) => {
+    const path = 'scene.objects[' + index + ']';
+    const item = record(value, ['id', 'name', 'kind', 'color', 'transform', 'track'], path, ['asset', 'components']);
+    if (!KINDS.includes(item.kind as PrimitiveKind) && item.kind !== 'asset') fail(path, 'unsupported primitive');
+    if ((item.kind === 'asset') !== (item.asset !== undefined)) fail(path, 'Compound objects require an asset reference.');
+    if (typeof item.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(item.color)) fail(path, 'expected a six-digit hex color');
+    return { id: identifier(item.id, path + '.id'), name: text(item.name, 120, path + '.name'), kind: item.kind as PrimitiveKind, color: item.color,
+      transform: transform(item.transform, path + '.transform'), track: motion(item.track, duration, path + '.track'),
+      ...(item.asset !== undefined ? { asset: assetReferenceSchema.parse(item.asset) } : {}),
+      ...(item.components !== undefined ? { components: componentsSchema.parse(item.components) } : {}) };
+  });
+  const cameras: SceneCamera[] = list(doc.cameras, legacy ? 24 : MAX_CAMERAS, 'scene.cameras').map((value, index) => {
+    const path = 'scene.cameras[' + index + ']';
+    const item = record(value, ['id', 'name', 'fov', 'transform', 'track'], path);
+    if (legacy && item.track !== null) fail(path, 'v2 camera setups must be static');
+    return { id: identifier(item.id, path + '.id'), name: text(item.name, 120, path + '.name'), fov: number(item.fov, 10, 120, path + '.fov'),
+      transform: transform(item.transform, path + '.transform'), track: motion(item.track, duration, path + '.track') };
+  });
+  const legacyFraming = new Map<string, Pick<SceneCamera, 'fov' | 'transform' | 'track'>>();
+  const shots: Shot[] = list(doc.shots, 100, 'scene.shots').map((value, index) => {
+    const path = 'scene.shots[' + index + ']';
+    const item = record(value, ['id', 'name', 'cameraId', 'start', 'duration', ...(legacy ? ['fov', 'transform', 'track'] : [])], path);
+    const start = number(item.start, 0, duration, path + '.start'), length = number(item.duration, 0.1, duration, path + '.duration');
+    if (start + length > duration + 1e-9) fail(path, 'shot must finish within the scene');
+    const cameraId = identifier(item.cameraId, path + '.cameraId', false);
+    if (!cameras.some(camera => camera.id === cameraId)) fail(path, 'shot camera must belong to this scene');
+    const id = identifier(item.id, path + '.id');
+    if (legacy) {
+      const track = motion(item.track, duration, path + '.track');
+      if (track && (track.start < start - 1e-9 || track.start + track.duration > start + length + 1e-9)) fail(path, 'camera motion must stay within its shot');
+      legacyFraming.set(id, { fov: number(item.fov, 10, 120, path + '.fov'), transform: transform(item.transform, path + '.transform'), track });
+    }
+    return { id, name: text(item.name, 120, path + '.name'), cameraId, start, duration: length };
+  });
+  // Preserve every old shot independently, and retain unused/different setup poses.
+  const assigned = new Set<string>();
+  for (const shot of shots) {
+    const framing = legacyFraming.get(shot.id); if (!framing) continue;
+    const source = cameras.find(camera => camera.id === shot.cameraId)!;
+    if (!assigned.has(source.id) && source.fov === framing.fov && JSON.stringify(source.transform) === JSON.stringify(framing.transform)) {
+      Object.assign(source, framing); assigned.add(source.id);
+    } else {
+      let n = 1; while (ids.has(`camera-${n}`)) n++;
+      const id = `camera-${n}`; ids.add(id); assigned.add(id);
+      cameras.push({ id, name: `${shot.name.slice(0, 110)} camera`, ...framing }); shot.cameraId = id;
+    }
+  }
+  return { format: 'LittleTake.scene', version: 3, id: identifier(doc.id, 'scene.id', false), name: text(doc.name, 120, 'scene.name'), duration, objects, cameras, shots };
+}
+
 export function serializeDocument(doc: SceneDocument): string { return JSON.stringify(validateDocument(doc), null, 2); }
 export function parseDocument(json: string): SceneDocument {
-  if (typeof json !== 'string' || json.length > MAX_JSON_LENGTH) fail('scene', 'file is too large (maximum 1 MB of text)');
+  if (typeof json !== 'string' || json.length > MAX_JSON_LENGTH) fail('scene', 'file is too large (maximum 20 MB of text)');
   return validateDocument(JSON.parse(json));
 }
 
-export class History {
-  private past: SceneDocument[] = [];
-  private future: SceneDocument[] = [];
-  constructor(initial: SceneDocument) { this.reset(initial); }
+export class History<T extends object = SceneDocument> {
+  private past: T[] = [];
+  private future: T[] = [];
+  constructor(initial: T) { this.reset(initial); }
   get canUndo(): boolean { return this.past.length > 1; }
   get canRedo(): boolean { return this.future.length > 0; }
-  commit(doc: SceneDocument): void {
+  commit(doc: T): void {
     this.future = [];
     if (JSON.stringify(this.past[this.past.length - 1]) === JSON.stringify(doc)) return;
-    this.past.push(cloneDocument(doc));
+    this.past.push(structuredClone(doc));
     if (this.past.length > 100) this.past.shift();
   }
-  undo(): SceneDocument | null {
+  undo(): T | null {
     if (!this.canUndo) return null;
     this.future.push(this.past.pop()!);
-    return cloneDocument(this.past[this.past.length - 1]);
+    return structuredClone(this.past[this.past.length - 1]);
   }
-  redo(): SceneDocument | null {
+  redo(): T | null {
     if (!this.canRedo) return null;
     const doc = this.future.pop()!;
     this.past.push(doc);
-    return cloneDocument(doc);
+    return structuredClone(doc);
   }
-  reset(doc: SceneDocument): void { this.past = [cloneDocument(doc)]; this.future = []; }
+  reset(doc: T): void { this.past = [structuredClone(doc)]; this.future = []; }
 }

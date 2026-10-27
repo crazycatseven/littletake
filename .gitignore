@@ -6,4 +6,7 @@ dist/
 !.env.example
 *.local
 *.log
+.littletake/
+output/
+.playwright-mcp/
 .DS_Store

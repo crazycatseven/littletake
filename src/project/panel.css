@@ -1,0 +1,37 @@
+.scene-switcher { padding: 16px 14px 10px; border-bottom: 1px solid var(--line, #e2e5dc); }
+.scene-switcher > label, .outliner-heading { font-size: 10px; letter-spacing: .1em; color: #75806d; font-weight: 650; }
+.scene-switcher > div, .shot-switcher { display: flex; align-items: center; gap: 6px; margin-top: 7px; }
+.scene-switcher select, .shot-switcher select, .shot-properties select { min-width: 0; width: 100%; padding: 7px 9px; border: 1px solid #dce2d6; border-radius: 7px; background: #fbfcf8; color: #35432d; font: inherit; font-size: 12px; }
+.scene-switcher > input { width: 100%; margin-top: 7px; padding: 4px 2px; border: 0; background: transparent; font: inherit; font-size: 12px; color: #65725b; }
+.scene-switcher button, .shot-switcher button { flex: none; width: 28px; height: 28px; padding: 0; }
+.shot-switcher { padding: 9px 12px 0; margin: 0; }
+.outliner-heading { display: flex; align-items: center; justify-content: space-between; padding: 15px 8px 5px; }
+.outliner-heading button { padding: 0 5px; font-size: 17px; }
+.add-camera-button { margin: 12px; width: calc(100% - 24px); }
+.shot-properties > label { display: grid; gap: 7px; font-size: 12px; margin-bottom: 12px; }
+.timeline-group { display: flex; align-items: center; gap: 14px; min-height: 22px; padding: 0 16px 0 20px; border-bottom: 1px solid #e0e7d8; color: #728065; background: #f2f6eb; font-size: 9px; letter-spacing: .06em; }
+.timeline-group > span { color: #8c9682; font-size: 10px; letter-spacing: 0; }
+.timeline-group > button { margin-left: auto; height: 21px; padding: 2px 7px; font-size: 10px; }
+.timeline-group svg { width: 12px; height: 12px; }
+.shot-row .track-label, .shot-row .track-lane { height: 38px; }
+.shot-row .track-label > span { display: grid; text-align: left; gap: 3px; }
+.shot-row small { color: #8395a0; font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shot-row .track-label.selected { background: #e5edf1; color: #57717d; }
+.shot-range { position: absolute; top: 5px; justify-content: flex-start; height: 27px; min-width: 8px; padding: 0 12px; overflow: hidden; border: 1px solid #b1c3cf; border-radius: 5px; background: #e6edf1; color: #6b8492; font-size: 10px; cursor: grab; touch-action: none; }
+.shot-range.selected { border-color: #8ca9ba; background: #dce8ee; color: #496978; }
+.shot-range.dragging { cursor: grabbing; }
+.shot-range > span:not(.clip-edge) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+.shot-actions, .camera-shot-links { display: flex; align-items: center; gap: 6px; }
+.camera-shot-links { flex-wrap: wrap; margin: 4px 0 16px; }
+.camera-shot-links button { padding: 5px 8px; border: 1px solid #dce5d1; border-radius: 6px; color: #778966; font-size: 11px; }
+.camera-shot-links button.selected { background: #e6edf1; color: #536f7e; border-color: #b7cbd6; }
+.camera-shot-links svg { width: 13px; height: 13px; }
+.shot-properties input#shotName { padding: 7px 9px; border: 1px solid #dce2d6; border-radius: 6px; background: #fbfcf8; color: #35432d; font: inherit; }
+.empty-stage { position: absolute; top: 34%; left: 10%; right: 36%; padding: 22px; background: #fbfcf5ed; border: 1px solid #e0e6d7; border-radius: 14px; max-width: 350px; }
+.empty-stage h2 { margin: 0 0 9px; font-size: 23px; font-weight: 520; }
+.empty-stage p { color: #728069; font-size: 13px; line-height: 1.6; }
+.empty-stage button { margin-top: 8px; }
+.scene-context-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#newProjectDialog { max-width: 430px; }
+#newProjectDialog > p { line-height: 1.6; color: #6c7764; }
+@media (max-width: 1100px) { .empty-stage { left: 5%; right: 5%; top: 38%; max-width: 280px; } }

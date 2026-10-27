@@ -1,13 +1,17 @@
 import { createAIProvider, aiConnection, type AIEnvironment } from './ai/index.ts';
 import { AIError, type AIProvider } from './ai/provider.ts';
 import { parseSceneEditInput, proposeSceneEdit } from './scene-edit.ts';
+import { newDiagnostic } from '../src/scene-edit/diagnostics.ts';
+import { AssetLibrary } from './assets/library.ts';
 
 const MAX_BODY = 4_100_000;
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
 export function createSceneEditHandler(env: AIEnvironment = process.env, providerFactory = (): AIProvider => createAIProvider(env)) {
+  const library = new AssetLibrary(env.LITTLETAKE_ASSET_DIR);
   return async (request: Request): Promise<Response> => {
     if (request.method === 'GET') return json(aiConnection(env));
     if (request.method !== 'POST') return new Response(null, { status: 405, headers: { Allow: 'GET, POST' } });
+    const diagnostic = newDiagnostic();
     try {
       if (request.headers.get('origin') && request.headers.get('origin') !== new URL(request.url).origin) throw new AIError('wrong_origin', 'Open LittleTake directly to edit this scene.', 403);
       if (!request.headers.get('content-type')?.startsWith('application/json')) throw new AIError('invalid_input', 'Send a JSON scene request.', 415);
@@ -22,10 +26,14 @@ export function createSceneEditHandler(env: AIEnvironment = process.env, provide
         }
       } finally { reader.releaseLock(); }
       let body: unknown; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new AIError('invalid_input', 'The scene request could not be read.', 400); }
-      return json(await proposeSceneEdit(parseSceneEditInput(body), providerFactory(), request.signal));
+      diagnostic.input = body;
+      const result = await proposeSceneEdit(parseSceneEditInput(body), providerFactory(), request.signal, diagnostic, library);
+      return json({ ...result, diagnostic });
     } catch (error) {
-      if (error instanceof AIError) return json({ error: { code: error.code, message: error.message } }, error.status);
-      return json({ error: { code: 'edit_failed', message: 'The edit could not finish. Your scene is unchanged.' } }, 500);
+      const detail = error instanceof AIError ? { code: error.code, message: error.message }
+        : { code: 'edit_failed', message: 'The edit could not finish. Your scene is unchanged.' };
+      diagnostic.outcome = 'failed'; diagnostic.error = detail;
+      return json({ error: detail, diagnostic }, error instanceof AIError ? error.status : 500);
     }
   };
 }

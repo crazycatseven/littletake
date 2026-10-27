@@ -2,16 +2,20 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { evaluateTransform } from './model';
+import { createAssetGroup, disposeAssetGroup, type AssetDefinition } from './assets/model';
 import { renderSceneSnapshot } from './scene-snapshot';
 import type { SceneSnapshot, SceneView } from './scene-edit/operations';
 import type { Axis, PrimitiveKind, SceneDocument, SceneObject, StageOptions, ToolMode, Transform } from './types';
 
 interface EntityView {
   root: THREE.Group;
+  bounds: THREE.Box3;
   kind: PrimitiveKind;
   material: THREE.MeshStandardMaterial;
   accent: THREE.MeshStandardMaterial;
   color: string;
+  assetKey?: string;
+  disposeAsset?: () => void;
 }
 interface PointerStart {
   id: number;
@@ -27,6 +31,10 @@ const NAV_HINT = 'Drag empty space to orbit · Middle drag to pan · Scroll to z
 
 /** Two persistent views of one scene: an editor with tools, and a clean shot camera. */
 export class Stage {
+  private currentAssets: AssetDefinition[] = [];
+  private controlled: { id: string; pose: Transform } | null = null;
+  private ghost: THREE.Group | null = null;
+  private readonly forwardArrow = new THREE.ArrowHelper(new THREE.Vector3(0,0,1),new THREE.Vector3(),1.2,0x669bb1,.22,.13);
   private readonly options: StageOptions;
   private readonly scene = new THREE.Scene();
   private readonly editorCamera = new THREE.PerspectiveCamera(45, 1, 0.05, 500);
@@ -36,8 +44,10 @@ export class Stage {
   private readonly orbit: OrbitControls;
   private readonly gizmo: TransformControls;
   private readonly gizmoHelper: THREE.Object3D;
-  private readonly selection = new THREE.BoxHelper(this.scene, 0xf3ae65);
   private readonly cameraIcon = new THREE.Group();
+  private readonly selectionMarker = new THREE.Group();
+  private readonly selectionBounds = new THREE.Box3();
+  private readonly selectionSize = new THREE.Vector3();
   private readonly views = new Map<string, EntityView>();
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
@@ -55,6 +65,9 @@ export class Stage {
   private readonly originalPreviewPosition: string;
   private readonly previewPositionChanged: boolean;
   private selectedId: string | null = null;
+  private currentShotId: string | null = null;
+  private iconCameraId: string | null = null;
+  private previewCameraId: string | null = null;
   private playing = false;
   private dragging = false;
   private dragEntityId: string | null = null;
@@ -118,15 +131,10 @@ export class Stage {
     this.gizmo.addEventListener('mouseUp', this.onGizmoEnd);
     this.gizmo.addEventListener('dragging-changed', this.onDraggingChanged);
 
-    this.selection.layers.set(1);
-    this.selection.visible = false;
-    this.selection.material.depthTest = false;
-    this.selection.material.transparent = true;
-    this.selection.material.opacity = 0.85;
-    this.selection.material.toneMapped = false;
-    this.scene.add(this.selection);
+    this.forwardArrow.traverse(node => node.layers.set(1)); this.forwardArrow.visible=false; this.scene.add(this.forwardArrow);
     this.sun = this.createEnvironment();
     this.createCameraIcon();
+    this.createSelectionMarker();
     this.resetView();
 
     this.listen(canvas, 'pointerdown', this.onPointerDown as EventListener, true);
@@ -147,23 +155,27 @@ export class Stage {
     this.frame = requestAnimationFrame(this.render);
   }
 
-  update(doc: SceneDocument, time: number, selectedId: string | null, playing: boolean): void {
+  update(doc: SceneDocument, time: number, selectedId: string | null, playing: boolean, shotId: string | null = doc.shots[0]?.id ?? null, assets: AssetDefinition[] = []): void {
     if (this.disposed) return;
-    this.currentDoc = doc; this.currentTime = time;
+    this.currentDoc = doc; this.currentTime = time; this.currentShotId = shotId;
+    this.currentAssets = assets;
     const liveIds = new Set(doc.objects.map((object) => object.id));
     for (const [id, view] of this.views) {
       if (liveIds.has(id)) continue;
       if (this.dragEntityId === id) this.finishGizmo();
       this.scene.remove(view.root);
+      view.disposeAsset?.();
       view.material.dispose();
       view.accent.dispose();
       this.views.delete(id);
     }
     for (const object of doc.objects) {
       let view = this.views.get(object.id);
-      if (!view || view.kind !== object.kind) {
+      const assetKey=object.asset?`${object.asset.id}@${object.asset.version}`:undefined;
+      if (!view || view.kind !== object.kind || view.assetKey !== assetKey) {
         if (view) {
           this.scene.remove(view.root);
+          view.disposeAsset?.();
           view.material.dispose();
           view.accent.dispose();
         }
@@ -175,22 +187,25 @@ export class Stage {
         view.material.color.set(object.color);
         view.accent.color.copy(view.material.color).multiplyScalar(0.72);
         view.color = object.color;
+        if(object.asset)view.root.traverse(node=>{if(node instanceof THREE.Mesh && node.userData.baseColor)(node.material as THREE.MeshStandardMaterial).color.set(node.userData.baseColor).multiply(new THREE.Color(object.color));});
       }
       view.root.name = object.name;
-      if (this.dragEntityId !== object.id) this.applyPose(view.root, evaluateTransform(object, time));
+      if (this.dragEntityId !== object.id) this.applyPose(view.root, this.controlled?.id===object.id?this.controlled.pose:evaluateTransform(object, time));
     }
-    if (this.dragEntityId !== 'camera') {
-      const cameraPose = evaluateTransform(doc.camera, time);
-      this.applyPose(this.cameraIcon, cameraPose);
-      this.applyPose(this.shotCamera, cameraPose, false);
-    } else {
-      this.copyIconToShot();
+    const shot = doc.shots.find(item => item.id === shotId);
+    const selectedCamera = doc.cameras.find(item => item.id === selectedId);
+    const preview = doc.cameras.find(item => item.id === shot?.cameraId) ?? selectedCamera ?? doc.cameras[0];
+    const camera = selectedCamera ?? preview;
+    this.iconCameraId = camera?.id ?? null; this.previewCameraId = preview?.id ?? null;
+    this.cameraIcon.visible = !!camera; this.cameraIcon.userData.entityId = camera?.id ?? '';
+    if (camera && this.dragEntityId !== camera.id) this.applyPose(this.cameraIcon, evaluateTransform(camera, time));
+    if (preview) {
+      if (this.dragEntityId === preview.id) this.copyIconToShot();
+      else this.applyPose(this.shotCamera, evaluateTransform(preview, time), false);
+      if (this.shotCamera.fov !== preview.fov) { this.shotCamera.fov = preview.fov; this.shotCamera.updateProjectionMatrix(); }
     }
-    if (this.shotCamera.fov !== doc.camera.fov) {
-      this.shotCamera.fov = THREE.MathUtils.clamp(doc.camera.fov, 10, 120);
-      this.shotCamera.updateProjectionMatrix();
-    }
-    const validSelectedId = selectedId === 'camera' || (selectedId && this.views.has(selectedId)) ? selectedId : null;
+    this.previewRenderer.domElement.hidden = !preview;
+    const validSelectedId = selectedId && (selectedId === this.iconCameraId || this.views.has(selectedId)) ? selectedId : null;
     if ((playing && !this.playing) || validSelectedId !== this.selectedId) this.finishGizmo();
     this.playing = playing;
     this.selectedId = validSelectedId;
@@ -202,6 +217,31 @@ export class Stage {
     this.gizmo.setMode(mode);
     this.gizmo.setSpace(mode === 'scale' ? 'local' : 'world');
     this.options.onStatus(`${mode[0].toUpperCase()}${mode.slice(1)}${this.axis ? ` on ${this.axis}` : ''} · Drag a colored handle · F to focus`);
+  }
+
+  setControlled(value: {id:string;pose:Transform;world?:boolean}|null): void {
+    if(!!value!==!!this.controlled)this.clearNavigation();
+    this.controlled=value;this.orbit.enabled=!value;this.forwardArrow.visible=!!value;
+    if(value){this.forwardArrow.position.fromArray(value.pose.position).add(new THREE.Vector3(0,.07,0));const direction=new THREE.Vector3(0,0,1);if(!value.world)direction.applyEuler(new THREE.Euler(...value.pose.rotation.map(THREE.MathUtils.degToRad) as [number,number,number],'XYZ'));direction.y=0;this.forwardArrow.setDirection(direction.normalize());}
+  }
+  focusCanvas():void {this.renderer.domElement.focus({preventScroll:true});}
+  placement(asset:AssetDefinition,clientX?:number,clientY?:number): Transform|null {
+    const rect=this.renderer.domElement.getBoundingClientRect();
+    this.pointer.set(clientX===undefined?0:(clientX-rect.left)/rect.width*2-1,clientY===undefined?0:-(clientY-rect.top)/rect.height*2+1);
+    this.scene.updateMatrixWorld(true);this.editorCamera.updateMatrixWorld(true);this.raycaster.setFromCamera(this.pointer,this.editorCamera);
+    let point=this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0,1,0),0),new THREE.Vector3());
+    const surface=this.raycaster.intersectObjects([...this.views.values()].map(v=>v.root),true).find(hit=>hit.face && hit.face.normal.clone().transformDirection(hit.object.matrixWorld).y>.65);
+    if(surface && (!point || surface.distance < point.distanceTo(this.raycaster.ray.origin)))point=surface.point;
+    if(!point || point.toArray().some(v=>Math.abs(v)>990))return null;
+    const pose:Transform=structuredClone(asset.template?.transform??{position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]});
+    pose.position=[0,0,0];const root=createAssetGroup(asset);this.applyPose(root,pose);root.updateMatrixWorld(true);
+    const minY=new THREE.Box3().setFromObject(root).min.y;disposeAssetGroup(root);
+    pose.position=[point.x,point.y-minY,point.z];return pose;
+  }
+  previewAsset(asset:AssetDefinition|null,pose?:Transform):void {
+    if(!asset){if(this.ghost){this.scene.remove(this.ghost);disposeAssetGroup(this.ghost);this.ghost=null;}return;}
+    if(!this.ghost||this.ghost.userData.assetId!==asset.id){this.previewAsset(null);this.ghost=createAssetGroup(asset);this.ghost.userData.assetId=asset.id;this.ghost.traverse(node=>{if(node instanceof THREE.Mesh){const m=node.material as THREE.MeshStandardMaterial;m.transparent=true;m.opacity=.55;m.depthWrite=false;node.castShadow=false;}});this.scene.add(this.ghost);}
+    if(pose)this.applyPose(this.ghost,pose);
   }
 
   setAxis(axis: Axis | null): void {
@@ -243,14 +283,15 @@ export class Stage {
     return { transform: this.readPose(this.editorCamera), fov: this.editorCamera.fov };
   }
 
-  captureSnapshot(doc: SceneDocument, time: number, view: SceneView): SceneSnapshot {
+  captureSnapshot(doc: SceneDocument, time: number, view: SceneView, shotId: string | null = doc.shots[0]?.id ?? null, assets:AssetDefinition[] = this.currentAssets): SceneSnapshot {
+    if (view === 'shot' && !doc.shots.some(shot => shot.id === shotId)) throw new Error('Choose a shot before capturing its view.');
     if (this.disposed || !this.currentDoc) throw new Error('The stage is not ready to capture an image.');
     if (this.dragging || this.flyPointer !== null) throw new Error('Finish moving the object or camera before capturing a view.');
-    const previous = { doc: this.currentDoc, time: this.currentTime, selected: this.selectedId, playing: this.playing };
+    const previous = { doc: this.currentDoc, time: this.currentTime, selected: this.selectedId, playing: this.playing, shotId: this.currentShotId, assets:this.currentAssets };
     try {
-      this.update(doc, time, null, true);
-      return renderSceneSnapshot(this.previewRenderer, this.scene, this.shotCamera, doc.objects.map(item => ({ id: item.id, name: item.name, root: this.views.get(item.id)!.root })), view, time);
-    } finally { this.update(previous.doc, previous.time, previous.selected, previous.playing); }
+      this.update(doc, time, null, true, shotId, assets);
+      return renderSceneSnapshot(this.previewRenderer, this.scene, this.shotCamera, doc.objects.map(item => ({ id: item.id, name: item.name, root: this.views.get(item.id)!.root })), view, time, this.previewCameraId);
+    } finally { this.update(previous.doc, previous.time, previous.selected, previous.playing, previous.shotId,previous.assets); }
   }
 
   dispose(): void {
@@ -266,7 +307,9 @@ export class Stage {
     this.gizmo.removeEventListener('dragging-changed', this.onDraggingChanged);
     this.gizmo.dispose();
     this.orbit.dispose();
+    this.previewAsset(null);this.forwardArrow.dispose();
     for (const view of this.views.values()) {
+      view.disposeAsset?.();
       view.material.dispose();
       view.accent.dispose();
     }
@@ -274,8 +317,6 @@ export class Stage {
     for (const geometry of this.geometries.values()) geometry.dispose();
     this.fixedGeometries.forEach((geometry) => geometry.dispose());
     this.fixedMaterials.forEach((material) => material.dispose());
-    this.selection.geometry.dispose();
-    this.selection.material.dispose();
     this.sun.shadow.dispose();
     this.scene.clear();
     this.renderer.dispose();
@@ -359,6 +400,12 @@ export class Stage {
     const material = new THREE.MeshStandardMaterial({ color: object.color, roughness: 0.79, metalness: 0.01 });
     const accent = material.clone();
     accent.color.multiplyScalar(0.72);
+    if(object.kind==='asset'){
+      const asset=this.currentAssets.find(a=>a.id===object.asset?.id&&a.version===object.asset.version);
+      if(!asset)throw new Error('Missing asset: '+object.name);
+      const group=createAssetGroup(asset);root.add(group);group.traverse(node=>{if(node instanceof THREE.Mesh)(node.material as THREE.MeshStandardMaterial).color.multiply(new THREE.Color(object.color));});
+      return {root,bounds:new THREE.Box3().setFromObject(root),kind:object.kind,material,accent,color:object.color,assetKey:`${asset.id}@${asset.version}`,disposeAsset:()=>disposeAssetGroup(group)};
+    }
     if (object.kind === 'plane') material.side = THREE.DoubleSide;
     const add = (kind: string, x: number, y: number, z: number, sx: number, sy: number, sz: number, dark = false): THREE.Mesh => {
       const mesh = new THREE.Mesh(this.geometry(kind), dark ? accent : material);
@@ -384,7 +431,38 @@ export class Stage {
     } else {
       add(object.kind, 0, 0, 0, 1, 1, 1);
     }
-    return { root, kind: object.kind, material, accent, color: object.color };
+    return { root, bounds: new THREE.Box3().setFromObject(root), kind: object.kind, material, accent, color: object.color };
+  }
+
+  private createSelectionMarker(): void {
+    const fillGeometry = new THREE.CircleGeometry(1, 96).rotateX(-Math.PI / 2);
+    const ringGeometry = new THREE.RingGeometry(0.95, 1, 96).rotateX(-Math.PI / 2);
+    const fillMaterial = new THREE.MeshBasicMaterial({ color: '#bd804b', transparent: true, opacity: 0.09, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+    const ringMaterial = fillMaterial.clone(); ringMaterial.opacity = 0.85;
+    const fill = new THREE.Mesh(fillGeometry, fillMaterial), ring = new THREE.Mesh(ringGeometry, ringMaterial);
+    fill.renderOrder = 1; ring.renderOrder = 2;
+    this.selectionMarker.add(fill, ring);
+    this.selectionMarker.traverse(node => node.layers.set(1));
+    this.selectionMarker.visible = false;
+    this.scene.add(this.selectionMarker);
+    this.fixedGeometries.push(fillGeometry, ringGeometry);
+    this.fixedMaterials.push(fillMaterial, ringMaterial);
+  }
+
+  private syncSelectionMarker(): void {
+    const view = this.selectedId ? this.views.get(this.selectedId) : undefined;
+    this.selectionMarker.visible = !!view;
+    if (!view) return;
+    view.root.updateWorldMatrix(true, false);
+    this.selectionBounds.copy(view.bounds).applyMatrix4(view.root.matrixWorld);
+    this.selectionBounds.getCenter(this.selectionMarker.position);
+    this.selectionMarker.position.y = Math.max(0, this.selectionBounds.min.y) + 0.015;
+    // Rest-pose dimensions keep the footprint steady as the object turns or animates.
+    view.bounds.getSize(this.selectionSize).multiply(view.root.scale);
+    const width = Math.max(0.25, this.selectionSize.x), depth = Math.max(0.25, this.selectionSize.z);
+    const character = view.kind === 'human';
+    this.selectionMarker.scale.set((character ? Math.max(width, depth) : width) * 0.6 + 0.12, 1, (character ? Math.max(width, depth) : depth) * 0.6 + 0.12);
+    this.selectionMarker.rotation.y = view.root.rotation.y;
   }
 
   private createCameraIcon(): void {
@@ -430,14 +508,12 @@ export class Stage {
   }
 
   private getSelectedObject(): THREE.Object3D | null {
-    if (this.selectedId === 'camera') return this.cameraIcon;
+    if (this.selectedId !== null && this.selectedId === this.iconCameraId) return this.cameraIcon;
     return this.selectedId ? this.views.get(this.selectedId)?.root ?? null : null;
   }
 
   private syncSelection(): void {
     const selected = this.getSelectedObject();
-    this.selection.visible = !!selected;
-    if (selected) this.selection.setFromObject(selected);
     if (!selected || this.playing) {
       this.gizmo.detach();
     } else if (this.gizmo.object !== selected) {
@@ -447,6 +523,7 @@ export class Stage {
   }
 
   private copyIconToShot(): void {
+    if (this.iconCameraId !== this.previewCameraId) return;
     this.shotCamera.position.copy(this.cameraIcon.position);
     this.shotCamera.quaternion.copy(this.cameraIcon.quaternion);
   }
@@ -466,7 +543,7 @@ export class Stage {
     const object = this.gizmo.object;
     object.scale.clampScalar(0.01, 100);
     object.position.clampScalar(-1000, 1000);
-    if (this.dragEntityId === 'camera') this.copyIconToShot();
+    if (this.dragEntityId !== null && this.dragEntityId === this.iconCameraId) this.copyIconToShot();
     this.options.onTransform(this.dragEntityId, this.readPose(object), 'change');
   };
 
@@ -479,7 +556,7 @@ export class Stage {
 
   private finishGizmo(): void {
     const id = this.dragEntityId;
-    const object = id === 'camera' ? this.cameraIcon : id ? this.views.get(id)?.root : null;
+    const object = id !== null && id === this.iconCameraId ? this.cameraIcon : id ? this.views.get(id)?.root : null;
     this.dragEntityId = null;
     this.dragging = false;
     if (this.gizmo.dragging) this.gizmo.dragging = false;
@@ -494,7 +571,7 @@ export class Stage {
     this.editorCamera.updateMatrixWorld(true);
     this.raycaster.setFromCamera(this.pointer, this.editorCamera);
     const roots = [...this.views.values()].map((view) => view.root);
-    roots.push(this.cameraIcon);
+    if (this.cameraIcon.visible) roots.push(this.cameraIcon);
     const hits = this.raycaster.intersectObjects(roots, true);
     for (const hit of hits) {
       let node: THREE.Object3D | null = hit.object;
@@ -507,6 +584,7 @@ export class Stage {
   }
 
   private onPointerDown = (event: PointerEvent): void => {
+    if(this.controlled){event.preventDefault();event.stopImmediatePropagation();this.focusCanvas();return;}
     if (event.pointerType === 'touch' && !event.isPrimary) return;
     this.renderer.domElement.focus({ preventScroll: true });
     if (event.button === 2) {
@@ -579,6 +657,7 @@ export class Stage {
   }
 
   private onKeyDown = (event: KeyboardEvent): void => {
+    if(this.controlled)return;
     if (document.activeElement !== this.renderer.domElement || this.isTextInput(event.target)) return;
     const key = event.key.toLowerCase();
     if (this.flyPointer !== null && ['w', 'a', 's', 'd', 'q', 'e', 'shift'].includes(key)) {
@@ -669,8 +748,8 @@ export class Stage {
     this.lastFrame = time;
     this.updateFly(delta);
     if (this.flyPointer === null && this.orbit.enabled) this.orbit.update();
-    if (this.selection.visible) this.selection.update();
-    if (this.dragEntityId === 'camera') this.copyIconToShot();
+    if (this.dragEntityId !== null && this.dragEntityId === this.iconCameraId) this.copyIconToShot();
+    this.syncSelectionMarker();
     this.renderer.render(this.scene, this.editorCamera);
     this.previewRenderer.render(this.scene, this.shotCamera);
     this.frame = requestAnimationFrame(this.render);
