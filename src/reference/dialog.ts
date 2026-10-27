@@ -20,6 +20,7 @@ export class ReferenceDialog {
   private controller: AbortController | null = null;
   private operation = 0;
   private busy = false;
+  private loadingDemo = false;
 
   constructor(private readonly applyScene: (scene: SceneDocument) => void) {
     this.root.id = 'referenceDialog'; this.root.setAttribute('aria-labelledby', 'referenceTitle');
@@ -29,7 +30,7 @@ export class ReferenceDialog {
       <div class="reference-layout">
         <section class="reference-source">
           <div class="reference-video-frame"><video id="referencePlayer" controls playsinline muted hidden></video><div class="reference-placeholder"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><rect x="5" y="7" width="30" height="26" rx="3"/><path d="m17 14 10 6-10 6Z"/></svg><span>A continuous shot works best</span></div></div>
-          <div class="reference-file-row"><button data-reference="choose">Choose video</button><span id="referenceFileName">MP4 or WebM · up to 3 MB</span></div>
+          <div class="reference-file-row"><button data-reference="choose">Choose video</button><button data-reference="demo">Load demo clip</button><span id="referenceFileName">MP4 or WebM · up to 3 MB</span></div>
           <input id="referenceFile" type="file" accept=".mp4,.webm,video/mp4,video/webm" hidden/>
           <p id="referenceMetadata" class="reference-metadata">1–60 seconds · objects, movement and camera</p>
           <label class="reference-direction-label" for="referenceDirection">Creative direction <span>optional</span></label>
@@ -50,6 +51,7 @@ export class ReferenceDialog {
       const action = (event.target as HTMLElement).closest<HTMLElement>('[data-reference]')?.dataset.reference;
       if (action === 'close') this.root.close();
       if (action === 'choose') this.fileInput.click();
+      if (action === 'demo') void this.loadDemo();
       if (action === 'analyze') void this.analyze();
       if (action === 'cancel') { this.cancelOperation(); this.emptyReport('Analysis cancelled', 'Your current scene is unchanged.'); }
       if (action === 'apply' && this.draft) { this.applyScene(this.draft.scene); this.root.close(); }
@@ -76,23 +78,44 @@ export class ReferenceDialog {
     this.updateButtons();
   }
   private updateButtons() {
-    this.analyzeButton.disabled = this.busy || !this.video || !this.connection?.available;
-    this.analyzeButton.textContent = this.busy ? 'Analyzing…' : this.draft ? 'Analyze again' : 'Analyze clip';
+    this.analyzeButton.disabled = this.busy || this.loadingDemo || !this.video || !this.connection?.available;
+    this.analyzeButton.textContent = this.loadingDemo ? 'Loading demo…' : this.busy ? 'Analyzing…' : this.draft ? 'Analyze again' : 'Analyze clip';
     this.analyzeButton.classList.toggle('reference-working', this.busy);
-    this.applyButton.hidden = !this.draft || this.busy;
-    this.find<HTMLButtonElement>('[data-reference="choose"]').disabled = this.busy;
-    this.find('[data-reference="cancel"]').hidden = !this.busy;
-    this.direction.disabled = this.busy;
+    this.applyButton.hidden = !this.draft || this.busy || this.loadingDemo;
+    this.find<HTMLButtonElement>('[data-reference="choose"]').disabled = this.busy || this.loadingDemo;
+    this.find<HTMLButtonElement>('[data-reference="demo"]').disabled = this.busy || this.loadingDemo;
+    this.find('[data-reference="cancel"]').hidden = !this.busy && !this.loadingDemo;
+    this.find('[data-reference="cancel"]').textContent = this.loadingDemo ? 'Cancel loading' : 'Cancel analysis';
+    this.direction.disabled = this.busy || this.loadingDemo;
     this.find('#referenceFooterNote').textContent = this.draft ? 'Use scene replaces your current scene. Undo brings it back.' : 'Estimated geometry and camera remain editable.';
   }
   private cancelOperation() {
-    this.operation++; this.controller?.abort(); this.controller = null; this.busy = false; this.updateButtons();
+    this.operation++; this.controller?.abort(); this.controller = null; this.busy = false; this.loadingDemo = false; this.updateButtons();
   }
   private showError(message: string) { const error = this.find('#referenceError'); error.textContent = message; error.hidden = false; }
   private clearError() { this.find('#referenceError').hidden = true; }
   private emptyReport(title: string, detail: string) {
     this.find('#referenceState').textContent = 'YOUR SCENE DRAFT';
     this.find('#referenceReport').innerHTML = `<div class="reference-empty"><span class="reference-draft-icon">◇</span><h3>${escapeHTML(title)}</h3><p>${escapeHTML(detail)}</p><div class="reference-output-tags"><span>Objects</span><span>Motion</span><span>Camera</span></div></div>`;
+  }
+  private async loadDemo() {
+    if (this.busy || this.loadingDemo) return;
+    this.cancelOperation(); this.clearError(); this.video = null; this.draft = null; this.loadingDemo = true;
+    const operation = this.operation; this.controller = new AbortController();
+    this.emptyReport('Loading the demo clip', 'The Grand Budapest Hotel · Interview with Zero · 0:33–0:45');
+    this.updateButtons();
+    try {
+      const response = await fetch('/demo/grand-budapest-zero/input-web.mp4', { signal: this.controller.signal });
+      if (!response.ok) throw new Error('The demo clip could not be loaded. Please try again.');
+      const clip = await response.blob();
+      if (operation !== this.operation) return;
+      await this.choose(new File([clip], 'grand-budapest-zero.mp4', { type: 'video/mp4' }));
+    } catch (error) {
+      if (operation === this.operation) {
+        this.loadingDemo = false; this.showError((error as Error).message);
+        this.emptyReport('Demo could not be loaded', 'You can choose a video from your device instead.'); this.updateButtons();
+      }
+    }
   }
   private async choose(file: File) {
     this.cancelOperation(); this.clearError(); this.video = null; this.draft = null;

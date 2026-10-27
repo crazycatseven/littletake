@@ -30,6 +30,9 @@ const icons: Record<string, string> = {
   key: '<path d="m12 3 9 9-9 9-9-9 9-9Z"/>',
   eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9 8a3 3 0 0 1 6 1c0 2-3 2-3 4M12 17h.01"/>',
+  more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  expand: '<path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/>',
+  timeline: '<path d="M4 5v14M4 8h16M4 16h16"/><rect x="8" y="6" width="7" height="4" rx="1"/><rect x="12" y="14" width="7" height="4" rx="1"/>',
 };
 const icon = (name: string) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.cube}</svg>`;
 const esc = (value: string) => value.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
@@ -37,40 +40,35 @@ const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.qu
 const app = $('#app');
 app.innerHTML = `
 <header class="app-header">
-  <a class="brand" href="/" aria-label="LittleTake Studio"><span class="brand-mark">L<span></span></span><span>LittleTake</span><span class="beta">STUDIO</span></a>
-  <div class="project-title"><span class="title-divider"></span><input id="projectName" aria-label="Scene name" maxlength="120"/><span class="file-tag">.scene</span></div>
-  <div class="header-actions"><span id="saveStatus" class="save-status">Local draft</span><button data-action="reference">${icon('camera')}<span>Reference video</span></button><button data-action="open">${icon('folder')}<span>Open</span></button><button data-action="save">${icon('save')}<span>Save</span></button><button class="primary-button" data-action="export">${icon('download')}<span>Export scene</span></button></div>
+  <a class="brand" href="/" aria-label="LittleTake Studio"><span class="brand-mark">L<span></span></span><span>LittleTake</span></a>
+  <div class="project-title"><input id="projectName" aria-label="Scene name" maxlength="120"/><span id="saveStatus" class="save-status">Local draft</span></div>
+  <div class="history-actions"><button class="icon-button" data-action="undo" aria-label="Undo" title="Undo · Ctrl Z">${icon('undo')}</button><button class="icon-button" data-action="redo" aria-label="Redo" title="Redo · Ctrl Shift Z">${icon('redo')}</button></div>
+  <div class="header-actions"><button data-action="reference">${icon('camera')}<span>Reference video</span></button><button class="primary-button" data-action="export">${icon('download')}<span>Export scene</span></button><details class="studio-menu" id="sceneMenu"><summary aria-label="Scene menu" title="Scene menu">${icon('more')}</summary><div class="menu-content"><button data-action="open">${icon('folder')}Open scene</button><button data-action="save">${icon('save')}Save locally<kbd>⌘ / Ctrl S</kbd></button><button data-action="shortcuts">${icon('help')}Keyboard shortcuts</button></div></details></div>
 </header>
-<nav class="tool-header" aria-label="Scene tools">
-  <div class="tool-group"><button data-tool="translate" aria-label="Move tool" title="Move · G">${icon('move')}<span>Move</span><kbd>G</kbd></button><button data-tool="rotate" aria-label="Rotate tool" title="Rotate · R">${icon('rotate')}<span>Rotate</span><kbd>R</kbd></button><button data-tool="scale" aria-label="Scale tool" title="Scale · S">${icon('scale')}<span>Scale</span><kbd>S</kbd></button></div>
-  <span class="toolbar-divider"></span><div class="axis-tools" aria-label="Axis constraint"><button data-axis="X" class="axis-x" aria-label="Constrain X axis">X</button><button data-axis="Y" class="axis-y" aria-label="Constrain Y axis">Y</button><button data-axis="Z" class="axis-z" aria-label="Constrain Z axis">Z</button></div>
-  <span class="toolbar-divider"></span><button class="icon-button" data-action="undo" aria-label="Undo" title="Undo · Ctrl Z">${icon('undo')}</button><button class="icon-button" data-action="redo" aria-label="Redo" title="Redo · Ctrl Shift Z">${icon('redo')}</button>
-  <div class="tool-header-end"><span class="units-label">METERS</span><button data-action="shortcuts">${icon('help')}<span>Shortcuts</span></button></div>
-</nav>
 <main class="workspace">
   <aside class="library-panel">
-    <div class="panel-heading"><h2>SHAPES</h2><span class="muted">6</span></div>
-    <div class="primitive-grid">${(['cube','sphere','cylinder','cone','plane','human'] as PrimitiveKind[]).map(kind=>`<button data-add="${kind}" aria-label="Add ${kind}" title="Add ${kind}">${icon(kind)}<span>${kind[0].toUpperCase()+kind.slice(1)}</span></button>`).join('')}</div>
-    <div class="panel-heading objects-heading"><h2>SCENE</h2><span id="objectCount" class="muted"></span></div>
-    <div id="outliner" class="outliner" aria-label="Scene objects"></div>
-    <div class="library-footer"><span class="tiny-dot"></span><span>Build a little. See a lot.</span></div>
+    <div class="library-tabs" role="tablist" aria-label="Library"><button id="objectsTab" role="tab" aria-controls="objectsPanel" aria-selected="true" data-library="objects">Objects<span id="objectCount"></span></button><button id="assetsTab" role="tab" aria-controls="assetsPanel" aria-selected="false" data-library="assets">${icon('plus')}Add</button></div>
+    <div id="objectsPanel" class="library-page" role="tabpanel" aria-labelledby="objectsTab"><div id="outliner" class="outliner" aria-label="Scene objects"></div></div>
+    <div id="assetsPanel" class="library-page" role="tabpanel" aria-labelledby="assetsTab" hidden><p class="library-caption">Add to your scene</p><div class="primitive-grid">${(['cube','sphere','cylinder','cone','plane','human'] as PrimitiveKind[]).map(kind=>`<button data-add="${kind}" aria-label="Add ${kind}">${icon(kind)}<span>${kind[0].toUpperCase()+kind.slice(1)}</span></button>`).join('')}</div></div>
   </aside>
   <section class="stage-panel" aria-label="3D stage">
-    <div class="viewport-heading"><span class="viewport-title"><span class="tiny-dot"></span>SCENE VIEW</span><div><button data-action="focus" title="Focus selection · F">${icon('focus')}<span>Focus</span></button><button data-action="reset-view">Perspective <span class="small-chevron">⌄</span></button></div></div>
+    <div class="viewport-heading"><div class="transform-tools" role="toolbar" aria-label="Transform tools"><button data-tool="translate" aria-label="Move tool" title="Move · G">${icon('move')}<span>Move</span></button><button data-tool="rotate" aria-label="Rotate tool" title="Rotate · R">${icon('rotate')}<span>Rotate</span></button><button data-tool="scale" aria-label="Scale tool" title="Scale · S">${icon('scale')}<span>Scale</span></button></div><div><button data-action="focus" title="Focus selection · F">${icon('focus')}Focus</button><button data-action="reset-view" aria-label="Reset scene view">Reset view</button></div></div>
     <div id="viewport" class="viewport"></div>
-    <div class="viewport-caption"><span id="viewHint">Drag to orbit · Middle drag to pan · Scroll to zoom</span><span class="axis-legend"><b>X</b><b>Y</b><b>Z</b></span></div>
+    <section class="shot-panel" aria-label="Shot preview"><div class="shot-heading"><h2>${icon('camera')}Shot preview</h2><button class="icon-button" data-action="expand-preview" aria-label="Expand shot preview" aria-expanded="false" title="Expand preview">${icon('expand')}</button></div><div id="previewDock"><div class="preview-frame" id="previewFrame"><div id="preview" class="preview"></div></div></div><div class="shot-footer"><span><span class="live-dot"></span>Live · 16:9</span><button data-select="camera" id="lensLabel">Edit camera</button></div></section>
+    <div class="viewport-caption"><span id="viewHint">Drag to orbit · Scroll to zoom</span></div>
   </section>
-  <aside class="details-panel">
-    <section class="shot-panel"><div class="panel-heading"><h2>${icon('camera')} CAMERA VIEW</h2><button class="icon-button" data-action="use-view" title="Align shot to current view" aria-label="Align shot to current view">${icon('eye')}</button></div><div class="preview-frame"><div id="preview" class="preview"></div><div class="shot-overlay"><span>CAM 01</span><span>16:9</span></div></div><div class="shot-footer"><span><span class="live-dot"></span>LIVE PREVIEW</span><button data-select="camera" id="lensLabel">40° FOV</button></div></section>
+  <aside class="properties-drawer" id="propertiesDrawer" aria-label="Inspector">
+    <div class="drawer-heading"><h2>Inspector</h2></div>
     <section class="inspector-panel" id="inspector" aria-label="Object properties"></section>
   </aside>
 </main>
-<section class="timeline-panel" aria-label="Animation timeline">
-  <div class="timeline-toolbar"><div class="timeline-title">TIMELINE<span>01</span></div><div class="transport"><button data-action="rewind" class="icon-button" aria-label="Go to start">${icon('rewind')}</button><button data-action="play" id="playButton" class="play-button" aria-label="Play">${icon('play')}</button><span class="timecode" id="timecode">00:00.00</span><span class="timecode-separator">/</span><span class="timecode" id="endTimecode">00:05.00</span></div><label class="duration-control">Duration <input type="number" id="duration" aria-label="Scene duration" min="1" max="60" step="1"/> s</label></div>
-  <div class="timeline-content" id="timelineContent"><div class="timeline-ruler-row"><div class="track-heading">OBJECT / CAMERA</div><div id="timeRuler" class="time-ruler" role="slider" tabindex="0" aria-label="Timeline playhead" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"></div></div><div id="timelineRows" class="timeline-rows"></div></div>
+<section class="timeline-panel" id="timelinePanel" aria-label="Animation timeline">
+  <div class="timeline-toolbar"><div class="transport"><button data-action="rewind" class="icon-button" aria-label="Go to start">${icon('rewind')}</button><button data-action="play" id="playButton" class="play-button" aria-label="Play">${icon('play')}</button><span class="timecode" id="timecode" data-current-time>00:00.00</span><span class="timecode-separator">/</span><span class="timecode" id="endTimecode" data-end-time>00:05.00</span></div><input id="playbackSeek" class="playback-seek" type="range" min="0" max="5" step="0.01" value="0" aria-label="Playback position"/><button id="timelineToggle" data-action="timeline" aria-expanded="false" aria-controls="timelineContent">${icon('timeline')}Timeline<span class="timeline-chevron">⌃</span></button></div>
+  <div class="timeline-content" id="timelineContent" hidden><div class="expanded-timeline-heading"><span>Animation</span><label class="duration-control">Duration <input type="number" id="duration" aria-label="Scene duration" min="1" max="60" step="1"/> s</label></div><div class="timeline-ruler-row"><div class="track-heading">OBJECT / CAMERA</div><div id="timeRuler" class="time-ruler" role="slider" tabindex="0" aria-label="Timeline playhead" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"></div></div><div id="timelineRows" class="timeline-rows"></div></div>
 </section>
-<footer class="status-bar"><span id="statusText" role="status">Ready</span><span>LOCAL WORKSPACE<span class="status-divider"></span>LittleTake 0.1</span></footer>
+<footer class="status-bar"><span id="statusText" role="status">Ready</span><button data-action="shortcuts">${icon('help')}Shortcuts</button></footer>
 <input id="openFile" type="file" accept=".json,application/json" hidden/>
+<dialog id="previewDialog" aria-labelledby="previewTitle"><div class="dialog-heading"><h2 id="previewTitle">Shot preview</h2><button data-action="close-preview" aria-label="Close shot preview">✕</button></div><div id="expandedPreview"></div><div class="preview-transport"><button class="play-button" data-action="play" aria-label="Play">${icon('play')}</button><span class="timecode" data-current-time></span><span class="timecode-separator">/</span><span class="timecode" data-end-time></span></div></dialog>
 <dialog id="shortcutsDialog"><div class="dialog-heading"><h2>Make yourself at home.</h2><button data-action="close-shortcuts" aria-label="Close shortcuts">✕</button></div><p class="muted">A few controls for your little stage.</p><dl class="shortcut-list"><dt>Orbit / pan / zoom</dt><dd>Left drag / Middle drag / Scroll</dd><dt>Fly around the scene</dt><dd>Hold right mouse + W A S D · Q / E up & down</dd><dt>Move / rotate / scale</dt><dd>G / R / S</dd><dt>Constrain an axis</dt><dd>X / Y / Z</dd><dt>Focus selection</dt><dd>F</dd><dt>Play / pause</dt><dd>Space</dd><dt>Duplicate / delete</dt><dd>Ctrl D / Delete</dd><dt>Undo / redo</dt><dd>Ctrl Z / Ctrl Shift Z</dd><dt>Save locally</dt><dd>Ctrl S</dd></dl><p class="dialog-note">Animate with Start and End poses. The camera has its own track.</p></dialog>
 `;
 
@@ -88,6 +86,8 @@ let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let statusTimer: ReturnType<typeof setTimeout> | undefined;
 let stage: Stage;
 let storageAvailable = true;
+let timelineOpen = false;
+let libraryTab: 'objects'|'assets' = 'objects';
 let liveFieldEdit=false; let pendingFieldDoc:SceneDocument|null=null; let fieldCommitTimer:ReturnType<typeof setTimeout>|undefined;
 function flushFieldEdit(){clearTimeout(fieldCommitTimer);if(pendingFieldDoc){history.commit(pendingFieldDoc);pendingFieldDoc=null;renderSelection();}}
 const entity = (id = selectedId): SceneEntity | undefined => id === 'camera' ? doc.camera : doc.objects.find(object=>object.id===id);
@@ -102,16 +102,17 @@ function persist() {
 }
 function changed(message?: string) { if(liveFieldEdit){pendingFieldDoc=cloneDocument(doc);clearTimeout(fieldCommitTimer);fieldCommitTimer=setTimeout(flushFieldEdit,450);}else{flushFieldEdit();history.commit(doc);} renderAll(); $('#saveStatus').textContent='Saving…'; clearTimeout(saveTimer); saveTimer=setTimeout(persist,350); if(message)status(message); }
 function pause() { const wasPlaying=playing; playing=false; renderTransport(); if(wasPlaying){renderInspector();syncStage();} }
-function select(id: string | null) { selectedId=id; renderSelection(); renderInspector(); syncStage(); }
+function select(id: string | null) { flushFieldEdit(); selectedId=id; if(id)setLibraryTab('objects'); renderInspector(); renderSelection(); syncStage(); }
 function clamp(value: number,min: number,max: number) { return Math.max(min,Math.min(max,value)); }
 function atEndpoint(item: SceneEntity) { return !item.track || Math.abs(time-item.track.start)<0.025 || Math.abs(time-(item.track.start+item.track.duration))<0.025; }
 function endpoint(item: SceneEntity): 'from'|'to' { return item.track && Math.abs(time-(item.track.start+item.track.duration)) < Math.abs(time-item.track.start) ? 'to':'from'; }
 function setPose(item: SceneEntity, pose: Transform) { const safe=copyPose(pose); safe.position=safe.position.map((v,i)=>clamp(Number.isFinite(v)?v:item.transform.position[i],-1000,1000)) as Transform['position']; safe.rotation=safe.rotation.map((v,i)=>clamp(Number.isFinite(v)?v:item.transform.rotation[i],-360000,360000)) as Transform['rotation']; safe.scale=safe.scale.map((v,i)=>clamp(Number.isFinite(v)?v:item.transform.scale[i],0.01,100)) as Transform['scale']; if(item.track) item.track[endpoint(item)]=safe; else item.transform=safe; }
 function syncStage() { const item=entity(); stage?.update(doc,time,selectedId,playing || Boolean(item && !atEndpoint(item))); }
 function seek(value: number) { time=clamp(value,0,doc.duration); renderTime(); syncStage(); if(!playing)renderInspector(); }
-function renderTransport() { $('#playButton').innerHTML=icon(playing?'pause':'play'); $('#playButton').setAttribute('aria-label',playing?'Pause':'Play'); $('#playButton').classList.toggle('is-playing',playing); }
+function renderTransport() { document.querySelectorAll<HTMLButtonElement>('[data-action="play"]').forEach(button=>{button.innerHTML=icon(playing?'pause':'play');button.setAttribute('aria-label',playing?'Pause':'Play');button.classList.toggle('is-playing',playing);}); }
 function renderTime() {
-  $('#timecode').textContent=timecode(time); $('#endTimecode').textContent=timecode(doc.duration);
+  document.querySelectorAll<HTMLElement>('[data-current-time]').forEach(node=>node.textContent=timecode(time)); document.querySelectorAll<HTMLElement>('[data-end-time]').forEach(node=>node.textContent=timecode(doc.duration));
+  $<HTMLInputElement>('#playbackSeek').max=String(doc.duration); $<HTMLInputElement>('#playbackSeek').value=String(time);
   const fraction=time/doc.duration*100;
   document.querySelectorAll<HTMLElement>('.lane-playhead').forEach(node=>node.style.left=`${fraction}%`);
   $('#timeRuler').setAttribute('aria-valuenow',String(num(time))); $('#timeRuler').setAttribute('aria-valuemax',String(doc.duration));
@@ -123,6 +124,13 @@ function renderSelection() {
   ($('[data-action="undo"]') as HTMLButtonElement).disabled=!history.canUndo;
   ($('[data-action="redo"]') as HTMLButtonElement).disabled=!history.canRedo;
 }
+function setLibraryTab(tab: 'objects'|'assets') {
+  libraryTab=tab; $('#objectsPanel').hidden=tab!=='objects'; $('#assetsPanel').hidden=tab!=='assets';
+  document.querySelectorAll<HTMLButtonElement>('[data-library]').forEach(button=>{const active=button.dataset.library===tab;button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;});
+}
+function setTimelineOpen(open: boolean) {
+  timelineOpen=open; $('#timelinePanel').classList.toggle('expanded',open); $('#timelineContent').hidden=!open; $('#timelineToggle').setAttribute('aria-expanded',String(open));
+}
 function renderOutliner() {
   $('#objectCount').textContent=String(doc.objects.length+1);
   $('#outliner').innerHTML=[...doc.objects,doc.camera].map(item=>`<button class="object-row" data-select="${esc(item.id)}" aria-label="Select ${esc(item.name)}">${icon('kind' in item?item.kind:'camera')}<span>${esc(item.name)}</span>${item.track?'<span class="motion-dot" title="Animated"></span>':''}</button>`).join('');
@@ -133,12 +141,13 @@ function poseFields(label: string,group: keyof Transform,values: number[],disabl
 function renderInspector() {
   if(document.activeElement instanceof HTMLInputElement && $('#inspector').contains(document.activeElement)) return;
   const item=entity();
-  if(!item) { $('#inspector').innerHTML=`<div class="empty-inspector">${icon('move')}<h3>Room for an idea.</h3><p>Select a shape or add one to begin.</p></div>`;return; }
+  if(!item) { $('#inspector').innerHTML=`<div class="empty-inspector">${icon('move')}<h3>Nothing selected</h3><p>Select an object to edit its properties.</p></div>`;return; }
   const pose=evaluateTransform(item,time), locked=playing || !atEndpoint(item), isCamera=item.id==='camera';
   const colors=['#b8ccce','#e8a28e','#f0d48d','#aebfa1','#9faed0','#e5d9c3','#b2a4bc','#555f66'];
   $('#inspector').innerHTML=`<div class="inspector-title"><span class="entity-type">${icon(isCamera?'camera':('kind' in item?item.kind:'cube'))}${isCamera?'CAMERA':('kind' in item?item.kind.toUpperCase():'OBJECT')}</span><div><button data-action="duplicate" class="icon-button" aria-label="Duplicate selection" ${isCamera?'disabled':''}>${icon('duplicate')}</button><button data-action="delete" class="icon-button" aria-label="Delete selection" ${isCamera?'disabled':''}>${icon('trash')}</button></div></div>
   <input class="entity-name" aria-label="Object name" id="entityName" maxlength="120" value="${esc(item.name)}"/>
-  <div class="inspector-section"><div class="section-label">TRANSFORM${item.track?`<span class="pose-badge">${locked?'PREVIEW':endpoint(item)==='from'?'START POSE':'END POSE'}</span>`:''}</div>${poseFields('Position','position',pose.position,locked)}${poseFields('Rotation','rotation',pose.rotation,locked)}${!isCamera?poseFields('Scale','scale',pose.scale,locked):`<label class="property-label">Field of view <span class="input-unit">degrees</span><input type="number" id="cameraFov" aria-label="Camera field of view" min="10" max="120" step="1" value="${doc.camera.fov}"/></label>`}</div>
+  <div class="inspector-section"><div class="section-label">Transform${item.track?`<span class="pose-badge">${locked?'PREVIEW':endpoint(item)==='from'?'START POSE':'END POSE'}</span>`:''}</div>${poseFields('Position','position',pose.position,locked)}${poseFields('Rotation','rotation',pose.rotation,locked)}${!isCamera?poseFields('Scale','scale',pose.scale,locked):`<label class="property-label">Field of view <span class="input-unit">degrees</span><input type="number" id="cameraFov" aria-label="Camera field of view" min="10" max="120" step="1" value="${doc.camera.fov}"/></label>`}<div class="axis-constraint-row"><span>Constrain axis</span><div class="axis-tools" aria-label="Axis constraint"><button data-axis="X" class="axis-x" aria-label="Constrain X axis">X</button><button data-axis="Y" class="axis-y" aria-label="Constrain Y axis">Y</button><button data-axis="Z" class="axis-z" aria-label="Constrain Z axis">Z</button></div></div></div>
+  ${isCamera?`<button class="add-motion camera-align" data-action="use-view">${icon('eye')}Use current scene view</button>`:''}
   ${!isCamera?`<div class="inspector-section"><div class="section-label">MATERIAL</div><div class="color-palette">${colors.map(color=>`<button class="color-swatch ${'color' in item&&item.color===color?'active':''}" style="--swatch:${color}" data-color="${color}" aria-label="Set color ${color}"></button>`).join('')}<label class="custom-color" title="Custom color"><input type="color" aria-label="Custom object color" id="objectColor" value="${'color' in item?item.color:'#ffffff'}"/></label></div></div>`:''}
   <div class="inspector-section animation-section"><div class="section-label">ANIMATION${item.track?`<button class="icon-button" data-action="remove-motion" aria-label="Remove motion">${icon('trash')}</button>`:''}</div>${item.track?`<div class="keyframe-switch"><button data-endpoint="from" class="${!locked&&endpoint(item)==='from'?'active':''}">${icon('key')}Start<span>${num(item.track.start)}s</span></button><button data-endpoint="to" class="${!locked&&endpoint(item)==='to'?'active':''}">${icon('key')}End<span>${num(item.track.start+item.track.duration)}s</span></button></div><div class="timing-fields"><label>Starts at<input id="trackStart" aria-label="Motion start time" type="number" min="0" max="${doc.duration-item.track.duration}" step="0.1" value="${num(item.track.start)}"/></label><label>Duration<input id="trackDuration" aria-label="Motion duration" type="number" min="0.1" max="${doc.duration-item.track.start}" step="0.1" value="${num(item.track.duration)}"/></label></div><p class="property-note">${locked?'Choose Start or End to edit a pose.':'Adjust this pose in the scene or with the fields above.'}</p>`:`<button class="add-motion" data-action="add-motion">${icon('plus')}Add motion</button><p class="property-note">Set a start and end pose. LittleTake fills the space between.</p>`}</div>`;
 }
@@ -150,14 +159,13 @@ function renderTimeline() {
 function renderAll() {
   if(document.activeElement!==$('#projectName')) ($<HTMLInputElement>('#projectName')).value=doc.name;
   ($<HTMLInputElement>('#duration')).value=String(doc.duration);
-  $('#lensLabel').textContent=`${num(doc.camera.fov)}° FOV`;
   renderOutliner();renderTimeline();renderInspector();renderSelection();renderTransport();renderTime();syncStage();
 }
 function addMotion(id=selectedId) {
   const item=entity(id);if(!item || item.track)return;
   pause();selectedId=item.id;const from=copyPose(item.transform),to=copyPose(from);
   if(item.id==='camera')to.position[2]-=1.5;else to.position[0]+=2;
-  item.track={start:0,duration:doc.duration,from,to};time=doc.duration;changed('Motion added · edit Start and End poses');
+  item.track={start:0,duration:doc.duration,from,to};time=doc.duration;setTimelineOpen(true);changed('Motion added · edit Start and End poses');
 }
 function duplicate() {
   const item=entity();if(!item || !('kind' in item))return;
@@ -170,8 +178,8 @@ function duplicate() {
 function nextObjectIndex(){for(let index=1;index<=101;index++)if(!doc.objects.some(item=>item.id===`object-${index}`))return index;throw new Error('Scene object limit reached.');}
 function nextObjectId(){return `object-${nextObjectIndex()}`;}
 function remove(){if(!selectedId || selectedId==='camera')return;doc.objects=doc.objects.filter(item=>item.id!==selectedId);selectedId=doc.objects[0]?.id??'camera';changed('Object deleted');}
-function chooseTool(next:ToolMode){tool=next;stage.setTool(tool);renderSelection();}
-function chooseAxis(next:Axis|null){axis=next;stage.setAxis(axis);renderSelection();}
+function chooseTool(next:ToolMode){tool=next;stage?.setTool(tool);renderSelection();}
+function chooseAxis(next:Axis|null){axis=next;stage?.setAxis(axis);renderSelection();}
 function togglePlay(){if(playing)pause();else{if(time>=doc.duration-0.001)time=0;playing=true;lastFrame=performance.now();renderTransport();syncStage();}}
 function restore(next:SceneDocument|null){if(!next)return;pause();doc=next;time=clamp(time,0,doc.duration);if(!entity())selectedId=doc.objects[0]?.id??'camera';renderAll();persist();}
 function exportScene(){const blob=new Blob([serializeDocument(doc)],{type:'application/json'}),url=URL.createObjectURL(blob),anchor=document.createElement('a');anchor.href=url;anchor.download=`${doc.name.replace(/[^a-z0-9-_ ]/gi,'').trim()||'LittleTake'}.json`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('Scene exported');}
@@ -193,10 +201,12 @@ try {
 
 app.addEventListener('click',event=>{
   const target=(event.target as HTMLElement).closest<HTMLElement>('button');if(!target || target.hasAttribute('disabled'))return;
+  target.closest<HTMLDetailsElement>('details.studio-menu')?.removeAttribute('open');
+  if(target.dataset.library){setLibraryTab(target.dataset.library as 'objects'|'assets');return;}
   if(target.dataset.select){select(target.dataset.select);return;}
   if(target.dataset.tool){chooseTool(target.dataset.tool as ToolMode);return;}
   if(target.dataset.axis){chooseAxis(axis===target.dataset.axis?null:target.dataset.axis as Axis);return;}
-  if(target.dataset.add){if(doc.objects.length>=100){status('This scene supports up to 100 objects');return;}pause();const item=createObject(target.dataset.add as PrimitiveKind,nextObjectIndex());doc.objects.push(item);selectedId=item.id;time=0;changed(`${item.name} added`);return;}
+  if(target.dataset.add){if(doc.objects.length>=100){status('This scene supports up to 100 objects');return;}pause();const item=createObject(target.dataset.add as PrimitiveKind,nextObjectIndex());doc.objects.push(item);selectedId=item.id;time=0;setLibraryTab('objects');changed(`${item.name} added`);return;}
   if(target.dataset.color){const item=entity();if(item && 'color' in item){item.color=target.dataset.color;changed();}return;}
   if(target.dataset.endpoint){const item=entity();if(item?.track){pause();seek(target.dataset.endpoint==='from'?item.track.start:item.track.start+item.track.duration);}return;}
   if(target.dataset.motionFor){addMotion(target.dataset.motionFor);return;}
@@ -216,13 +226,21 @@ app.addEventListener('click',event=>{
     case 'export':exportScene();break;
     case 'open':$<HTMLInputElement>('#openFile').click();break;
     case 'reference':pause();flushFieldEdit();referenceDialog.open();break;
+    case 'timeline':setTimelineOpen(!timelineOpen);break;
+    case 'expand-preview':$('#expandedPreview').appendChild($('#previewFrame'));$<HTMLDialogElement>('#previewDialog').showModal();target.setAttribute('aria-expanded','true');break;
+    case 'close-preview':$<HTMLDialogElement>('#previewDialog').close();break;
     case 'shortcuts':$<HTMLDialogElement>('#shortcutsDialog').showModal();break;
     case 'close-shortcuts':$<HTMLDialogElement>('#shortcutsDialog').close();break;
   }
 });
+$<HTMLDialogElement>('#previewDialog').addEventListener('close',()=>{$('#previewDock').appendChild($('#previewFrame'));$('[data-action="expand-preview"]').setAttribute('aria-expanded','false');});
+$('#previewDialog').addEventListener('keydown',event=>{if(event.code==='Space'){event.preventDefault();if(!event.repeat)togglePlay();}});
+document.addEventListener('pointerdown',event=>{document.querySelectorAll<HTMLDetailsElement>('details.studio-menu[open]').forEach(menu=>{if(!menu.contains(event.target as Node))menu.open=false;});});
+$('.library-tabs').addEventListener('keydown',event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();setLibraryTab(libraryTab==='objects'?'assets':'objects');$<HTMLButtonElement>(`[data-library="${libraryTab}"]`).focus();}});
 const onPropertyInput = (event: Event)=>{
   const input=event.target as HTMLInputElement;if(!(input instanceof HTMLInputElement)||input.type==='file')return;
   const value=Number(input.value),item=entity();
+  if(input.id==='playbackSeek'){pause();seek(value);return;}
   if(input.id==='projectName'){doc.name=input.value.trim().slice(0,120)||'Untitled take';changed();return;}
   if(input.id==='entityName' && item){item.name=input.value.trim().slice(0,120)||'Untitled';changed();return;}
   if(input.id==='objectColor' && item && 'color' in item){item.color=input.value;changed();return;}
@@ -276,7 +294,7 @@ window.addEventListener('keydown',event=>{
   if(key==='x'||key==='y'||key==='z')chooseAxis(axis===key.toUpperCase()?null:key.toUpperCase() as Axis);
   if(key==='f'){event.preventDefault();stage?.focusSelection();}
   if(key==='delete'||key==='backspace'){event.preventDefault();remove();}
-  if(key==='escape'){chooseAxis(null);pause();}
+  if(key==='escape'){chooseAxis(null);pause();document.querySelectorAll<HTMLDetailsElement>('details.studio-menu[open]').forEach(menu=>menu.open=false);}
 });
 function tick(now:number){const delta=Math.min((now-lastFrame)/1000,0.1);lastFrame=now;if(playing){time=Math.min(time+delta,doc.duration);if(time>=doc.duration){pause();renderInspector();}renderTime();syncStage();}requestAnimationFrame(tick);}
 renderAll();persist();status(recovered?'Local scene restored':'Your first take · select a shape and make it move');requestAnimationFrame(tick);

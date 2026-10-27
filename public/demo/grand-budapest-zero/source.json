@@ -1,0 +1,38 @@
+{
+  "id": "grand-budapest-zero",
+  "role": "reference-input",
+  "title": "The Grand Budapest Hotel — Interview with Zero",
+  "demoSelection": "User-confirmed demo reference",
+  "source": {
+    "url": "https://www.youtube.com/watch?v=fmH0tKU0B4g",
+    "publisher": "SearchlightPictures",
+    "startSeconds": 33,
+    "endSeconds": 45
+  },
+  "containsCameraCuts": true,
+  "files": [
+    {
+      "file": "input.mp4",
+      "variant": "original selected clip, byte-for-byte preserved",
+      "bytes": 5846925,
+      "sha256": "3a6dfc6d2e68b7fb29fdadb11b64c67537c9ab3999333caf3bcb35d23244d3c1",
+      "width": 1920,
+      "height": 1080,
+      "durationSeconds": 12.011292
+    },
+    {
+      "file": "input-web.mp4",
+      "variant": "same selected interval, H.264/AAC web copy; no crop or shot removal",
+      "bytes": 2034420,
+      "sha256": "a69a27698922c8381fe9fe2c2d364c2cf3926ef24eafd66ef3fbad786b4048db",
+      "width": 1280,
+      "height": 720,
+      "durationSeconds": 12.011292,
+      "encoding": {
+        "video": "libx264, CRF 24",
+        "audio": "AAC, 96 kbps",
+        "fastStart": true
+      }
+    }
+  ]
+}

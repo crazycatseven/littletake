@@ -16,6 +16,8 @@ AI video models are powerful, but describing actions, camera movement, and relat
 
 Reference clips are analyzed into editable proxy scenes; scenes can also be created manually. Proxy animation provides visual guidance for AI video generation.
 
+Demo input: **The Grand Budapest Hotel — Interview with Zero**, source 0:33–0:45. The [original selected clip](public/demo/grand-budapest-zero/input.mp4), [web copy](public/demo/grand-budapest-zero/input-web.mp4) and [source metadata](public/demo/grand-budapest-zero/source.json) are included in the repository. Load the web copy with **Reference video → Load demo clip**.
+
 ## Features
 
 Desktop scope: mouse/keyboard authoring, text prompts and reference clips.
@@ -33,7 +35,7 @@ Desktop scope: mouse/keyboard authoring, text prompts and reference clips.
 
 | P | Module | Scope | Status |
 | --- | --- | --- | --- |
-| **P0** | **Scene & project model** | A shared editable representation of objects, actions, cameras and timing, with project storage. | Done |
+| **P0** | **Scene & project model** | A shared editable representation of objects, actions, cameras and timing, with project storage. | Partial |
 | **P0** | **Desktop editor** | Mouse/keyboard tools for direct scene editing. | Done |
 | **P0** | **AI scene editing** | Edit layout, objects, motion and cameras through Muse text instructions and scene tools. | Todo |
 | **P0** | **Motion & camera authoring** | Basic object/character motion and independent camera moves. | Done |
@@ -79,6 +81,8 @@ npm run dev
 Vercel deploys `main` to production and creates previews for other branches and pull requests.
 
 The studio includes six primitives, transform tools, an independent shot preview, start/end motion tracks, local saves, JSON export and reference-video import. The in-app **Shortcuts** panel lists navigation controls. AI scene editing and previs image/video export remain planned.
+
+Storage currently keeps one active scene in this browser, with scene JSON import/export. A project library and multiple scenes per project are not implemented yet.
 
 For video analysis, copy `.env.example` to `.env.local` and set `MODEL_API_KEY` and `MUSE_MODEL`. Vite serves the same `/api/reference` handler locally that Vercel runs in production. Model credentials are server-side environment variables.
 
