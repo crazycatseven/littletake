@@ -328,3 +328,55 @@ kbd { margin-left: 6px; color: #a0a492; font-family: inherit; font-size: 9px; fo
   .primitive-grid { padding-bottom: 9px; }
   .library-footer { display: none; }
 }
+
+#referenceDialog { width: min(880px, calc(100vw - 72px)); max-height: calc(100dvh - 64px); overflow-y: auto; border: 1px solid #cdd1c0; border-radius: 12px; padding: 25px 28px 20px; background: var(--paper); color: var(--ink); box-shadow: 0 22px 90px #28321a2b; }
+#referenceDialog::backdrop { background: #29332255; backdrop-filter: blur(5px); }
+.reference-heading { display: flex; align-items: center; justify-content: space-between; }
+.reference-eyebrow { color: #8b927f; font-size: 9px; font-weight: 600; letter-spacing: 1.7px; }
+.reference-heading h2 { margin-top: 7px; font-size: 25px; font-weight: 500; letter-spacing: -.8px; }
+.reference-intro { margin: 10px 0 23px; color: #7c8272; font-size: 12px; }
+.reference-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 25px; }
+.reference-source, .reference-result { min-width: 0; }
+.reference-video-frame { position: relative; display: grid; place-items: center; aspect-ratio: 16 / 9; overflow: hidden; border: 1px solid #d5d7c9; border-radius: 7px; background: #eaeae2; }
+.reference-video-frame video { display: block; width: 100%; height: 100%; object-fit: contain; background: #242a26; }
+.reference-placeholder { display: flex; flex-direction: column; align-items: center; gap: 12px; color: #8f9881; font-size: 10px; }
+.reference-placeholder svg { width: 40px; height: 40px; color: #919e7a; }
+.reference-file-row { display: flex; align-items: center; gap: 11px; margin-top: 12px; }
+.reference-file-row button { flex-shrink: 0; border: 1px solid #c7ceba; border-radius: 5px; padding: 7px 10px; font-size: 11px; }
+.reference-file-row > span { overflow: hidden; color: #8f9683; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.reference-metadata { min-height: 16px; margin-top: 9px; color: #939984; font-size: 10px; }
+.reference-direction-label { display: flex; justify-content: space-between; margin-top: 20px; font-size: 11px; }
+.reference-direction-label span { color: #9ca18f; font-size: 10px; }
+#referenceDirection { box-sizing: border-box; width: 100%; min-height: 77px; resize: vertical; margin-top: 9px; border: 1px solid #d2d6c7; border-radius: 5px; padding: 10px; background: #fbfbf6; color: var(--ink); font: inherit; font-size: 11px; line-height: 1.6; outline: none; }
+#referenceDirection:focus { border-color: #8d9e72; }
+#referenceDirection::placeholder { color: #a6aa9c; }
+.reference-result { padding-left: 23px; border-left: 1px solid #dfe1d5; }
+.reference-result-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #879174; font-size: 8px; font-weight: 600; letter-spacing: 1px; }
+.reference-model { color: #9caa82; font-size: 9px; font-weight: 400; letter-spacing: 0; }
+.reference-empty { display: flex; min-height: 300px; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.reference-draft-icon { margin-bottom: 11px; color: #9cae7a; font-size: 42px; font-weight: 200; }
+.reference-empty h3, .reference-draft-summary h3 { font-size: 17px; font-weight: 500; letter-spacing: -.4px; }
+.reference-empty p { max-width: 240px; margin-top: 11px; color: #919886; font-size: 11px; line-height: 1.8; }
+.reference-output-tags { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 19px; }
+.reference-output-tags span { border: 1px solid #d9dfce; border-radius: 4px; padding: 4px 7px; color: #879775; font-size: 9px; }
+.reference-draft-summary { padding-top: 23px; }
+.reference-draft-summary p { margin-top: 11px; color: #818b76; font-size: 11px; line-height: 1.7; }
+.reference-draft-summary .reference-output-tags { justify-content: flex-start; margin-top: 13px; }
+.reference-object-list { max-height: 145px; overflow-y: auto; margin: 16px 0 0; padding: 0; list-style: none; }
+.reference-object-list li { display: flex; align-items: center; gap: 11px; border-bottom: 1px solid #e5e7dc; padding: 7px 0; font-size: 10px; }
+.reference-kind { min-width: 42px; color: #a1a890; font-size: 8px; text-transform: uppercase; }
+.reference-assumptions { margin-top: 18px; color: #949b87; }
+.reference-assumptions h4 { margin: 0; font-size: 9px; font-weight: 500; }
+.reference-assumptions ul { max-height: 95px; overflow-y: auto; margin: 7px 0 0; padding-left: 15px; font-size: 10px; line-height: 1.65; }
+.reference-assumptions li + li { margin-top: 5px; }
+.reference-error { margin: 16px 0 0; border-left: 2px solid #c38b71; padding: 7px 10px; background: #f3e9df; color: #94654f; font-size: 11px; line-height: 1.6; }
+.reference-footer { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-top: 23px; padding-top: 16px; border-top: 1px solid #dfe1d5; }
+.reference-footer > span { max-width: 330px; color: #939b86; font-size: 10px; line-height: 1.6; }
+.reference-footer > div { display: flex; flex-shrink: 0; gap: 8px; }
+.reference-footer button { border-radius: 5px; padding: 8px 11px; font-size: 11px; }
+.reference-footer .primary-button { border: 1px solid #b8c49b; background: #e4ebd4; color: #526840; }
+.reference-footer button:disabled { opacity: .45; cursor: default; }
+.reference-orbit { width: 38px; height: 38px; margin-bottom: 25px; border: 1px solid #d2dbc0; border-top-color: #829962; border-radius: 50%; animation: reference-spin 1.5s linear infinite; }
+@keyframes reference-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .reference-orbit { animation: none; } }
+@media (max-width: 800px) { #referenceDialog { width: calc(100vw - 42px); padding: 21px; } .reference-layout { gap: 18px; } .reference-result { padding-left: 17px; } }

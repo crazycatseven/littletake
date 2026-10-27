@@ -1,5 +1,5 @@
 import { Euler, MathUtils, Matrix4, Quaternion, Vector3 } from 'three';
-import type { PrimitiveKind, SceneDocument, SceneEntity, SceneObject, Transform, Vec3 } from './types';
+import type { PrimitiveKind, SceneDocument, SceneEntity, SceneObject, Transform, Vec3 } from './types.ts';
 
 const KINDS: readonly PrimitiveKind[] = ['cube', 'sphere', 'cylinder', 'cone', 'plane', 'human'];
 const COLORS = ['#f0a06d', '#80aaa0', '#9b99c8', '#d9bb72', '#9fb9cf', '#b98e97'];

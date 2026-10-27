@@ -24,7 +24,7 @@ Desktop scope: mouse/keyboard authoring, text prompts and reference clips.
 
 | P | Module | Scope | Status |
 | --- | --- | --- | --- |
-| **P0** | **Muse integration** | Video input, scene understanding and structured scene proposals. | Todo |
+| **P0** | **Muse integration** | Video input, scene understanding and structured scene proposals. | Done |
 | **P0** | **Tool Calling & Harness** | Model context, scene tools, execution, validation and feedback loops. | Todo |
 | **P2** | **Vision adapters** | SAM 3.1 Segmentation for reference images/video through Meta Model API. | Todo |
 | **P2** | **SAM 3D Body service** | Separate model deployment and inference for human 3D pose estimation from reference frames. | Todo |
@@ -78,4 +78,10 @@ npm run dev
 
 Vercel deploys `main` to production and creates previews for other branches and pull requests.
 
-The studio includes six primitives, transform tools, an independent shot preview, start/end motion tracks, local saves and JSON export. The in-app **Shortcuts** panel lists navigation controls. AI integration and previs image/video export remain planned.
+The studio includes six primitives, transform tools, an independent shot preview, start/end motion tracks, local saves, JSON export and reference-video import. The in-app **Shortcuts** panel lists navigation controls. AI scene editing and previs image/video export remain planned.
+
+For video analysis, copy `.env.example` to `.env.local` and set `MODEL_API_KEY` and `MUSE_MODEL`. Vite serves the same `/api/reference` handler locally that Vercel runs in production. Model credentials are server-side environment variables.
+
+Provider adapters live in `server/ai/`; the video-analysis workflow and validated scene conversion live in `server/reference/`. The editor consumes ordinary `SceneDocument` data. Replacing the AI provider requires an adapter and a factory entry, without changing the editor.
+
+Reference import currently accepts MP4/WebM clips of 1–60 seconds, up to 3 MB. It builds a coarse single-shot draft with separate objects, basic motion and a camera. Review it before replacing the current scene; Undo restores the previous scene. Geometry, depth and motion are AI estimates, with simplifications shown in the review.

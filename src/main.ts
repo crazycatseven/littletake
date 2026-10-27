@@ -2,6 +2,7 @@ import './style.css';
 import { Stage } from './stage';
 import { createDocument, createObject, cloneDocument, evaluateTransform, parseDocument, serializeDocument, History } from './model';
 import type { Axis, MotionTrack, PrimitiveKind, SceneDocument, SceneEntity, ToolMode, Transform } from './types';
+import { ReferenceDialog } from './reference/dialog';
 
 const STORAGE_KEY = 'littletake.scene.v1';
 const icons: Record<string, string> = {
@@ -38,7 +39,7 @@ app.innerHTML = `
 <header class="app-header">
   <a class="brand" href="/" aria-label="LittleTake Studio"><span class="brand-mark">L<span></span></span><span>LittleTake</span><span class="beta">STUDIO</span></a>
   <div class="project-title"><span class="title-divider"></span><input id="projectName" aria-label="Scene name" maxlength="120"/><span class="file-tag">.scene</span></div>
-  <div class="header-actions"><span id="saveStatus" class="save-status">Local draft</span><button data-action="open">${icon('folder')}<span>Open</span></button><button data-action="save">${icon('save')}<span>Save</span></button><button class="primary-button" data-action="export">${icon('download')}<span>Export scene</span></button></div>
+  <div class="header-actions"><span id="saveStatus" class="save-status">Local draft</span><button data-action="reference">${icon('camera')}<span>Reference video</span></button><button data-action="open">${icon('folder')}<span>Open</span></button><button data-action="save">${icon('save')}<span>Save</span></button><button class="primary-button" data-action="export">${icon('download')}<span>Export scene</span></button></div>
 </header>
 <nav class="tool-header" aria-label="Scene tools">
   <div class="tool-group"><button data-tool="translate" aria-label="Move tool" title="Move · G">${icon('move')}<span>Move</span><kbd>G</kbd></button><button data-tool="rotate" aria-label="Rotate tool" title="Rotate · R">${icon('rotate')}<span>Rotate</span><kbd>R</kbd></button><button data-tool="scale" aria-label="Scale tool" title="Scale · S">${icon('scale')}<span>Scale</span><kbd>S</kbd></button></div>
@@ -175,6 +176,11 @@ function togglePlay(){if(playing)pause();else{if(time>=doc.duration-0.001)time=0
 function restore(next:SceneDocument|null){if(!next)return;pause();doc=next;time=clamp(time,0,doc.duration);if(!entity())selectedId=doc.objects[0]?.id??'camera';renderAll();persist();}
 function exportScene(){const blob=new Blob([serializeDocument(doc)],{type:'application/json'}),url=URL.createObjectURL(blob),anchor=document.createElement('a');anchor.href=url;anchor.download=`${doc.name.replace(/[^a-z0-9-_ ]/gi,'').trim()||'LittleTake'}.json`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('Scene exported');}
 
+const referenceDialog = new ReferenceDialog(next => {
+  pause(); flushFieldEdit(); doc = cloneDocument(next); time = 0; selectedId = doc.objects[0]?.id ?? 'camera';
+  changed('Reference scene loaded · every object and camera is editable'); persist(); stage?.resetView();
+});
+
 try {
   stage=new Stage({viewport:$('#viewport'),preview:$('#preview'),onSelect:select,onStatus:message=>$('#viewHint').textContent=message,onTransform:(id,pose,phase)=>{
     const item=entity(id);if(!item)return;
@@ -209,6 +215,7 @@ app.addEventListener('click',event=>{
     case 'save':persist();status(storageAvailable?'Scene saved on this device':'Local storage unavailable · export the scene to keep it');break;
     case 'export':exportScene();break;
     case 'open':$<HTMLInputElement>('#openFile').click();break;
+    case 'reference':pause();flushFieldEdit();referenceDialog.open();break;
     case 'shortcuts':$<HTMLDialogElement>('#shortcutsDialog').showModal();break;
     case 'close-shortcuts':$<HTMLDialogElement>('#shortcutsDialog').close();break;
   }
@@ -257,7 +264,7 @@ $('#timelineContent').addEventListener('pointerup',()=>finishTimelineDrag());
 $('#timelineContent').addEventListener('pointercancel',()=>finishTimelineDrag(true));
 $('#timeRuler').addEventListener('keydown',event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();pause();seek(time+(event.key==='ArrowRight'?0.1:-0.1));}else if(event.key==='Home'){event.preventDefault();pause();seek(0);}else if(event.key==='End'){event.preventDefault();pause();seek(doc.duration);}});
 window.addEventListener('keydown',event=>{
-  const target=event.target as HTMLElement;if(target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || $<HTMLDialogElement>('#shortcutsDialog').open)return;
+  const target=event.target as HTMLElement;if(target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || document.querySelector('dialog[open]'))return;
   const key=event.key.toLowerCase(),mod=event.ctrlKey||event.metaKey;
   if(mod&&key==='z'){event.preventDefault();flushFieldEdit();restore(event.shiftKey?history.redo():history.undo());return;}
   if(mod&&key==='y'){event.preventDefault();flushFieldEdit();restore(history.redo());return;}
