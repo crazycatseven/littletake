@@ -1,5 +1,5 @@
 /** App-owned request types. Provider SDK/HTTP types stay inside their adapter. */
-export type AIContent = { type: 'text'; text: string } | { type: 'video'; dataUrl: string };
+export type AIContent = { type: 'text'; text: string } | { type: 'video'; dataUrl: string } | { type: 'image'; dataUrl: string };
 export interface StructuredRequest {
   instructions: string;
   content: AIContent[];

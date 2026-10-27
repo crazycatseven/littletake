@@ -105,6 +105,19 @@ kbd { margin-left: auto; color: #a0a893; font-family: inherit; font-size: 10px; 
 .drawer-heading h2 { color: #738363; font-size: 13px; font-weight: 550; }
 .drawer-heading button { color: #9aa88b; }
 .inspector-panel { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 18px 24px; }
+.ai-edit-panel { flex: 0 0 auto; max-height: 44%; overflow: auto; border-top: 1px solid var(--line); padding: 14px 16px; background: #f3f6ed; }
+.ai-edit-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
+.ai-edit-heading label { color: #526b42; font-size: 12px; font-weight: 600; }
+.ai-edit-heading > span { color: #8a977d; font-size: 9px; }
+.ai-edit-panel textarea { display: block; width: 100%; min-height: 62px; resize: vertical; border: 1px solid #d3ddc7; border-radius: 6px; padding: 9px; background: var(--paper); font-size: 12px; line-height: 1.5; }
+.ai-edit-panel textarea:focus { outline: 2px solid #879b64; outline-offset: 1px; }
+.ai-edit-message { margin: 9px 0; color: #6c7b60; font-size: 11px; line-height: 1.55; overflow-wrap: anywhere; }
+.ai-edit-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.ai-edit-actions button { height: 30px; padding: 5px 7px; font-size: 10px; }
+.ai-edit-actions button[aria-pressed="true"] { border-color: #c9d6b6; background: #e7efd9; }
+.ai-view-evidence { display: flex; gap: 7px; margin-bottom: 9px; }
+.ai-view-evidence img { width: 58px; height: 50px; object-fit: contain; border: 1px solid #d4ddca; border-radius: 4px; background: var(--paper); }
+.ai-preview-badge { position: absolute; z-index: 6; bottom: 20px; left: 50%; transform: translateX(-50%); border: 1px solid #b8cba2; border-radius: 6px; padding: 8px 12px; background: #f8fceeef; color: #526b42; font-size: 12px; pointer-events: none; }
 .inspector-title { display: flex; align-items: center; justify-content: space-between; height: 29px; margin-bottom: 8px; }
 .inspector-title > div { display: flex; gap: 2px; }
 .inspector-title .icon-button { width: 27px; height: 27px; padding: 6px; color: #93a080; }
@@ -219,6 +232,12 @@ dialog::backdrop { background: #2b3c2445; backdrop-filter: blur(4px); }
 .shortcut-list dd { justify-content: flex-end; color: #a5b88b; font-size: 10px; text-align: right; }
 #shortcutsDialog .dialog-note { color: #b4c39f; font-size: 10px; }
 #previewDialog { width: min(1000px, calc(100vw - 100px)); }
+#sceneSnapshotDialog { width: min(760px, calc(100vw - 80px)); }
+.scene-snapshot-image { display: block; width: 100%; max-height: calc(100dvh - 220px); margin-top: 16px; border: 1px solid var(--line); border-radius: 6px; background: #e9e7e2; object-fit: contain; }
+.snapshot-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 13px; }
+.snapshot-footer > span { color: #7b8b69; font-size: 11px; }
+.snapshot-footer > div { display: flex; gap: 5px; }
+.snapshot-footer button { font-size: 11px; }
 #expandedPreview { margin-top: 18px; }
 .preview-transport { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 17px; }
 .webgl-error { display: flex; flex-direction: column; justify-content: center; height: 100%; gap: 12px; padding: 35px; color: #81956c; }

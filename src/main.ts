@@ -3,6 +3,8 @@ import { Stage } from './stage';
 import { createDocument, createObject, cloneDocument, evaluateTransform, parseDocument, serializeDocument, History } from './model';
 import type { Axis, MotionTrack, PrimitiveKind, SceneDocument, SceneEntity, ToolMode, Transform } from './types';
 import { ReferenceDialog } from './reference/dialog';
+import { SceneEditPanel } from './scene-edit/panel';
+import type { SceneSnapshot } from './scene-edit/operations';
 
 const STORAGE_KEY = 'littletake.scene.v1';
 const icons: Record<string, string> = {
@@ -52,14 +54,16 @@ app.innerHTML = `
     <div id="assetsPanel" class="library-page" role="tabpanel" aria-labelledby="assetsTab" hidden><p class="library-caption">Add to your scene</p><div class="primitive-grid">${(['cube','sphere','cylinder','cone','plane','human'] as PrimitiveKind[]).map(kind=>`<button data-add="${kind}" aria-label="Add ${kind}">${icon(kind)}<span>${kind[0].toUpperCase()+kind.slice(1)}</span></button>`).join('')}</div></div>
   </aside>
   <section class="stage-panel" aria-label="3D stage">
-    <div class="viewport-heading"><div class="transform-tools" role="toolbar" aria-label="Transform tools"><button data-tool="translate" aria-label="Move tool" title="Move · G">${icon('move')}<span>Move</span></button><button data-tool="rotate" aria-label="Rotate tool" title="Rotate · R">${icon('rotate')}<span>Rotate</span></button><button data-tool="scale" aria-label="Scale tool" title="Scale · S">${icon('scale')}<span>Scale</span></button></div><div><button data-action="focus" title="Focus selection · F">${icon('focus')}Focus</button><button data-action="reset-view" aria-label="Reset scene view">Reset view</button></div></div>
+    <div class="viewport-heading"><div class="transform-tools" role="toolbar" aria-label="Transform tools"><button data-tool="translate" aria-label="Move tool" title="Move · G">${icon('move')}<span>Move</span></button><button data-tool="rotate" aria-label="Rotate tool" title="Rotate · R">${icon('rotate')}<span>Rotate</span></button><button data-tool="scale" aria-label="Scale tool" title="Scale · S">${icon('scale')}<span>Scale</span></button></div><div><button data-action="top-view">Top view</button><button data-action="focus" title="Focus selection · F">${icon('focus')}Focus</button><button data-action="reset-view" aria-label="Reset scene view">Reset view</button></div></div>
     <div id="viewport" class="viewport"></div>
     <section class="shot-panel" aria-label="Shot preview"><div class="shot-heading"><h2>${icon('camera')}Shot preview</h2><button class="icon-button" data-action="expand-preview" aria-label="Expand shot preview" aria-expanded="false" title="Expand preview">${icon('expand')}</button></div><div id="previewDock"><div class="preview-frame" id="previewFrame"><div id="preview" class="preview"></div></div></div><div class="shot-footer"><span><span class="live-dot"></span>Live · 16:9</span><button data-select="camera" id="lensLabel">Edit camera</button></div></section>
     <div class="viewport-caption"><span id="viewHint">Drag to orbit · Scroll to zoom</span></div>
+    <div class="ai-preview-badge" id="aiPreviewBadge" role="status" hidden>Previewing Muse changes</div>
   </section>
   <aside class="properties-drawer" id="propertiesDrawer" aria-label="Inspector">
     <div class="drawer-heading"><h2>Inspector</h2></div>
     <section class="inspector-panel" id="inspector" aria-label="Object properties"></section>
+    <section class="ai-edit-panel" id="sceneAI" aria-label="AI scene editing"></section>
   </aside>
 </main>
 <section class="timeline-panel" id="timelinePanel" aria-label="Animation timeline">
@@ -68,6 +72,7 @@ app.innerHTML = `
 </section>
 <footer class="status-bar"><span id="statusText" role="status">Ready</span><button data-action="shortcuts">${icon('help')}Shortcuts</button></footer>
 <input id="openFile" type="file" accept=".json,application/json" hidden/>
+<dialog id="sceneSnapshotDialog" aria-labelledby="sceneSnapshotTitle"><div class="dialog-heading"><h2 id="sceneSnapshotTitle">Top view</h2><button data-action="close-snapshot" aria-label="Close top view">✕</button></div><img id="sceneSnapshotImage" class="scene-snapshot-image" alt="Top-down scene layout with object IDs"/><div class="snapshot-footer"><span id="sceneSnapshotInfo"></span><div><button data-action="refresh-snapshot">Refresh</button><button data-action="download-snapshot" class="primary-button">Download PNG</button></div></div></dialog>
 <dialog id="previewDialog" aria-labelledby="previewTitle"><div class="dialog-heading"><h2 id="previewTitle">Shot preview</h2><button data-action="close-preview" aria-label="Close shot preview">✕</button></div><div id="expandedPreview"></div><div class="preview-transport"><button class="play-button" data-action="play" aria-label="Play">${icon('play')}</button><span class="timecode" data-current-time></span><span class="timecode-separator">/</span><span class="timecode" data-end-time></span></div></dialog>
 <dialog id="shortcutsDialog"><div class="dialog-heading"><h2>Make yourself at home.</h2><button data-action="close-shortcuts" aria-label="Close shortcuts">✕</button></div><p class="muted">A few controls for your little stage.</p><dl class="shortcut-list"><dt>Orbit / pan / zoom</dt><dd>Left drag / Middle drag / Scroll</dd><dt>Fly around the scene</dt><dd>Hold right mouse + W A S D · Q / E up & down</dd><dt>Move / rotate / scale</dt><dd>G / R / S</dd><dt>Constrain an axis</dt><dd>X / Y / Z</dd><dt>Focus selection</dt><dd>F</dd><dt>Play / pause</dt><dd>Space</dd><dt>Duplicate / delete</dt><dd>Ctrl D / Delete</dd><dt>Undo / redo</dt><dd>Ctrl Z / Ctrl Shift Z</dd><dt>Save locally</dt><dd>Ctrl S</dd></dl><p class="dialog-note">Animate with Start and End poses. The camera has its own track.</p></dialog>
 `;
@@ -88,6 +93,9 @@ let stage: Stage;
 let storageAvailable = true;
 let timelineOpen = false;
 let libraryTab: 'objects'|'assets' = 'objects';
+let editPreview: SceneDocument | null = null;
+let sceneEditor: SceneEditPanel | undefined;
+let sceneSnapshot: SceneSnapshot | null = null;
 let liveFieldEdit=false; let pendingFieldDoc:SceneDocument|null=null; let fieldCommitTimer:ReturnType<typeof setTimeout>|undefined;
 function flushFieldEdit(){clearTimeout(fieldCommitTimer);if(pendingFieldDoc){history.commit(pendingFieldDoc);pendingFieldDoc=null;renderSelection();}}
 const entity = (id = selectedId): SceneEntity | undefined => id === 'camera' ? doc.camera : doc.objects.find(object=>object.id===id);
@@ -100,14 +108,14 @@ function persist() {
   try { localStorage.setItem(STORAGE_KEY,serializeDocument(doc)); $('#saveStatus').textContent='Saved on this device'; storageAvailable=true; }
   catch { $('#saveStatus').textContent='Export to keep your scene'; storageAvailable=false; }
 }
-function changed(message?: string) { if(liveFieldEdit){pendingFieldDoc=cloneDocument(doc);clearTimeout(fieldCommitTimer);fieldCommitTimer=setTimeout(flushFieldEdit,450);}else{flushFieldEdit();history.commit(doc);} renderAll(); $('#saveStatus').textContent='Saving…'; clearTimeout(saveTimer); saveTimer=setTimeout(persist,350); if(message)status(message); }
+function changed(message?: string) { sceneEditor?.sceneChanged(); if(liveFieldEdit){pendingFieldDoc=cloneDocument(doc);clearTimeout(fieldCommitTimer);fieldCommitTimer=setTimeout(flushFieldEdit,450);}else{flushFieldEdit();history.commit(doc);} renderAll(); $('#saveStatus').textContent='Saving…'; clearTimeout(saveTimer); saveTimer=setTimeout(persist,350); if(message)status(message); }
 function pause() { const wasPlaying=playing; playing=false; renderTransport(); if(wasPlaying){renderInspector();syncStage();} }
 function select(id: string | null) { flushFieldEdit(); selectedId=id; if(id)setLibraryTab('objects'); renderInspector(); renderSelection(); syncStage(); }
 function clamp(value: number,min: number,max: number) { return Math.max(min,Math.min(max,value)); }
 function atEndpoint(item: SceneEntity) { return !item.track || Math.abs(time-item.track.start)<0.025 || Math.abs(time-(item.track.start+item.track.duration))<0.025; }
 function endpoint(item: SceneEntity): 'from'|'to' { return item.track && Math.abs(time-(item.track.start+item.track.duration)) < Math.abs(time-item.track.start) ? 'to':'from'; }
 function setPose(item: SceneEntity, pose: Transform) { const safe=copyPose(pose); safe.position=safe.position.map((v,i)=>clamp(Number.isFinite(v)?v:item.transform.position[i],-1000,1000)) as Transform['position']; safe.rotation=safe.rotation.map((v,i)=>clamp(Number.isFinite(v)?v:item.transform.rotation[i],-360000,360000)) as Transform['rotation']; safe.scale=safe.scale.map((v,i)=>clamp(Number.isFinite(v)?v:item.transform.scale[i],0.01,100)) as Transform['scale']; if(item.track) item.track[endpoint(item)]=safe; else item.transform=safe; }
-function syncStage() { const item=entity(); stage?.update(doc,time,selectedId,playing || Boolean(item && !atEndpoint(item))); }
+function syncStage() { const item=entity(), visibleDoc=editPreview??doc; stage?.update(visibleDoc,Math.min(time,visibleDoc.duration),selectedId,Boolean(editPreview) || playing || Boolean(item && !atEndpoint(item))); }
 function seek(value: number) { time=clamp(value,0,doc.duration); renderTime(); syncStage(); if(!playing)renderInspector(); }
 function renderTransport() { document.querySelectorAll<HTMLButtonElement>('[data-action="play"]').forEach(button=>{button.innerHTML=icon(playing?'pause':'play');button.setAttribute('aria-label',playing?'Pause':'Play');button.classList.toggle('is-playing',playing);}); }
 function renderTime() {
@@ -139,14 +147,16 @@ function poseFields(label: string,group: keyof Transform,values: number[],disabl
   return `<div class="property-group"><label class="property-label">${label}</label><div class="vector-inputs">${['X','Y','Z'].map((a,i)=>`<label class="vector-field axis-${a.toLowerCase()}"><span>${a}</span><input type="number" aria-label="${label} ${a}" data-pose="${group}" data-component="${i}" step="${group==='rotation'?5:0.1}" value="${num(values[i])}" ${group==='scale'?'min="0.01" max="100"':''} ${disabled?'disabled':''}/></label>`).join('')}</div></div>`;
 }
 function renderInspector() {
-  if(document.activeElement instanceof HTMLInputElement && $('#inspector').contains(document.activeElement)) return;
-  const item=entity();
+  if(!editPreview && document.activeElement instanceof HTMLInputElement && $('#inspector').contains(document.activeElement)) return;
+  const inspectedDoc=editPreview??doc;
+  const item=selectedId==='camera'?inspectedDoc.camera:inspectedDoc.objects.find(object=>object.id===selectedId);
+  $('#inspector').inert=Boolean(editPreview);
   if(!item) { $('#inspector').innerHTML=`<div class="empty-inspector">${icon('move')}<h3>Nothing selected</h3><p>Select an object to edit its properties.</p></div>`;return; }
-  const pose=evaluateTransform(item,time), locked=playing || !atEndpoint(item), isCamera=item.id==='camera';
+  const pose=evaluateTransform(item,Math.min(time,inspectedDoc.duration)), locked=Boolean(editPreview) || playing || !atEndpoint(item), isCamera=item.id==='camera';
   const colors=['#b8ccce','#e8a28e','#f0d48d','#aebfa1','#9faed0','#e5d9c3','#b2a4bc','#555f66'];
   $('#inspector').innerHTML=`<div class="inspector-title"><span class="entity-type">${icon(isCamera?'camera':('kind' in item?item.kind:'cube'))}${isCamera?'CAMERA':('kind' in item?item.kind.toUpperCase():'OBJECT')}</span><div><button data-action="duplicate" class="icon-button" aria-label="Duplicate selection" ${isCamera?'disabled':''}>${icon('duplicate')}</button><button data-action="delete" class="icon-button" aria-label="Delete selection" ${isCamera?'disabled':''}>${icon('trash')}</button></div></div>
   <input class="entity-name" aria-label="Object name" id="entityName" maxlength="120" value="${esc(item.name)}"/>
-  <div class="inspector-section"><div class="section-label">Transform${item.track?`<span class="pose-badge">${locked?'PREVIEW':endpoint(item)==='from'?'START POSE':'END POSE'}</span>`:''}</div>${poseFields('Position','position',pose.position,locked)}${poseFields('Rotation','rotation',pose.rotation,locked)}${!isCamera?poseFields('Scale','scale',pose.scale,locked):`<label class="property-label">Field of view <span class="input-unit">degrees</span><input type="number" id="cameraFov" aria-label="Camera field of view" min="10" max="120" step="1" value="${doc.camera.fov}"/></label>`}<div class="axis-constraint-row"><span>Constrain axis</span><div class="axis-tools" aria-label="Axis constraint"><button data-axis="X" class="axis-x" aria-label="Constrain X axis">X</button><button data-axis="Y" class="axis-y" aria-label="Constrain Y axis">Y</button><button data-axis="Z" class="axis-z" aria-label="Constrain Z axis">Z</button></div></div></div>
+  <div class="inspector-section"><div class="section-label">Transform${item.track?`<span class="pose-badge">${locked?'PREVIEW':endpoint(item)==='from'?'START POSE':'END POSE'}</span>`:''}</div>${poseFields('Position','position',pose.position,locked)}${poseFields('Rotation','rotation',pose.rotation,locked)}${!isCamera?poseFields('Scale','scale',pose.scale,locked):`<label class="property-label">Field of view <span class="input-unit">degrees</span><input type="number" id="cameraFov" aria-label="Camera field of view" min="10" max="120" step="1" value="${inspectedDoc.camera.fov}"/></label>`}<div class="axis-constraint-row"><span>Constrain axis</span><div class="axis-tools" aria-label="Axis constraint"><button data-axis="X" class="axis-x" aria-label="Constrain X axis">X</button><button data-axis="Y" class="axis-y" aria-label="Constrain Y axis">Y</button><button data-axis="Z" class="axis-z" aria-label="Constrain Z axis">Z</button></div></div></div>
   ${isCamera?`<button class="add-motion camera-align" data-action="use-view">${icon('eye')}Use current scene view</button>`:''}
   ${!isCamera?`<div class="inspector-section"><div class="section-label">MATERIAL</div><div class="color-palette">${colors.map(color=>`<button class="color-swatch ${'color' in item&&item.color===color?'active':''}" style="--swatch:${color}" data-color="${color}" aria-label="Set color ${color}"></button>`).join('')}<label class="custom-color" title="Custom color"><input type="color" aria-label="Custom object color" id="objectColor" value="${'color' in item?item.color:'#ffffff'}"/></label></div></div>`:''}
   <div class="inspector-section animation-section"><div class="section-label">ANIMATION${item.track?`<button class="icon-button" data-action="remove-motion" aria-label="Remove motion">${icon('trash')}</button>`:''}</div>${item.track?`<div class="keyframe-switch"><button data-endpoint="from" class="${!locked&&endpoint(item)==='from'?'active':''}">${icon('key')}Start<span>${num(item.track.start)}s</span></button><button data-endpoint="to" class="${!locked&&endpoint(item)==='to'?'active':''}">${icon('key')}End<span>${num(item.track.start+item.track.duration)}s</span></button></div><div class="timing-fields"><label>Starts at<input id="trackStart" aria-label="Motion start time" type="number" min="0" max="${doc.duration-item.track.duration}" step="0.1" value="${num(item.track.start)}"/></label><label>Duration<input id="trackDuration" aria-label="Motion duration" type="number" min="0.1" max="${doc.duration-item.track.start}" step="0.1" value="${num(item.track.duration)}"/></label></div><p class="property-note">${locked?'Choose Start or End to edit a pose.':'Adjust this pose in the scene or with the fields above.'}</p>`:`<button class="add-motion" data-action="add-motion">${icon('plus')}Add motion</button><p class="property-note">Set a start and end pose. LittleTake fills the space between.</p>`}</div>`;
@@ -181,7 +191,7 @@ function remove(){if(!selectedId || selectedId==='camera')return;doc.objects=doc
 function chooseTool(next:ToolMode){tool=next;stage?.setTool(tool);renderSelection();}
 function chooseAxis(next:Axis|null){axis=next;stage?.setAxis(axis);renderSelection();}
 function togglePlay(){if(playing)pause();else{if(time>=doc.duration-0.001)time=0;playing=true;lastFrame=performance.now();renderTransport();syncStage();}}
-function restore(next:SceneDocument|null){if(!next)return;pause();doc=next;time=clamp(time,0,doc.duration);if(!entity())selectedId=doc.objects[0]?.id??'camera';renderAll();persist();}
+function restore(next:SceneDocument|null){if(!next)return;sceneEditor?.sceneChanged();pause();doc=next;time=clamp(time,0,doc.duration);if(!entity())selectedId=doc.objects[0]?.id??'camera';renderAll();persist();}
 function exportScene(){const blob=new Blob([serializeDocument(doc)],{type:'application/json'}),url=URL.createObjectURL(blob),anchor=document.createElement('a');anchor.href=url;anchor.download=`${doc.name.replace(/[^a-z0-9-_ ]/gi,'').trim()||'LittleTake'}.json`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('Scene exported');}
 
 const referenceDialog = new ReferenceDialog(next => {
@@ -192,12 +202,30 @@ const referenceDialog = new ReferenceDialog(next => {
 try {
   stage=new Stage({viewport:$('#viewport'),preview:$('#preview'),onSelect:select,onStatus:message=>$('#viewHint').textContent=message,onTransform:(id,pose,phase)=>{
     const item=entity(id);if(!item)return;
-    if(phase==='start'){pause();return;}
+    if(phase==='start'){sceneEditor?.sceneChanged();pause();return;}
     setPose(item,pose);
     if(phase==='end')changed('Transform updated');else{renderInspector();syncStage();}
   }});
   stage.setTool(tool);
 } catch(error) { $('#viewport').innerHTML=`<div class="webgl-error"><h2>This stage needs WebGL.</h2><p>Enable hardware acceleration in your browser, then reload.</p><small>${esc(error instanceof Error?error.message:'Renderer could not start.')}</small></div>`; }
+
+sceneEditor=new SceneEditPanel({
+  root:$('#sceneAI'), context:()=>({scene:doc,time,selectedId}), prepare:()=>{pause();flushFieldEdit();},
+  capture:(scene,frame,view)=>{if(!stage)throw new Error('The 3D stage is unavailable.');return stage.captureSnapshot(scene,frame,view);},
+  preview:next=>{editPreview=next;$('#aiPreviewBadge').hidden=!next;pause();renderInspector();syncStage();},
+  apply:(next,base)=>{if(serializeDocument(doc)!==base)return false;doc=cloneDocument(next);time=clamp(time,0,doc.duration);if(!entity())selectedId=doc.objects[0]?.id??'camera';changed('Muse changes applied · Undo to restore');return true;},
+});
+
+function captureTopView() {
+  pause();flushFieldEdit();
+  if(!stage){status('The 3D stage is unavailable.');return;}
+  try {
+    const scene=editPreview??doc;sceneSnapshot=stage.captureSnapshot(scene,Math.min(time,scene.duration),'top_down');
+    $<HTMLImageElement>('#sceneSnapshotImage').src=sceneSnapshot.dataUrl;
+    $('#sceneSnapshotInfo').textContent=`${sceneSnapshot.width} × ${sceneSnapshot.height} · ${sceneSnapshot.time.toFixed(2)}s`;
+    if(!$<HTMLDialogElement>('#sceneSnapshotDialog').open)$<HTMLDialogElement>('#sceneSnapshotDialog').showModal();
+  } catch(error){status((error as Error).message);}
+}
 
 app.addEventListener('click',event=>{
   const target=(event.target as HTMLElement).closest<HTMLElement>('button');if(!target || target.hasAttribute('disabled'))return;
@@ -226,6 +254,9 @@ app.addEventListener('click',event=>{
     case 'export':exportScene();break;
     case 'open':$<HTMLInputElement>('#openFile').click();break;
     case 'reference':pause();flushFieldEdit();referenceDialog.open();break;
+    case 'top-view':case 'refresh-snapshot':captureTopView();break;
+    case 'close-snapshot':$<HTMLDialogElement>('#sceneSnapshotDialog').close();break;
+    case 'download-snapshot':if(sceneSnapshot){const anchor=document.createElement('a');anchor.href=sceneSnapshot.dataUrl;anchor.download='littletake-top-view.png';anchor.click();}break;
     case 'timeline':setTimelineOpen(!timelineOpen);break;
     case 'expand-preview':$('#expandedPreview').appendChild($('#previewFrame'));$<HTMLDialogElement>('#previewDialog').showModal();target.setAttribute('aria-expanded','true');break;
     case 'close-preview':$<HTMLDialogElement>('#previewDialog').close();break;

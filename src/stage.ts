@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { evaluateTransform } from './model';
+import { renderSceneSnapshot } from './scene-snapshot';
+import type { SceneSnapshot, SceneView } from './scene-edit/operations';
 import type { Axis, PrimitiveKind, SceneDocument, SceneObject, StageOptions, ToolMode, Transform } from './types';
 
 interface EntityView {
@@ -64,6 +66,8 @@ export class Stage {
   private frame = 0;
   private lastFrame = 0;
   private disposed = false;
+  private currentDoc: SceneDocument | null = null;
+  private currentTime = 0;
 
   constructor(options: StageOptions) {
     this.options = options;
@@ -145,6 +149,7 @@ export class Stage {
 
   update(doc: SceneDocument, time: number, selectedId: string | null, playing: boolean): void {
     if (this.disposed) return;
+    this.currentDoc = doc; this.currentTime = time;
     const liveIds = new Set(doc.objects.map((object) => object.id));
     for (const [id, view] of this.views) {
       if (liveIds.has(id)) continue;
@@ -236,6 +241,16 @@ export class Stage {
 
   captureView(): { transform: Transform; fov: number } {
     return { transform: this.readPose(this.editorCamera), fov: this.editorCamera.fov };
+  }
+
+  captureSnapshot(doc: SceneDocument, time: number, view: SceneView): SceneSnapshot {
+    if (this.disposed || !this.currentDoc) throw new Error('The stage is not ready to capture an image.');
+    if (this.dragging || this.flyPointer !== null) throw new Error('Finish moving the object or camera before capturing a view.');
+    const previous = { doc: this.currentDoc, time: this.currentTime, selected: this.selectedId, playing: this.playing };
+    try {
+      this.update(doc, time, null, true);
+      return renderSceneSnapshot(this.previewRenderer, this.scene, this.shotCamera, doc.objects.map(item => ({ id: item.id, name: item.name, root: this.views.get(item.id)!.root })), view, time);
+    } finally { this.update(previous.doc, previous.time, previous.selected, previous.playing); }
   }
 
   dispose(): void {

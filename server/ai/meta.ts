@@ -23,23 +23,24 @@ export class MetaProvider implements AIProvider {
           text: { format: { type: 'json_schema', name: request.schemaName, strict: true, schema: request.schema } },
           input: [{ type: 'message', role: 'user', content: request.content.map(part => part.type === 'text'
             ? { type: 'input_text', text: part.text }
+            : part.type === 'image' ? { type: 'input_image', image_url: part.dataUrl }
             : { type: 'input_video', video_url: part.dataUrl }) }],
         }),
       });
     } catch {
-      if (request.signal?.aborted) throw new AIError('cancelled', 'Analysis cancelled.', 499);
+      if (request.signal?.aborted) throw new AIError('cancelled', 'Request cancelled.', 499);
       throw new AIError('provider_unavailable', 'Muse could not finish the request. Please try again.', 504);
     }
     if (!response.ok) {
       // Never echo an upstream error body: it can contain request data or credentials.
-      if (response.status === 402) throw new AIError('credits_required', 'Muse needs API credits before it can analyze this clip.', 503);
+      if (response.status === 402) throw new AIError('credits_required', 'Muse needs API credits before it can finish this request.', 503);
       if (response.status === 401 || response.status === 403) throw new AIError('provider_auth', 'Muse is not authorized on this server.', 503);
       if (response.status === 429) throw new AIError('rate_limited', 'Muse is busy. Please wait a moment and try again.', 429);
-      throw new AIError('provider_error', 'Muse could not analyze this clip. Please try a shorter MP4 or WebM clip.');
+      throw new AIError('provider_error', 'Muse could not finish this request. Please try again.');
     }
     let data: { status?: string; output_text?: string; output?: { content?: { type?: string; text?: string }[] }[] };
     try { data = await response.json(); } catch { throw new AIError('invalid_response', 'Muse returned an unreadable response. Please try again.'); }
-    if (data.status && data.status !== 'completed') throw new AIError('incomplete_response', 'Muse did not finish the scene. Please try a shorter clip.');
+    if (data.status && data.status !== 'completed') throw new AIError('incomplete_response', 'Muse did not finish its response. Please try again.');
     const text = data.output_text ?? data.output?.flatMap(item => item.content ?? []).filter(part => part.type === 'output_text').map(part => part.text ?? '').join('');
     try { if (!text) throw new Error(); return JSON.parse(text); }
     catch { throw new AIError('invalid_response', 'Muse did not return a complete scene. Please try again.'); }
