@@ -194,7 +194,7 @@ export function shotCamera(scene: SceneDocument, shotId: string | null): SceneCa
   const shot = scene.shots.find(item => item.id === shotId);
   return scene.cameras.find(camera => camera.id === shot?.cameraId);
 }
-/** New shots and copies own an independent camera by default. */
+/** Create the first shot in an empty scene, or explicitly duplicate a shot with its own camera. */
 export function addIndependentShot(scene: SceneDocument, source?: Shot): Shot {
   if (scene.shots.length >= 100 || scene.cameras.length >= MAX_CAMERAS) throw new Error('Scene camera or shot limit reached.');
   const ids = new Set([...scene.objects, ...scene.cameras, ...scene.shots].map(item => item.id));

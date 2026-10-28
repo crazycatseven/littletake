@@ -175,11 +175,11 @@ function addScene(){
 }
 function ensureScene(){if(!project.activeSceneId)addScene();}
 function addCamera(){ensureScene();pause();if(doc.cameras.length>=MAX_CAMERAS){status('Scene camera limit reached');return;}const camera=createCamera(nextId('camera',[...doc.objects,...doc.cameras,...doc.shots]),'Camera '+(doc.cameras.length+1));doc.cameras.push(camera);selection.active=camera.id;project.activeShotId=null;changed('Camera added');setSidePanel('inspector');}
-function addShot(useSelectedCamera=false){
+function addShot(){
   ensureScene();pause();
   try{
     if(doc.shots.length>=100)throw new Error('This scene supports up to 100 shots');
-    const camera=useSelectedCamera?doc.cameras.find(item=>item.id===selection.active):undefined;
+    const camera=doc.cameras.find(item=>item.id===selection.active)??shotCamera(doc,project.activeShotId)??doc.cameras[0];
     const shot=camera?createShot(camera,nextId('shot',[...doc.objects,...doc.cameras,...doc.shots]),doc.duration,'Shot '+(doc.shots.length+1)):addIndependentShot(doc);
     if(camera)doc.shots.push(shot);
     project.activeShotId=shot.id;selection.active=shot.cameraId;time=shot.start;setTimelineOpen(true);setSidePanel('inspector');changed('Shot and camera linked · shared scene time');
@@ -545,7 +545,7 @@ app.addEventListener('click',event=>{
     case 'add-scene':addScene();break;
     case 'add-camera':addCamera();break;
     case 'add-shot':addShot();break;
-    case 'camera-shot':addShot(true);break;
+    case 'camera-shot':addShot();break;
     case 'duplicate-shot':duplicateShot();break;
     case 'remove-shot':removeShot();break;
     case 'edit-shot':{const shot=activeShot();if(shot)switchShot(shot.id);else addShot();break;}
