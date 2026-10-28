@@ -41,5 +41,5 @@ test('expert cabinet views hide interior geometry behind closed mirrored doors, 
     return {approved:true,notes:'Closed and open views inspected.',revisedRecipe:null};
   }};
   const result=await generateAsset('A cabinet with mirrored opening doors',provider,library);
-  assert.equal(calls,2);assert.equal(result.job.status,'ready');assert.deepEqual(await library.read(result.asset.id,1),result.asset);
+  assert.equal(calls,2);assert.equal(result.job.status,'ready');assert.deepEqual(await library.read(result.asset.id),result.asset);
 });

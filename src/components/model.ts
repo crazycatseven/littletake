@@ -1,30 +1,36 @@
 import { z } from 'zod';
 import { Euler, MathUtils, Quaternion, Vector3 } from 'three';
 import type { Transform } from '../types.ts';
+import { applyTransformModifiers } from './transform.ts';
 
 export const componentSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('movement'), enabled: z.boolean(), mode: z.enum(['walk', 'drive', 'free']), space: z.enum(['local', 'world']), speed: z.number().min(.1).max(20), turnSpeed: z.number().min(1).max(360) }),
   z.strictObject({ type: z.literal('hinge'), enabled: z.boolean(), speed: z.number().min(1).max(360) }),
+  z.strictObject({ type: z.literal('pivot'), enabled: z.boolean(), offset: z.tuple([z.number().min(-1000).max(1000), z.number().min(-1000).max(1000), z.number().min(-1000).max(1000)]) }),
 ]);
-export const componentsSchema = z.array(componentSchema).max(1);
+export const componentsSchema = z.array(componentSchema).max(2)
+  .refine(items => new Set(items.map(c => c.type)).size === items.length, 'Each component can only be added once.')
+  .refine(items => items.filter(c => c.type !== 'pivot').length <= 1, 'Only one keyboard controller can be attached.');
 export type ObjectComponent = z.infer<typeof componentSchema>;
 export const movement = (mode: 'walk'|'drive'|'free' = 'walk', speed = 1.7): ObjectComponent => ({ type: 'movement', enabled: true, mode, space: 'local', speed, turnSpeed: 90 });
-export interface ComponentField { key: string; label: string; options?: Record<string, string>; min?: number; max?: number; step?: number; unit?: string }
+export const pivotOffset = (offset: [number,number,number] = [0,0,0]): ObjectComponent => ({type:'pivot',enabled:true,offset});
+export const inputController = (components: ObjectComponent[] = []) => components.find(c => c.type !== 'pivot' && c.enabled);
+export interface ComponentField { key: string; label: string; options?: Record<string, string>; vector?: boolean; min?: number; max?: number; step?: number; unit?: string }
 export interface ComponentScript {
-  title: string; fields: ComponentField[]; actions: { id: string; label: string }[];
+  title: string; description: string; addable?: boolean; fields: ComponentField[]; actions: { id: string; label: string }[];
   help(component: ObjectComponent): string;
-  update(component: ObjectComponent, pose: Transform, keys: Set<string>, dt: number, runtime: { velocity: number; yaw: number }): void;
+  update?(component: ObjectComponent, pose: Transform, keys: Set<string>, dt: number, runtime: { velocity: number; yaw: number }): void;
 }
 export const componentScripts: Record<ObjectComponent['type'], ComponentScript> = {
   movement: {
-    title: '移动操控', actions: [{ id: 'control', label: '开始操控' }],
+    title: 'Movement Controller', description: 'Walk, drive, or move objects with the keyboard.', actions: [{ id: 'control', label: 'Start Control' }],
     fields: [
-      { key: 'mode', label: '操作方式', options: { walk: '人物行走', drive: '车辆驾驶', free: '自由移动' } },
-      { key: 'space', label: '移动坐标系', options: { local: '自身坐标（Local）', world: '世界坐标（World）' } },
-      { key: 'speed', label: '移动速度', min: .1, max: 20, step: .1, unit: 'm/s' },
-      { key: 'turnSpeed', label: '转向速度', min: 1, max: 360, step: 15, unit: '°/s' },
+      { key: 'mode', label: 'Movement Mode', options: { walk: 'Walk', drive: 'Drive', free: 'Free Move' } },
+      { key: 'space', label: 'Movement Space', options: { local: 'Local', world: 'World' } },
+      { key: 'speed', label: 'Move Speed', min: .1, max: 20, step: .1, unit: 'm/s' },
+      { key: 'turnSpeed', label: 'Turn Speed', min: 1, max: 360, step: 15, unit: '°/s' },
     ],
-    help: c => c.type === 'movement' ? `W/S ${c.space === 'local' ? '沿自身前进、后退' : '沿世界 Z 轴移动'}，A/D 原地左转、右转。${c.mode === 'drive' ? '空格刹车。' : 'Shift 加速。'}${c.mode === 'free' ? 'F/V 升降。' : ''}` : '',
+    help: c => c.type === 'movement' ? `W/S ${c.space === 'local' ? 'move forward/back in the object’s local direction' : 'move along the world Z axis'}. A/D turn left/right. ${c.mode === 'drive' ? 'Space brakes.' : 'Shift moves faster.'}${c.mode === 'free' ? ' F/V move up/down.' : ''}` : '',
     update(c, pose, keys, dt, runtime) {
       if (c.type !== 'movement' || !c.enabled) return;
       const rotation=new Quaternion().setFromEuler(new Euler(...pose.rotation.map(MathUtils.degToRad) as Transform['rotation'],'XYZ'));
@@ -40,9 +46,29 @@ export const componentScripts: Record<ObjectComponent['type'], ComponentScript> 
     },
   },
   hinge: {
-    title: '转轴开合', actions: [{ id: 'control', label: '开始操控' }],
-    fields: [{ key: 'speed', label: '开合速度', min: 1, max: 360, step: 5, unit: '°/s' }],
-    help: () => 'W 打开，S 关闭。绕对象原点的 Y 轴转动。',
-    update(c, pose, keys, dt, runtime) { if (c.enabled) pose.rotation[1] = MathUtils.clamp(pose.rotation[1] + (Number(keys.has('w')) - Number(keys.has('s'))) * c.speed * dt, runtime.yaw, runtime.yaw + 120); },
+    title: 'Legacy Rotation Controller', description: 'Retains the controls of an older project.', addable: false, actions: [{ id: 'control', label: 'Start Control' }],
+    fields: [{ key: 'speed', label: 'Rotation Speed', min: 1, max: 360, step: 5, unit: '°/s' }],
+    help: () => 'W opens, S closes. Rotates the whole object around its Y pivot, up to 120° from the starting angle.',
+    update(c, pose, keys, dt, runtime) { if (c.type === 'hinge' && c.enabled) pose.rotation[1] = MathUtils.clamp(pose.rotation[1] + (Number(keys.has('w')) - Number(keys.has('s'))) * c.speed * dt, runtime.yaw, runtime.yaw + 120); },
+  },
+  pivot: {
+    title: 'Pivot Offset', description: 'Choose the local center for rotation and scale without moving the object.', actions: [],
+    fields: [{key:'offset',label:'Pivot Offset',vector:true,min:-1000,max:1000,step:.05,unit:'m'}],
+    help: () => 'Local XYZ offset. Moving the pivot keeps the object and existing motion in place. Rotation and scale use this center.',
   },
 };
+
+/** Input produces a transform, then modifiers resolve the final geometry pose. */
+export function updateComponents(components: ObjectComponent[] | undefined, pose: Transform, keys: Set<string>, dt: number, runtime: {velocity:number;yaw:number}): void {
+  const before = structuredClone(pose), controller = inputController(components);
+  if (!controller) return;
+  componentScripts[controller.type].update?.(controller, pose, keys, dt, runtime);
+  applyTransformModifiers(before, pose, components);
+  pose.position = pose.position.map(value => MathUtils.clamp(value, -990, 990)) as Transform['position'];
+}
+
+export function componentAddReason(components: ObjectComponent[], type: ObjectComponent['type']): string {
+  if (components.some(c => c.type === type)) return 'Added';
+  if (type !== 'pivot' && components.some(c => c.type !== 'pivot')) return 'Remove the current controller first';
+  return '';
+}

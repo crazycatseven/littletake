@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { assetReferenceSchema, assetSummary, evaluateAsset, type AssetDefinition } from '../../src/assets/model.ts';
+import { assetReferenceSchema, assetSummary, evaluateAsset, migrateAssetValue, type AssetDefinition } from '../../src/assets/model.ts';
 import { editPlanSchema, operationSchema, type SceneOperation } from '../../src/scene-edit/operations.ts';
 import type { ProjectContent } from '../../src/types.ts';
 import type { SceneEditDiagnostic } from '../../src/scene-edit/diagnostics.ts';
@@ -8,7 +8,7 @@ import { AssetLibrary } from './library.ts';
 import { generateAsset } from './expert.ts';
 
 const id = assetReferenceSchema.shape.id;
-const reference = z.strictObject({ assetId: id, version: assetReferenceSchema.shape.version });
+const reference = z.strictObject({ assetId: id });
 const transform = z.strictObject({ position: z.tuple([z.number(), z.number(), z.number()]), rotation: z.tuple([z.number(), z.number(), z.number()]), scale: z.tuple([z.number().positive(), z.number().positive(), z.number().positive()]) });
 const schemas = {
   search_assets: z.strictObject({ query: z.string().trim().min(1).max(500) }),
@@ -22,7 +22,7 @@ const descriptions: Record<keyof typeof schemas, string> = {
   read_asset: 'Read a candidate and inspect its three-view preview, dimensions and named parts before deciding to reuse it.',
   generate_asset: 'Delegate a missing asset to the dedicated modeling expert. Requires a preceding searchId and a concrete explanation why its candidates do not fit. Describe appearance, dimensions and movable parts; never write geometry yourself. Waits for bounded expert construction, rendered inspection and registration; returns a durable jobId and ready asset or an error. Never retry a failed job in the same turn.',
   get_asset_job: 'Read the persisted status/result of an asset expert job; does not start or retry generation.',
-  instantiate_asset: 'Prepare an instance of a read or generated asset at a scene transform. Y up, +Z forward; use bounds.min/max for its local origin (new generation defaults to bottom-centre; edited versions preserve it). Returns application-assigned objectId and placementId. Include {type:"place_asset",sceneId,placementId} at the correct position in the final operations, after add_scene and before actions using objectId. This prepares a preview, never applies changes itself.',
+  instantiate_asset: 'Prepare an instance of a read or generated asset at a scene transform. Y up, +Z forward; use bounds.min/max for its local origin (new generation defaults to bottom-centre; edits preserve it). Returns application-assigned objectId and placementId. Include {type:"place_asset",sceneId,placementId} at the correct position in the final operations, after add_scene and before actions using objectId. This prepares a preview, never applies changes itself.',
 };
 export const assetToolDefinitions: ToolDefinition[] = Object.entries(schemas).map(([name, schema]) => ({ name, description: descriptions[name as keyof typeof schemas], parameters: z.toJSONSchema(schema, { target: 'draft-7' }) }));
 export const directorPlanSchema = editPlanSchema.extend({ operations: z.array(z.union([
@@ -56,7 +56,7 @@ export class AssetTools {
     if (this.cache.has(key)) return this.cache.get(key) as { result: unknown; image?: string };
     let response: { result: unknown; image?: string };
     const expose = async (asset: AssetDefinition) => {
-      this.readAssets.set(`${asset.id}@${asset.version}`, asset);
+      this.readAssets.set(asset.id, asset);
       return { result: { ...assetSummary(asset), parts: evaluateAsset(asset).parts.map(p => ({ id: p.id, name: p.name, parentId: p.parentId, sourceId:p.sourceId, generatedBy:p.generatedBy, joint: p.joint })) }, image: 'data:image/png;base64,' + Buffer.from(await this.library.preview(asset)).toString('base64') };
     };
     switch (name) {
@@ -65,7 +65,7 @@ export class AssetTools {
         this.searches.set(searchId, result); response = { result: { searchId, ...result } }; break;
       }
       case 'read_asset': {
-        const args = schemas.read_asset.parse(raw); response = await expose(await this.library.read(args.assetId, args.version, this.project.assets)); break;
+        const args = schemas.read_asset.parse(raw); response = await expose(await this.library.read(args.assetId, this.project.assets)); break;
       }
       case 'generate_asset': {
         const args = schemas.generate_asset.parse(raw);
@@ -75,15 +75,15 @@ export class AssetTools {
       }
       case 'get_asset_job': {
         const args = schemas.get_asset_job.parse(raw), job = await this.library.readJob(args.jobId);
-        response = { result: { id: job.id, status: job.status, brief: job.brief, asset: job.asset, summary: job.summary, error: job.error } }; break;
+        response = { result: { id: job.id, status: job.status, brief: job.brief, asset: migrateAssetValue(job.asset), summary: migrateAssetValue(job.summary), error: job.error } }; break;
       }
       case 'instantiate_asset': {
-        const args = schemas.instantiate_asset.parse(raw), asset = this.readAssets.get(`${args.assetId}@${args.version}`);
+        const args = schemas.instantiate_asset.parse(raw), asset = this.readAssets.get(args.assetId);
         if (!asset) throw new Error('Read the asset before preparing its instance.');
         const placementId = crypto.randomUUID(), objectId = 'object-' + crypto.randomUUID();
         const operation: SceneOperation = { type: 'instantiate_asset', sceneId: args.sceneId, id: objectId, name: args.name, asset, transform: args.transform, track: null };
         operationSchema.parse(operation); this.placements.set(placementId, operation);
-        response = { result: { placementId, objectId, sceneId: args.sceneId, assetId: asset.id, version: asset.version, dimensions: asset.bounds.size, bounds: asset.bounds, origin: 'asset local origin; see bounds', operation: { type: 'place_asset', sceneId: args.sceneId, placementId } } }; break;
+        response = { result: { placementId, objectId, sceneId: args.sceneId, assetId: asset.id, dimensions: asset.bounds.size, bounds: asset.bounds, origin: 'asset local origin; see bounds', operation: { type: 'place_asset', sceneId: args.sceneId, placementId } } }; break;
       }
       default: throw new Error('Unknown asset tool.');
     }

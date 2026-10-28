@@ -2,10 +2,13 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { evaluateTransform } from './model';
+import { activePivot, fromPivotPose, toPivotPose } from './components/transform';
 import { createAssetGroup, disposeAssetGroup, type AssetDefinition } from './assets/model';
 import { renderSceneSnapshot } from './scene-snapshot';
 import { configureHandles } from './placement/gizmo';
 import { ViewNavigation } from './placement/navigation';
+import type { AlignmentEdge, PrecisionSettings } from './placement/panel';
+import { ShotRenderer } from './shot-export/renderer';
 import type { PoseUpdate } from './placement/transforms';
 import type { SceneSnapshot, SceneView } from './scene-edit/operations';
 import type { Axis, PrimitiveKind, SceneDocument, SceneObject, StageOptions, ToolMode, Transform } from './types';
@@ -37,7 +40,15 @@ const NAV_HINT = 'Drag empty space to orbit · Shift drag to box select · Ctrl 
 
 /** Two persistent views of one scene: an editor with tools, and a clean shot camera. */
 export class Stage {
+  private precision: PrecisionSettings = { space: 'world', snap: false, move: .25, rotate: 15 };
   private currentAssets: AssetDefinition[] = [];
+  private assetKeys = new WeakMap<AssetDefinition, string>();
+  private assetKey(asset: AssetDefinition | undefined): string | undefined {
+    if (!asset) return undefined;
+    let key = this.assetKeys.get(asset);
+    if (!key) { key = JSON.stringify(asset); this.assetKeys.set(asset, key); }
+    return key;
+  }
   private controlled: { id: string; pose: Transform } | null = null;
   private ghost: THREE.Group | null = null;
   private readonly forwardArrow = new THREE.ArrowHelper(new THREE.Vector3(0,0,1),new THREE.Vector3(),1.2,0x669bb1,.22,.13);
@@ -56,6 +67,7 @@ export class Stage {
   private readonly navigation: ViewNavigation;
   private readonly selectionBox = document.createElement('div');
   private readonly groupPivot = new THREE.Group();
+  private readonly objectPivot = new THREE.Group();
   private readonly dragPoses = new Map<string, Transform>();
   private dragPivot = new THREE.Matrix4();
   private lastAxisPress: { axis: string | null; x: number; y: number; at: number } | null = null;
@@ -145,7 +157,7 @@ export class Stage {
     this.gizmoHelper.traverse((node) => node.layers.set(1));
     this.gizmo.getRaycaster().layers.set(1);
     this.scene.add(this.gizmoHelper);
-    this.scene.add(this.groupPivot);
+    this.scene.add(this.groupPivot, this.objectPivot);
     this.gizmo.addEventListener('mouseDown', this.onGizmoStart);
     this.gizmo.addEventListener('objectChange', this.onGizmoChange);
     this.gizmo.addEventListener('mouseUp', this.onGizmoEnd);
@@ -186,6 +198,7 @@ export class Stage {
 
   update(doc: SceneDocument, time: number, selectedIds: string[], playing: boolean, shotId: string | null = doc.shots[0]?.id ?? null, assets: AssetDefinition[] = []): void {
     if (this.disposed) return;
+    selectedIds = selectedIds.filter(id => !doc.objects.find(item => item.id === id)?.hidden);
     const selectedId = selectedIds.at(-1) ?? null;
     this.currentDoc = doc; this.currentTime = time; this.currentShotId = shotId;
     this.currentAssets = assets;
@@ -201,7 +214,7 @@ export class Stage {
     }
     for (const object of doc.objects) {
       let view = this.views.get(object.id);
-      const assetKey=object.asset?`${object.asset.id}@${object.asset.version}`:undefined;
+      const assetKey=this.assetKey(this.currentAssets.find(asset=>asset.id===object.asset?.id));
       if (!view || view.kind !== object.kind || view.assetKey !== assetKey) {
         if (view) {
           this.scene.remove(view.root);
@@ -220,6 +233,7 @@ export class Stage {
         if(object.asset)view.root.traverse(node=>{if(node instanceof THREE.Mesh && node.userData.baseColor)(node.material as THREE.MeshStandardMaterial).color.set(node.userData.baseColor).multiply(new THREE.Color(object.color));});
       }
       view.root.name = object.name;
+      view.root.visible = !object.hidden;
       if (!this.dragPoses.has(object.id)) this.applyPose(view.root, this.controlled?.id===object.id?this.controlled.pose:evaluateTransform(object, time));
     }
     const shot = doc.shots.find(item => item.id === shotId);
@@ -246,9 +260,15 @@ export class Stage {
   setTool(mode: ToolMode): void {
     this.tool = mode;
     this.gizmo.setMode(mode);
-    this.gizmo.setSpace(mode === 'scale' && this.selectedIds.length < 2 ? 'local' : 'world');
     this.syncSelection();
     this.options.onStatus(`${mode[0].toUpperCase()}${mode.slice(1)}${this.axis ? ` on ${this.axis}` : ''} · Drag a colored handle · F to focus`);
+  }
+
+  setPrecision(settings: PrecisionSettings): void {
+    this.precision = {...settings};
+    this.gizmo.setTranslationSnap(settings.snap ? settings.move : null);
+    this.gizmo.setRotationSnap(settings.snap ? settings.rotate * DEG : null);
+    this.syncSelection();
   }
 
   setControlled(value: {id:string;pose:Transform;world?:boolean}|null): void {
@@ -262,7 +282,7 @@ export class Stage {
     this.pointer.set(clientX===undefined?0:(clientX-rect.left)/rect.width*2-1,clientY===undefined?0:-(clientY-rect.top)/rect.height*2+1);
     this.scene.updateMatrixWorld(true);this.editorCamera.updateMatrixWorld(true);this.raycaster.setFromCamera(this.pointer,this.editorCamera);
     let point=this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0,1,0),0),new THREE.Vector3());
-    const surface=this.raycaster.intersectObjects([...this.views.values()].map(v=>v.root),true).find(hit=>hit.face && hit.face.normal.clone().transformDirection(hit.object.matrixWorld).y>.65);
+    const surface=this.raycaster.intersectObjects([...this.views.values()].filter(v=>v.root.visible).map(v=>v.root),true).find(hit=>hit.face && hit.face.normal.clone().transformDirection(hit.object.matrixWorld).y>.65);
     if(surface && (!point || surface.distance < point.distanceTo(this.raycaster.ray.origin)))point=surface.point;
     if(!point || point.toArray().some(v=>Math.abs(v)>990))return null;
     const pose:Transform=structuredClone(asset.template?.transform??{position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]});
@@ -326,8 +346,15 @@ export class Stage {
     const previous = { doc: this.currentDoc, time: this.currentTime, selected: [...this.selectedIds], playing: this.playing, shotId: this.currentShotId, assets:this.currentAssets };
     try {
       this.update(doc, time, [], true, shotId, assets);
-      return renderSceneSnapshot(this.previewRenderer, this.scene, this.shotCamera, doc.objects.map(item => ({ id: item.id, name: item.name, root: this.views.get(item.id)!.root })), view, time, this.previewCameraId);
+      return renderSceneSnapshot(this.previewRenderer, this.scene, this.shotCamera, doc.objects.filter(item=>!item.hidden).map(item => ({ id: item.id, name: item.name, root: this.views.get(item.id)!.root })), view, time, this.previewCameraId);
     } finally { this.update(previous.doc, previous.time, previous.selected, previous.playing, previous.shotId,previous.assets); }
+  }
+
+  createShotRenderer(cameraId: string): ShotRenderer {
+    if (!this.currentDoc || this.disposed || this.dragging) throw new Error('Finish editing before exporting a shot.');
+    const roots = [...this.views.values()].map(view => view.root);
+    const environment = this.scene.children.filter(node => node instanceof THREE.Light || (node instanceof THREE.Mesh && node.layers.isEnabled(0)));
+    return new ShotRenderer(this.currentDoc, cameraId, [...environment, ...roots], this.scene.background, this.scene.fog);
   }
 
   dispose(): void {
@@ -439,10 +466,10 @@ export class Stage {
     const accent = material.clone();
     accent.color.multiplyScalar(0.72);
     if(object.kind==='asset'){
-      const asset=this.currentAssets.find(a=>a.id===object.asset?.id&&a.version===object.asset.version);
+      const asset=this.currentAssets.find(a=>a.id===object.asset?.id);
       if(!asset)throw new Error('Missing asset: '+object.name);
       const group=createAssetGroup(asset);root.add(group);group.traverse(node=>{if(node instanceof THREE.Mesh)(node.material as THREE.MeshStandardMaterial).color.multiply(new THREE.Color(object.color));});
-      return {root,bounds:new THREE.Box3().setFromObject(root),kind:object.kind,material,accent,color:object.color,assetKey:`${asset.id}@${asset.version}`,disposeAsset:()=>disposeAssetGroup(group)};
+      return {root,bounds:new THREE.Box3().setFromObject(root),kind:object.kind,material,accent,color:object.color,assetKey:this.assetKey(asset),disposeAsset:()=>disposeAssetGroup(group)};
     }
     if (object.kind === 'plane') material.side = THREE.DoubleSide;
     const add = (kind: string, x: number, y: number, z: number, sx: number, sy: number, sz: number, dark = false): THREE.Mesh => {
@@ -596,15 +623,21 @@ export class Stage {
   private getSelectedObject(): THREE.Object3D | null {
     if (this.selectedIds.length > 1) return this.groupPivot;
     if (this.selectedId !== null && this.selectedId === this.iconCameraId) return this.cameraIcon;
+    if (activePivot(this.currentDoc?.objects.find(item => item.id === this.selectedId)?.components)) return this.objectPivot;
     return this.selectedId ? this.views.get(this.selectedId)?.root ?? null : null;
   }
 
   private syncSelection(): void {
     if (this.selectedIds.length > 1 && !this.dragging) {
-      this.groupPivot.position.fromArray(this.selectionCenter()); this.groupPivot.rotation.set(0, 0, 0); this.groupPivot.scale.setScalar(1); this.groupPivot.updateMatrixWorld();
+      this.groupPivot.position.fromArray(this.selectionCenter());
+      this.groupPivot.quaternion.copy(this.precision.space === 'local' ? this.rootFor(this.selectedId!)!.quaternion : new THREE.Quaternion());
+      this.groupPivot.scale.setScalar(1); this.groupPivot.updateMatrixWorld();
+    } else if (this.selectedId && !this.dragging) {
+      const item = this.currentDoc?.objects.find(item => item.id === this.selectedId), root = this.rootFor(this.selectedId);
+      if (item && root) { this.applyPose(this.objectPivot, toPivotPose(this.readPose(root), item.components)); this.objectPivot.updateMatrixWorld(); }
     }
     this.uniformHandles(this.selectedIds.length > 1);
-    this.gizmo.setSpace(this.tool === 'scale' && this.selectedIds.length < 2 ? 'local' : 'world');
+    this.gizmo.setSpace(this.tool === 'scale' && this.selectedIds.length < 2 ? 'local' : this.precision.space);
     this.syncAxis();
     const selected = this.getSelectedObject();
     if (!selected || this.playing) {
@@ -656,6 +689,9 @@ export class Stage {
         const root = this.rootFor(id)!; this.applyPose(root, pose); root.updateMatrix();
         delta.clone().multiply(root.matrix).decompose(root.position, root.quaternion, root.scale);
       }
+    } else if (object === this.objectPivot) {
+      const item = this.currentDoc?.objects.find(item => item.id === this.dragEntityId), root = this.rootFor(this.dragEntityId);
+      if (item && root) this.applyPose(root, fromPivotPose(this.readPose(object), item.components));
     }
     if (this.dragEntityId !== null && this.dragEntityId === this.iconCameraId) this.copyIconToShot();
     if (!this.options.onTransform(this.currentUpdates(), 'change', this.dragPoses.size > 1)) this.finishGizmo(true);
@@ -688,7 +724,7 @@ export class Stage {
   }
 
   transformGroup(group: 'position' | 'rotation' | 'scale', index: number, value: number): void {
-    if (this.selectedIds.length < 2 || !Number.isFinite(value)) return;
+    if (!this.selectedIds.length || !Number.isFinite(value)) return;
     const center = new THREE.Vector3().fromArray(this.selectionCenter());
     const delta = new THREE.Matrix4();
     if (group === 'position') {
@@ -704,6 +740,23 @@ export class Stage {
     }));
   }
 
+  alignSelection(axis: number, edge: AlignmentEdge): void {
+    if (this.controlled || this.dragging || this.playing) return;
+    const ids = this.selectedIds.filter(id => this.views.has(id));
+    if (ids.length < 2) return;
+    const coordinate = (id: string) => {
+      const view = this.views.get(id)!; view.root.updateWorldMatrix(true, true);
+      const bounds = view.bounds.clone().applyMatrix4(view.root.matrixWorld);
+      return (edge === 'center' ? bounds.getCenter(new THREE.Vector3()) : bounds[edge]).getComponent(axis);
+    };
+    const target = coordinate(ids.at(-1)!);
+    this.applyPlacement(ids.map(id => {
+      const transform = this.readPose(this.views.get(id)!.root);
+      transform.position[axis] += target - coordinate(id);
+      return {id, transform};
+    }));
+  }
+
   dropSelection(): void {
     if (this.controlled || this.dragging) return;
     const ids = this.selectedIds.filter(id => this.views.has(id)), pending = new Set(ids);
@@ -714,7 +767,7 @@ export class Stage {
     try {
       for (const id of ordered) {
         const view = this.views.get(id)!, box = boxFor(id);
-        const supports = [...this.views].filter(([other]) => !pending.has(other)).map(([, value]) => value.root);
+        const supports = [...this.views].filter(([other, value]) => !pending.has(other) && value.root.visible).map(([, value]) => value.root);
         supports.forEach(root => root.updateWorldMatrix(true, true));
         let height = 0;
         // Sample inside the actual rotated footprint rather than the corners of its world AABB.
@@ -742,7 +795,7 @@ export class Stage {
     this.scene.updateMatrixWorld(true);
     this.editorCamera.updateMatrixWorld(true);
     this.raycaster.setFromCamera(this.pointer, this.editorCamera);
-    const roots = [...this.views.values()].map((view) => view.root);
+    const roots = [...this.views.values()].filter(view => view.root.visible).map((view) => view.root);
     if (this.cameraIcon.visible) roots.push(this.cameraIcon);
     const hits = this.raycaster.intersectObjects(roots, true);
     for (const hit of hits) {
@@ -835,6 +888,7 @@ export class Stage {
     const rect = this.renderer.domElement.getBoundingClientRect(), ids: string[] = [];
     this.editorCamera.updateMatrixWorld(true);
     for (const [id, view] of this.views) {
+      if (!view.root.visible) continue;
       view.root.updateWorldMatrix(true, false);
       const points = this.boundCorners(view.bounds).map(point => point.applyMatrix4(view.root.matrixWorld).project(this.editorCamera)).filter(point => point.z >= -1 && point.z <= 1);
       if (!points.length) continue;

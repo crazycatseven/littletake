@@ -1,0 +1,72 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { Color } from 'three';
+import { AssetLibrary } from './library.ts';
+import { createAssetsHandler } from './api.ts';
+import { builtinAssets, instantiateAsset, linkObjectAsset, saveObjectAsset } from '../../src/assets/library.ts';
+import { draftFromAsset, editAsset, updateAssetInstances } from '../../src/assets/edit.ts';
+import { createEmptyScene, createObject, History } from '../../src/model.ts';
+import { createProject, parseProject, serializeProject } from '../../src/project/storage.ts';
+import { projectContent } from '../../src/project/model.ts';
+import { movement } from '../../src/components/model.ts';
+
+test('folders and empty directories persist; moves, renames, edit saves and interrupted-registration retries preserve asset IDs', async () => {
+  const directory=await mkdtemp(path.join(tmpdir(),'littletake-folders-')),library=new AssetLibrary(directory);
+  const handler=createAssetsHandler(library,()=>{throw new Error('Library operations must not call a model');});
+  const post=(input:unknown)=>handler(new Request('http://localhost/api/assets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(input)}));
+  const folders=await Promise.all(['Props/Cabinets','Props/Empty','Sets/Lobby'].map(folder=>post({action:'create_folder',folder})));
+  assert.deepEqual(folders.map(r=>r.status),[200,200,200]);
+  const object=instantiateAsset(builtinAssets[0],'source',[2,0,4],5),asset=saveObjectAsset(object,[builtinAssets[0]],'saved-folder-asset');
+  assert.equal((await post({action:'register',asset,folder:'Props/Cabinets'})).status,200);
+  let restarted=new AssetLibrary(directory),listing=await restarted.browse();
+  assert.equal(listing.catalog.locations[asset.id],'Props/Cabinets');assert.ok(listing.catalog.folders.includes('Props/Empty'));
+  assert.equal((await post({action:'move_asset',assetId:asset.id,folder:'Sets/Lobby'})).status,200);
+  assert.equal((await post({action:'register',asset,folder:'Props/Cabinets'})).status,200);
+  assert.equal((await library.browse()).catalog.locations[asset.id],'Sets/Lobby');
+  const prior=await library.read(asset.id);
+  const renamed=await post({action:'rename_folder',from:'Sets',to:'Film Sets'});assert.equal(renamed.status,200);
+  assert.equal((await renamed.json()).catalog.locations[asset.id],'Film Sets/Lobby');assert.deepEqual(await library.read(asset.id),prior);
+  const draft=editAsset(draftFromAsset(asset),[{type:'set_metadata',changes:{name:'Renamed chair'}}]);await library.revise(asset,draft);
+  restarted=new AssetLibrary(directory);listing=await restarted.browse();
+  assert.equal(listing.catalog.locations[asset.id],'Film Sets/Lobby');assert.equal((await restarted.read(asset.id)).name,'Renamed chair');
+  assert.equal((await post({action:'create_folder',folder:'../escape'})).status,400);
+  assert.equal((await post({action:'rename_folder',from:'Props',to:'Props/Inside'})).status,400);
+  assert.equal((await post({action:'move_asset',assetId:asset.id,folder:'Missing'})).status,400);
+  assert.equal((await post({action:'move_asset',assetId:builtinAssets[0].id,folder:''})).status,400);
+  const interrupted={...asset,id:'interrupted'};await library.register(interrupted);
+  await library.register(interrupted,'Props/Cabinets');assert.equal((await new AssetLibrary(directory).browse()).catalog.locations.interrupted,'Props/Cabinets');
+  await writeFile(path.join(directory,'catalog.json'),'{broken');await assert.rejects(library.browse());
+});
+
+test('creating an independent prefab relinks only the source and retains placement, sampled motion and controllers across undo, reload and another project', async () => {
+  const library=new AssetLibrary(await mkdtemp(path.join(tmpdir(),'littletake-link-'))),base=builtinAssets.find(asset=>asset.id==='builtin-trolley')!;
+  const original=instantiateAsset(base,'source',[3,0,-2],5),other=instantiateAsset(base,'other',[-4,0,0],5);
+  original.color='#aaccee';original.transform.rotation=[0,35,0];original.transform.scale=[1.3,.8,1.1];original.components=[movement('drive',2.3)];
+  original.track={start:1,duration:3,from:structuredClone(original.transform),to:{...structuredClone(original.transform),position:[7,0,-2]},samples:[{at:.5,transform:{...structuredClone(original.transform),position:[5,0,-2]}}]};
+  const project=createProject(createEmptyScene());project.assets=[base];project.scenes[0].objects=[original,other];
+  const before=serializeProject(project),asset=saveObjectAsset(original,[base],'independent-trolley');await library.createFolder('Props/Carts');await library.register(asset,'Props/Carts');
+  const next=linkObjectAsset(projectContent(project),project.scenes[0].id,original.id,asset),linked=next.scenes[0].objects[0];
+  assert.deepEqual(linked,{...original,kind:'asset',asset:{id:asset.id},color:'#ffffff'});
+  assert.deepEqual(next.scenes[0].objects[1],other);assert.equal(serializeProject(project),before);
+  for(let i=0;i<base.parts.length;i++)assert.equal(asset.parts[i].color,'#'+new Color(base.parts[i].color).multiply(new Color(original.color)).getHexString());
+  const history=new History(projectContent(project));history.commit(next);assert.deepEqual(history.undo(),projectContent(project));assert.deepEqual(history.redo(),next);
+  Object.assign(project,next);assert.deepEqual(parseProject(serializeProject(project)),project);
+  const edited=await library.revise(asset,editAsset(draftFromAsset(asset),[{type:'set_metadata',changes:{name:'Edited cart'}}]));
+  const synced=updateAssetInstances(project,[edited]);assert.deepEqual(synced.project.scenes,project.scenes);
+  const restarted=new AssetLibrary(library.directory),projectB=createProject(createEmptyScene('scene-b'));
+  projectB.assets=[await restarted.read(asset.id)];projectB.scenes[0].objects=[instantiateAsset(projectB.assets[0],'cart-b',[10,0,5],8)];
+  const reused=projectB.scenes[0].objects[0];assert.deepEqual(reused.components,original.components);assert.deepEqual(reused.transform.rotation,original.transform.rotation);assert.deepEqual(reused.transform.scale,original.transform.scale);
+  assert.deepEqual(reused.track!.from.position,[10,0,5]);assert.deepEqual(reused.track!.to.position,[14,0,5]);assert.deepEqual(reused.track!.samples![0].transform.position,[12,0,5]);
+  assert.deepEqual(parseProject(serializeProject(projectB)),projectB);
+  await library.moveAsset(asset.id,'');assert.deepEqual(await restarted.read(asset.id),edited);
+});
+
+test('saving a primitive preserves its local origin instead of bottom-centering a linked instance',()=>{
+  const cube=createObject('cube',1);cube.transform.position=[5,3,2];cube.transform.rotation=[20,30,40];cube.transform.scale=[2,3,4];
+  const saved=saveObjectAsset(cube,[],'saved-cube');assert.deepEqual(saved.parts[0].position,[0,0,0]);assert.deepEqual(saved.bounds.min,[-.5,-.5,-.5]);assert.deepEqual(saved.bounds.max,[.5,.5,.5]);
+  assert.deepEqual(saved.template!.transform!.position,[0,0,0]);assert.deepEqual(saved.template!.transform!.rotation,cube.transform.rotation);
+  const human=saveObjectAsset(createObject('human',1),[],'saved-human');assert.ok(human.parts.some(part=>part.id==='body-top'));assert.ok(human.bounds.max[1]>1.8);
+});

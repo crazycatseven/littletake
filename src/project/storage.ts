@@ -3,6 +3,7 @@ import { createDocument, validateDocument } from '../model.ts';
 import type { SceneDocument, ProjectContent } from '../types.ts';
 import { validateProjectContent } from './model.ts';
 import { conversationsSchema, createConversations, type ConversationBook } from '../scene-edit/conversations.ts';
+import { migrateAssetValue } from '../assets/model.ts';
 
 export const PROJECT_STORAGE_KEY = 'littletake.project.v1';
 const LEGACY_SCENE_KEY = 'littletake.scene.v1';
@@ -37,6 +38,14 @@ export function parseProject(text: string): ProjectDocument {
     raw = { ...createProject(scene), revision: raw.revision, conversations: raw.conversations };
   }
   if (raw?.format === 'LittleTake.project' && raw.version === 2) raw.version = 3;
+  // Retain historical plans while removing only the retired prefab-version field.
+  for (const thread of raw?.conversations?.threads ?? []) for (const message of thread.messages ?? []) {
+    for (const operation of message.edit?.operations ?? []) if (operation.type === 'instantiate_asset') {
+      const asset = migrateAssetValue(operation.asset);
+      if (asset !== operation.asset && message.edit.status === 'pending') message.edit.status = 'stale';
+      operation.asset = asset;
+    }
+  }
   const value = projectSchema.parse(raw), content = validateProjectContent({ name: value.name, scenes: value.scenes, ...(value.assets ? { assets: value.assets } : {}) });
   const { assets: _rawAssets, ...metadata } = value;
   const project: ProjectDocument = { ...metadata, ...content };

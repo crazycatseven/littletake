@@ -1,5 +1,5 @@
 import { evaluateTransform } from '../model.ts';
-import { componentScripts } from '../components/model.ts';
+import { updateComponents } from '../components/model.ts';
 import { recordedTrack, repositionTrack } from './motion.ts';
 import type { MotionTrack, SceneObject, Transform } from '../types.ts';
 
@@ -25,9 +25,8 @@ export class PerformanceSession {
   start(duration:number):void {if(this.time>duration-.1)this.time=0;this.mode='record';this.draft=null;this.runtime.velocity=0;this.keys.clear();this.frames=[{time:this.time,transform:structuredClone(this.pose)}];}
   update(dt:number,duration:number):boolean {
     if(this.mode==='review')return false;
-    const component=this.before.components?.[0];
     const step=this.mode==='record'?Math.min(dt,duration-this.time):dt;
-    if(component)componentScripts[component.type].update(component,this.pose,this.keys,step,this.runtime);
+    updateComponents(this.before.components,this.pose,this.keys,step,this.runtime);
     if(this.mode==='record'){
       this.time=Math.min(duration,this.time+step);
       if(this.time-this.frames.at(-1)!.time>=1/30)this.frames.push({time:this.time,transform:structuredClone(this.pose)});

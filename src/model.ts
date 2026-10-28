@@ -1,6 +1,6 @@
 import { Euler, MathUtils, Matrix4, Quaternion, Vector3 } from 'three';
 import type { PrimitiveKind, SceneDocument, SceneEntity, SceneObject, SceneCamera, Shot, Transform, Vec3 } from './types.ts';
-import { assetReferenceSchema } from './assets/model.ts';
+import { assetReferenceSchema, migrateAssetValue } from './assets/model.ts';
 import { componentsSchema } from './components/model.ts';
 import { samplesSchema } from './performance/motion.ts';
 
@@ -230,14 +230,16 @@ export function validateDocument(value: unknown): SceneDocument {
   };
   const objects: SceneObject[] = list(doc.objects, 100, 'scene.objects').map((value, index) => {
     const path = 'scene.objects[' + index + ']';
-    const item = record(value, ['id', 'name', 'kind', 'color', 'transform', 'track'], path, ['asset', 'components']);
+    const item = record(value, ['id', 'name', 'kind', 'color', 'transform', 'track'], path, ['asset', 'components', 'hidden']);
+    if (item.hidden !== undefined && typeof item.hidden !== 'boolean') fail(path + '.hidden', 'expected a boolean');
     if (!KINDS.includes(item.kind as PrimitiveKind) && item.kind !== 'asset') fail(path, 'unsupported primitive');
     if ((item.kind === 'asset') !== (item.asset !== undefined)) fail(path, 'Compound objects require an asset reference.');
     if (typeof item.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(item.color)) fail(path, 'expected a six-digit hex color');
     return { id: identifier(item.id, path + '.id'), name: text(item.name, 120, path + '.name'), kind: item.kind as PrimitiveKind, color: item.color,
       transform: transform(item.transform, path + '.transform'), track: motion(item.track, duration, path + '.track'),
-      ...(item.asset !== undefined ? { asset: assetReferenceSchema.parse(item.asset) } : {}),
-      ...(item.components !== undefined ? { components: componentsSchema.parse(item.components) } : {}) };
+      ...(item.asset !== undefined ? { asset: assetReferenceSchema.parse(migrateAssetValue(item.asset)) } : {}),
+      ...(item.components !== undefined ? { components: componentsSchema.parse(item.components) } : {}),
+      ...(item.hidden === true ? { hidden: true } : {}) };
   });
   const cameras: SceneCamera[] = list(doc.cameras, legacy ? 24 : MAX_CAMERAS, 'scene.cameras').map((value, index) => {
     const path = 'scene.cameras[' + index + ']';

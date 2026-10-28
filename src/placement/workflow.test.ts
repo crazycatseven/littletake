@@ -7,6 +7,7 @@ import { projectContent, validateProjectContent } from '../project/model';
 import { trackPoses } from '../performance/motion';
 import { transformSelection } from './transforms';
 import type { Transform } from '../types';
+import { applyProjectOperations } from '../scene-edit/operations';
 
 test('batch placement preserves complete motion, camera/shot independence, one-step undo and project reopen', () => {
   const scene = createEmptyScene(), first = createObject('human', 1), second = createObject('cube', 2), untouched = createObject('sphere', 3);
@@ -43,4 +44,26 @@ test('batch placement preserves complete motion, camera/shot independence, one-s
   safe[1].track!.to.position[0] = 1000;
   const unchanged = structuredClone(safe);
   assert.throws(() => transformSelection(safe, bad, 0, true)); assert.deepEqual(safe, unchanged);
+});
+
+test('hidden objects survive project reopen, unrelated edits and batch undo without losing motion or components', () => {
+  const scene = createEmptyScene(), first = createObject('human', 1), second = createObject('cube', 2);
+  const from = structuredClone(first.transform), to = structuredClone(from); to.position[0] += 3;
+  first.track = {start: .5, duration: 3, from, to, samples: [{at: .5, transform: structuredClone(to)}]};
+  first.components = [{type: 'pivot', enabled: true, offset: [.2, .3, 0]}];
+  scene.objects = [first, second];
+  const camera = createCamera('camera'); scene.cameras = [camera]; scene.shots = [createShot(camera, 'shot', 5)];
+  const project = createProject(scene), original = structuredClone(projectContent(project)), history = new History(original);
+  first.hidden = true; second.hidden = true;
+  history.commit(projectContent(project));
+  assert.deepEqual(history.undo(), original);
+  assert.deepEqual(history.redo(), projectContent(project));
+  const reopened = parseProject(serializeProject(project));
+  assert.equal(reopened.scenes[0].objects.filter(item => item.hidden).length, 2);
+  assert.deepEqual(reopened.scenes[0].objects[0].track, JSON.parse(JSON.stringify(first.track)));
+  assert.deepEqual(reopened.scenes[0].objects[0].components, first.components);
+  const edited = applyProjectOperations(projectContent(reopened), [{type: 'rename_scene', sceneId: scene.id, name: 'Renamed'}], 1.5);
+  assert.equal(edited.scenes[0].objects[0].hidden, true);
+  edited.scenes[0].objects.forEach(item => { delete item.hidden; });
+  assert.deepEqual(edited.scenes[0].objects, JSON.parse(JSON.stringify(original.scenes[0].objects)));
 });

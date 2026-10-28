@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { constructionEdits, editConstruction, drivenProperties } from './toolkit/edits.ts';
-import { assetRecipeSchema, assetSchema, recipeBounds, validateAsset, validateRecipe, type AssetDefinition, type AssetReference } from './model.ts';
+import { assetRecipeSchema, assetSchema, recipeBounds, validateAsset, validateRecipe, type AssetDefinition } from './model.ts';
 import { componentsSchema } from '../components/model.ts';
 import type { ProjectContent } from '../types.ts';
 
@@ -45,26 +45,21 @@ export function editAsset(value: AssetDraft, edits: AssetEdit[]): AssetDraft {
   return assetDraft(draft);
 }
 /** Revisions preserve the local origin: moving a part must not translate all other parts. */
-export function reviseAsset(base: AssetDefinition, value: AssetDraft, version = base.version + 1): AssetDefinition {
+export function reviseAsset(base: AssetDefinition, value: AssetDraft): AssetDefinition {
   const draft = assetDraft(value);
-  return validateAsset({ ...draft, id: base.id, version, source: 'edited', createdAt: new Date().toISOString(), bounds: recipeBounds(draft) });
+  return validateAsset({ ...draft, id: base.id, source: 'edited', createdAt: base.createdAt, bounds: recipeBounds(draft) });
 }
-export type AssetUpdateScope = 'library' | 'selected' | 'all';
-export interface AssetInstance { sceneId: string; objectId: string }
 /** Geometry references only. Every instance retains its own transform, tint, performance and components. */
-export function updateAssetInstances(project: ProjectContent, base: AssetReference, asset: AssetDefinition, scope: AssetUpdateScope, selected?: AssetInstance): { project: ProjectContent; count: number } {
-  if (asset.id !== base.id || asset.version <= base.version) throw new Error('Expected a newer version of this asset.');
+export function updateAssetInstances(project: ProjectContent, assets: AssetDefinition[]): { project: ProjectContent; count: number } {
   const next = structuredClone(project); let count = 0;
-  if (scope === 'library') return { project: next, count };
+  const changed = new Set<string>();
+  next.assets = next.assets?.map(previous => {
+    const asset = assets.find(a => a.id === previous.id);
+    if (!asset || JSON.stringify(previous) === JSON.stringify(asset)) return previous;
+    changed.add(asset.id); return validateAsset(asset);
+  });
   for (const scene of next.scenes) for (const object of scene.objects) {
-    const matches = object.asset?.id === base.id && object.asset.version === base.version;
-    if (matches && (scope === 'all' || (selected?.sceneId === scene.id && selected?.objectId === object.id))) { object.asset = { id: asset.id, version: asset.version }; count++; }
-  }
-  if (scope === 'selected' && !count) throw new Error('The selected instance changed. The new asset version remains in the library.');
-  if (count) {
-    const existing = next.assets?.find(a => a.id === asset.id && a.version === asset.version);
-    if (existing && JSON.stringify(existing) !== JSON.stringify(asset)) throw new Error('An immutable asset version cannot be replaced.');
-    if (!existing) (next.assets ??= []).push(validateAsset(asset));
+    if (object.asset && changed.has(object.asset.id)) count++;
   }
   return { project: next, count };
 }
@@ -76,8 +71,14 @@ export interface AssetEditorState { base: AssetDefinition; draft: AssetDraft; me
 export class AssetDraftStore {
   private raw: string | null;
   readonly key: string;
-  constructor(private storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>, base: AssetDefinition) {
-    this.key = `littletake.asset-draft.${base.id}@${base.version}`; this.raw = storage.getItem(this.key);
+  constructor(private storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & Partial<Pick<Storage, 'length' | 'key'>>, base: AssetDefinition) {
+    this.key = `littletake.asset-draft.${base.id}`; this.raw = storage.getItem(this.key);
+    if (!this.raw && storage.key) {
+      const prefix = this.key + '@', keys = Array.from({ length: storage.length ?? 0 }, (_, i) => storage.key!(i) ?? '')
+        .filter(key => key.startsWith(prefix) && /^\d+$/.test(key.slice(prefix.length))).sort((a, b) => Number(b.slice(prefix.length)) - Number(a.slice(prefix.length)));
+      const legacy = keys.length ? storage.getItem(keys[0]) : null;
+      if (legacy) { storage.setItem(this.key, legacy); this.raw = legacy; }
+    }
   }
   read(): AssetEditorState | null {
     if (!this.raw) return null;

@@ -135,9 +135,7 @@ export function applyProjectOperations(source: ProjectContent, operations: Scene
       case 'add_object': doc.objects.push(structuredClone(operation.object)); break;
       case 'instantiate_asset': {
         const asset = validateAsset(operation.asset);
-        const existing = project.assets?.find(a => a.id === asset.id && a.version === asset.version);
-        if (existing && JSON.stringify(existing) !== JSON.stringify(asset)) throw new Error('An asset version cannot be overwritten.');
-        if (!existing) (project.assets ??= []).push(asset);
+        project.assets = [...(project.assets ?? []).filter(a => a.id !== asset.id), asset];
         const instance=instantiateAsset(asset,operation.id,operation.transform.position,doc.duration);
         instance.name=operation.name;instance.transform=structuredClone(operation.transform);
         if(operation.track)instance.track=structuredClone(operation.track);

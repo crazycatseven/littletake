@@ -35,10 +35,10 @@ function transportFor(mode: 'generate' | 'reuse', assetId = 'builtin-chair') {
     const outputs = body.input.filter((x: any) => x.type === 'function_call_output').map((x: any) => JSON.parse(x.output));
     const call = (name: string, args: unknown) => Response.json({ status: 'completed', output: [{ type: 'function_call', call_id: 'call_' + directorCalls, name, arguments: JSON.stringify(args), status: 'completed' }] });
     if (directorCalls === 1) return call('search_assets', { query: mode === 'generate' ? 'blue test chair special' : 'chair' });
-    if (directorCalls === 2) return mode === 'generate' ? call('generate_asset', { searchId: outputs[0].searchId, brief: 'Blue chair with four legs and a backrest, matching the requested special asset.', reason: 'The user explicitly requested a new test asset variant.' }) : call('read_asset', { assetId, version: 1 });
+    if (directorCalls === 2) return mode === 'generate' ? call('generate_asset', { searchId: outputs[0].searchId, brief: 'Blue chair with four legs and a backrest, matching the requested special asset.', reason: 'The user explicitly requested a new test asset variant.' }) : call('read_asset', { assetId });
     const selected = mode === 'generate' ? outputs[1].asset.id : assetId;
-    if (directorCalls === 3) return call('instantiate_asset', { assetId: selected, version: 1, sceneId: 'scene-1', name: 'Chair A', transform });
-    if (directorCalls === 4) return call('instantiate_asset', { assetId: selected, version: 1, sceneId: 'scene-1', name: 'Chair B', transform: { ...transform, position: [2, 0, 0] } });
+    if (directorCalls === 3) return call('instantiate_asset', { assetId: selected, sceneId: 'scene-1', name: 'Chair A', transform });
+    if (directorCalls === 4) return call('instantiate_asset', { assetId: selected, sceneId: 'scene-1', name: 'Chair B', transform: { ...transform, position: [2, 0, 0] } });
     return Response.json(json({ summary: 'Prepared two instances.', requestedViews: [], objectCounts: [], operations: [outputs[2].operation, outputs[3].operation] }));
   }) as typeof fetch;
   return { provider: new MetaProvider({ apiKey: 'do-not-log-this-test-secret', model: 'test' }, transport), requests, counts: () => ({ directorCalls, expertCalls }) };
@@ -77,16 +77,16 @@ test('missing asset is delegated, rendered, inspected and persisted; a restarted
   const result = applyProjectOperations(source.project, response.plan.operations, 0), asset = result.assets![0];
   const jobs = await readdir(path.join(directory, 'jobs')); const job = await library.readJob(jobs[0].replace('.json', ''));
   assert.equal(job.status, 'ready'); assert.equal((job.attempts as unknown[]).length, 2); assert.ok(!JSON.stringify(job).includes('do-not-log-this-test-secret'));
-  const fresh = new AssetLibrary(directory); assert.deepEqual(await fresh.read(asset.id, 1), asset);
+  const fresh = new AssetLibrary(directory); assert.deepEqual(await fresh.read(asset.id), asset);
   assert.ok((await fresh.preview(asset)).length > 1000);
   const reuse = transportFor('reuse', asset.id), next = await proposeSceneEdit(input(), reuse.provider, undefined, newDiagnostic(), fresh);
   assert.equal(next.status, 'ready'); assert.equal(reuse.counts().expertCalls, 0); assert.equal((await fresh.list()).length, catalogAssets.length + 1);
   const duplicate = await Promise.all([fresh.register(asset), fresh.register(asset)]); assert.ok(duplicate.every(a => a.id === asset.id));
-  assert.equal((await fresh.list()).filter(a => a.id === asset.id && a.version === 1).length, 1);
+  assert.equal((await fresh.list()).filter(a => a.id === asset.id).length, 1);
   const variant = { ...asset, id: 'concurrent-publication' };
   const concurrent = await Promise.allSettled([fresh.register(variant), fresh.register({...variant,name:'Conflicting chair'})]);
   assert.equal(concurrent.filter(r => r.status === 'fulfilled').length, 1);
-  assert.deepEqual(await fresh.read(variant.id, 1), concurrent.find(r => r.status === 'fulfilled')!.value);
+  assert.deepEqual(await fresh.read(variant.id), concurrent.find(r => r.status === 'fulfilled')!.value);
 });
 
 test('rejected visual reviews and interrupted jobs retain raw evidence, spend a bounded number of calls and never register a ready asset', async () => {
