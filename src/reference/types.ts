@@ -8,11 +8,14 @@ export interface ReferenceInput {
   video: { dataUrl: string; duration: number; width: number; height: number };
   direction: string;
 }
+/** A SAM 3.1 track for review overlays: boxes as [seconds, x, y, width, height], normalised to the frame. */
+export interface ReferenceTrack { label: string; objectId?: string; boxes: [number, number, number, number, number][] }
 export interface ReferenceDraft {
   scene: SceneDocument;
   summary: string;
   assumptions: string[];
   provider: string;
   model: string;
+  tracks?: ReferenceTrack[];
 }
 export interface ReferenceConnection { available: boolean; provider: string; model: string }

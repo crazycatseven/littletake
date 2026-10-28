@@ -30,7 +30,7 @@ Desktop scope: mouse/keyboard authoring, text prompts and reference clips.
 | --- | --- | --- | --- |
 | **P0** | **Muse integration** | Video input, scene understanding and structured scene proposals. | Done |
 | **P0** | **Tool Calling & Harness** | Conversation context, native asset function calls, bounded expert tasks and atomic preview/apply. | Partial |
-| **P2** | **Vision adapters** | SAM 3.1 Segmentation for reference images/video through Meta Model API. | Todo |
+| **P2** | **Vision adapters** | SAM 3.1 tracks people in reference clips alongside Muse analysis; tracks ground draft placement and motion timing and appear over the review video. | Partial |
 | **P2** | **SAM 3D Body service** | Separate model deployment and inference for human 3D pose estimation from reference frames. | Todo |
 
 ### Authoring
@@ -112,6 +112,8 @@ For video analysis, copy `.env.example` to `.env.local` and set `MODEL_API_KEY` 
 Provider adapters live in `server/ai/`; the video-analysis workflow and validated scene conversion live in `server/reference/`. The editor consumes ordinary `SceneDocument` data. Replacing the AI provider requires an adapter and a factory entry, without changing the editor.
 
 Reference import currently accepts MP4/WebM clips of 1–60 seconds, up to 3 MB. It builds a coarse single-shot draft with separate objects, basic motion and a camera bound to the shot. Review it before adding it as a new scene; Undo removes that addition. Geometry, depth and motion are AI estimates, with simplifications shown in the review.
+
+**SAM 3.1 grounding.** While Muse Spark reads the clip, `/api/reference` sends the same clip to SAM 3.1 (`sam-3.1`, Responses API, streamed) with the noun phrase `person`, so tracking adds no waiting time. Each tracked person is paired with the draft person nearest to it on screen. When their feet are visible, foot points are cast through the draft camera onto the y=0 floor: a static person is placed at the median foot point, and a person who walks gets a start/end pose and start/stop times from the tracked path, even if Muse kept them static. Without visible feet and with a fixed camera, an existing Muse move is only retimed. The review player draws the tracked boxes, and the draft notes list what tracking changed. MP4 frame counts come from the `stsz` box so SAM frame indices map to seconds. Placement still depends on Muse's camera estimate; seated or cropped subjects keep Muse positions. SAM failures never block a draft. `SAM_TRACKING=off` disables the extra call.
 
 ### Asset library and modeling expert
 
