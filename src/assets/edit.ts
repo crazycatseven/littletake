@@ -26,7 +26,10 @@ export function editAsset(value: AssetDraft, edits: AssetEdit[]): AssetDraft {
   for (const edit of z.array(assetEditSchema).min(1).max(64).parse(edits)) {
     if (edit.type==='set_construction'||edit.type==='set_parameter'||edit.type==='group_parts'||edit.type==='make_unique'||edit.type==='duplicate_subtree'||edit.type==='bake_construction') { editConstruction(draft, edit as Parameters<typeof editConstruction>[1]); continue; }
     if (edit.type === 'set_metadata') Object.assign(draft, edit.changes);
-    else if (edit.type === 'set_components') draft.template = { ...draft.template, track: draft.template?.track ?? null, components: edit.components };
+    else if (edit.type === 'set_components') {
+      draft.template = { ...draft.template, track: draft.template?.track ?? null, components: edit.components };
+      if(draft.template.animation&&!edit.components.some(component=>component.type==='pivot'))for(const axis of ['x','y','z'] as const)delete draft.template.animation.curves[`pivot.${axis}`];
+    }
     else if (edit.type === 'add_part') draft.parts.push(edit.part);
     else {
       const part = draft.parts.find(p => p.id === edit.id); if (!part) throw new Error('Part not found: ' + edit.id);

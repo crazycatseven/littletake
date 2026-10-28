@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { evaluateTransform } from '../model';
+import { evaluateFov, evaluateTransform } from '../model';
 import type { SceneDocument, Transform } from '../types';
 
 /** An export owns its geometry, materials, camera and poses; the live editor keeps running independently. */
@@ -70,7 +70,10 @@ export class ShotRenderer {
       root.visible = !item.hidden;
       if (root.visible) pose(root, evaluateTransform(item, time));
     }
-    pose(this.camera, evaluateTransform(this.document.cameras.find(item => item.id === this.cameraId)!, time), false);
+    const camera = this.document.cameras.find(item => item.id === this.cameraId)!;
+    pose(this.camera, evaluateTransform(camera, time), false);
+    const fov = evaluateFov(camera, time);
+    if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
     this.renderer.render(this.scene, this.camera);
     return this.canvas;
   }

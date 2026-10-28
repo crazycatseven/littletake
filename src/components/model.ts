@@ -15,7 +15,7 @@ export type ObjectComponent = z.infer<typeof componentSchema>;
 export const movement = (mode: 'walk'|'drive'|'free' = 'walk', speed = 1.7): ObjectComponent => ({ type: 'movement', enabled: true, mode, space: 'local', speed, turnSpeed: 90 });
 export const pivotOffset = (offset: [number,number,number] = [0,0,0]): ObjectComponent => ({type:'pivot',enabled:true,offset});
 export const inputController = (components: ObjectComponent[] = []) => components.find(c => c.type !== 'pivot' && c.enabled);
-export interface ComponentField { key: string; label: string; options?: Record<string, string>; vector?: boolean; min?: number; max?: number; step?: number; unit?: string }
+export interface ComponentField { key: string; label: string; options?: Record<string, string>; vector?: boolean; animatable?: boolean; min?: number; max?: number; step?: number; unit?: string }
 export interface ComponentScript {
   title: string; description: string; addable?: boolean; fields: ComponentField[]; actions: { id: string; label: string }[];
   help(component: ObjectComponent): string;
@@ -53,7 +53,7 @@ export const componentScripts: Record<ObjectComponent['type'], ComponentScript> 
   },
   pivot: {
     title: 'Pivot Offset', description: 'Choose the local center for rotation and scale without moving the object.', actions: [],
-    fields: [{key:'offset',label:'Pivot Offset',vector:true,min:-1000,max:1000,step:.05,unit:'m'}],
+    fields: [{key:'offset',label:'Pivot Offset',vector:true,animatable:true,min:-1000,max:1000,step:.05,unit:'m'}],
     help: () => 'Local XYZ offset. Moving the pivot keeps the object and existing motion in place. Rotation and scale use this center.',
   },
 };

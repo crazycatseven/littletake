@@ -3,6 +3,7 @@ import type { PrimitiveKind, SceneDocument, SceneEntity, SceneObject, SceneCamer
 import { assetReferenceSchema, migrateAssetValue } from './assets/model.ts';
 import { componentsSchema } from './components/model.ts';
 import { samplesSchema } from './performance/motion.ts';
+import { emptyAnimation, evaluateAnimatedTransform, evaluateProperty, migrateMotionTrack, validateAnimation, type PropertyAnimation } from './animation/model.ts';
 
 const KINDS: readonly PrimitiveKind[] = ['cube', 'sphere', 'cylinder', 'cone', 'plane', 'human'];
 const COLORS = ['#f0a06d', '#80aaa0', '#9b99c8', '#d9bb72', '#9fb9cf', '#b98e97'];
@@ -64,8 +65,28 @@ export function createDocument(): SceneDocument {
 
 export function cloneDocument(doc: SceneDocument): SceneDocument { return structuredClone(doc); }
 
+/** Legacy motion is converted only when edited; unopened projects retain their original track. */
+export function animationFor(entity: SceneEntity): PropertyAnimation | undefined {
+  return entity.animation ?? (entity.track ? migrateMotionTrack(entity.track) : undefined);
+}
+export function ensureAnimation(entity: SceneEntity): PropertyAnimation {
+  if (!entity.animation) entity.animation = entity.track ? migrateMotionTrack(entity.track) : emptyAnimation();
+  entity.track = null;
+  return entity.animation;
+}
+export function evaluateFov(camera: SceneCamera, time: number): number {
+  return evaluateProperty(camera.animation, 'fov', camera.fov, time);
+}
+export function evaluateComponents(object: SceneObject, time: number): SceneObject['components'] {
+  if (!object.animation || !object.components?.some(component => component.type === 'pivot')) return object.components;
+  return object.components.map(component => component.type === 'pivot' ? {
+    ...component, offset: (['x','y','z'] as const).map((axis,index) => evaluateProperty(object.animation, `pivot.${axis}`, component.offset[index], time)) as Vec3,
+  } : component);
+}
+
 export function evaluateTransform(entity: SceneEntity, time: number): Transform {
   if (!Number.isFinite(time)) throw new Error('Playback time must be finite.');
+  if (entity.animation) return evaluateAnimatedTransform(entity.animation, entity.transform, time);
   const track = entity.track;
   if (!track) return copyTransform(entity.transform);
   let alpha = MathUtils.clamp((time - track.start) / track.duration, 0, 1);
@@ -217,10 +238,11 @@ export function validateDocument(value: unknown): SceneDocument {
     return { format: 'LittleTake.scene', version: 3, id: 'scene-1', name: old.name, duration: old.duration, objects: old.objects,
       cameras: [camera], shots: [createShot(camera, `shot-${shotIndex}`, old.duration, 'Shot 1')] };
   }
-  const doc = record(value, ['format', 'version', 'id', 'name', 'duration', 'objects', 'cameras', 'shots'], 'scene');
+  const doc = record(value, ['format', 'version', 'id', 'name', 'duration', 'objects', 'cameras', 'shots'], 'scene', ['fps']);
   if (doc.format !== 'LittleTake.scene' || (doc.version !== 2 && doc.version !== 3)) fail('scene', 'unsupported format or version');
   const legacy = doc.version === 2;
   const duration = number(doc.duration, 1, 60, 'scene.duration');
+  if (doc.fps !== undefined && doc.fps !== 24 && doc.fps !== 30) fail('scene.fps', 'expected 24 or 30');
   const ids = new Set<string>();
   const identifier = (value: unknown, path: string, unique = true) => {
     const id = text(value, 64, path);
@@ -230,23 +252,33 @@ export function validateDocument(value: unknown): SceneDocument {
   };
   const objects: SceneObject[] = list(doc.objects, 100, 'scene.objects').map((value, index) => {
     const path = 'scene.objects[' + index + ']';
-    const item = record(value, ['id', 'name', 'kind', 'color', 'transform', 'track'], path, ['asset', 'components', 'hidden']);
+    const item = record(value, ['id', 'name', 'kind', 'color', 'transform', 'track'], path, ['animation', 'asset', 'components', 'hidden']);
     if (item.hidden !== undefined && typeof item.hidden !== 'boolean') fail(path + '.hidden', 'expected a boolean');
     if (!KINDS.includes(item.kind as PrimitiveKind) && item.kind !== 'asset') fail(path, 'unsupported primitive');
     if ((item.kind === 'asset') !== (item.asset !== undefined)) fail(path, 'Compound objects require an asset reference.');
     if (typeof item.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(item.color)) fail(path, 'expected a six-digit hex color');
+    const track = motion(item.track, duration, path + '.track');
+    const animation = item.animation === undefined ? undefined : validateAnimation(item.animation, duration);
+    const components = item.components === undefined ? undefined : componentsSchema.parse(item.components);
+    if (track && animation) fail(path, 'an entity cannot have both legacy motion and property animation');
+    if (animation?.curves.fov?.length) fail(path, 'field of view is only available on cameras');
+    if (animation && Object.keys(animation.curves).some(key=>key.startsWith('pivot.')) && !components?.some(component=>component.type==='pivot')) fail(path, 'pivot animation requires a pivot component');
     return { id: identifier(item.id, path + '.id'), name: text(item.name, 120, path + '.name'), kind: item.kind as PrimitiveKind, color: item.color,
-      transform: transform(item.transform, path + '.transform'), track: motion(item.track, duration, path + '.track'),
+      transform: transform(item.transform, path + '.transform'), track, ...(animation ? { animation } : {}),
       ...(item.asset !== undefined ? { asset: assetReferenceSchema.parse(migrateAssetValue(item.asset)) } : {}),
-      ...(item.components !== undefined ? { components: componentsSchema.parse(item.components) } : {}),
+      ...(components ? { components } : {}),
       ...(item.hidden === true ? { hidden: true } : {}) };
   });
   const cameras: SceneCamera[] = list(doc.cameras, legacy ? 24 : MAX_CAMERAS, 'scene.cameras').map((value, index) => {
     const path = 'scene.cameras[' + index + ']';
-    const item = record(value, ['id', 'name', 'fov', 'transform', 'track'], path);
+    const item = record(value, ['id', 'name', 'fov', 'transform', 'track'], path, ['animation']);
     if (legacy && item.track !== null) fail(path, 'v2 camera setups must be static');
+    const track = motion(item.track, duration, path + '.track');
+    const animation = item.animation === undefined ? undefined : validateAnimation(item.animation, duration);
+    if (track && animation) fail(path, 'an entity cannot have both legacy motion and property animation');
+    if (animation && Object.keys(animation.curves).some(key=>key.startsWith('pivot.'))) fail(path, 'cameras cannot have pivot components');
     return { id: identifier(item.id, path + '.id'), name: text(item.name, 120, path + '.name'), fov: number(item.fov, 10, 120, path + '.fov'),
-      transform: transform(item.transform, path + '.transform'), track: motion(item.track, duration, path + '.track') };
+      transform: transform(item.transform, path + '.transform'), track, ...(animation ? { animation } : {}) };
   });
   const legacyFraming = new Map<string, Pick<SceneCamera, 'fov' | 'transform' | 'track'>>();
   const shots: Shot[] = list(doc.shots, 100, 'scene.shots').map((value, index) => {
@@ -277,7 +309,7 @@ export function validateDocument(value: unknown): SceneDocument {
       cameras.push({ id, name: `${shot.name.slice(0, 110)} camera`, ...framing }); shot.cameraId = id;
     }
   }
-  return { format: 'LittleTake.scene', version: 3, id: identifier(doc.id, 'scene.id', false), name: text(doc.name, 120, 'scene.name'), duration, objects, cameras, shots };
+  return { format: 'LittleTake.scene', version: 3, id: identifier(doc.id, 'scene.id', false), name: text(doc.name, 120, 'scene.name'), duration, ...(doc.fps !== undefined ? {fps: doc.fps as 24 | 30} : {}), objects, cameras, shots };
 }
 
 export function serializeDocument(doc: SceneDocument): string { return JSON.stringify(validateDocument(doc), null, 2); }

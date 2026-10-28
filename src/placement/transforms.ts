@@ -1,5 +1,6 @@
 import { evaluateTransform } from '../model';
 import { repositionTrack, trackPoses, transformSchema } from '../performance/motion';
+import { transformAnimatedSelection } from '../animation/model';
 import type { SceneEntity, Transform } from '../types';
 
 export interface PoseUpdate { id: string; transform: Transform }
@@ -11,7 +12,12 @@ export function transformSelection(before: SceneEntity[], updates: PoseUpdate[],
   if (poses.size !== before.length || before.some(item => !poses.has(item.id))) throw new Error('The selection changed. Try the transform again.');
   return before.map(source => {
     const item = structuredClone(source), pose = transformSchema.parse(poses.get(item.id));
-    if (item.track && (wholeMotion || item.track.samples)) {
+    if (item.animation && wholeMotion) {
+      const original=evaluateTransform(source,time);
+      const animatedTransform=Object.entries(item.animation.curves).some(([path,keys])=>/^(position|rotation|scale)\./.test(path)&&keys?.length);
+      if(!animatedTransform)item.transform=pose;
+      else transformAnimatedSelection(item.animation,item.transform,original,pose);
+    } else if (item.track && (wholeMotion || item.track.samples)) {
       repositionTrack(item.track, evaluateTransform(source, time), pose);
       item.transform = structuredClone(item.track.from);
     } else if (item.track) {

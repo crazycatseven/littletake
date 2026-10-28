@@ -3,6 +3,7 @@ import { Box3, Group, Mesh, MeshStandardMaterial, BoxGeometry, SphereGeometry, C
 import type { Vec3 } from '../types.ts';
 import { componentsSchema } from '../components/model.ts';
 import { motionSchema, transformSchema } from '../performance/motion.ts';
+import { animationSchema, validateAnimation } from '../animation/model.ts';
 
 import { vector, identifier, partSchema, constructionSchema } from './toolkit/schema.ts';
 import { evaluateAsset } from './toolkit/evaluate.ts';
@@ -16,7 +17,7 @@ export const assetRecipeSchema = z.strictObject({
 export const assetSchema = assetRecipeSchema.extend({
   id: identifier, source: z.enum(['builtin', 'generated', 'edited']), createdAt: z.string(),
   bounds: z.strictObject({ min: vector(-1000, 1000), max: vector(-1000, 1000), size: vector(0.001, 1000) }),
-  template: z.strictObject({ components: componentsSchema, track: motionSchema.nullable(), transform: transformSchema.optional() }).optional(),
+  template: z.strictObject({ components: componentsSchema, track: motionSchema.nullable(), transform: transformSchema.optional(), animation: animationSchema.optional() }).optional(),
 });
 export type AssetRecipe = z.infer<typeof assetRecipeSchema>;
 export type AssetDefinition = z.infer<typeof assetSchema>;
@@ -117,6 +118,12 @@ export function migrateAssetDefinitions(values: unknown[]): AssetDefinition[] {
 }
 export function validateAsset(value: unknown): AssetDefinition {
   const asset = assetSchema.parse(migrateAssetValue(value)); validateRecipe(assetRecipeSchema.strip().parse(asset));
+  if(asset.template?.animation){
+    if(asset.template.track)throw new Error('A prefab cannot have both legacy motion and property animation.');
+    asset.template.animation=validateAnimation(asset.template.animation,60);
+    if(asset.template.animation.curves.fov?.length)throw new Error('Only cameras can animate field of view.');
+    if(Object.keys(asset.template.animation.curves).some(key=>key.startsWith('pivot.'))&&!asset.template.components.some(component=>component.type==='pivot'))throw new Error('Pivot animation requires a pivot component.');
+  }
   const actual = recipeBounds(asset);
   if (actual.min.some((v, i) => Math.abs(v - asset.bounds.min[i]) > 1e-5) || actual.max.some((v, i) => Math.abs(v - asset.bounds.max[i]) > 1e-5)
     || actual.size.some((v, i) => Math.abs(v - asset.bounds.size[i]) > 1e-5))

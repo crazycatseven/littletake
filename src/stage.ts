@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { evaluateTransform } from './model';
+import { evaluateComponents, evaluateFov, evaluateTransform } from './model';
 import { activePivot, fromPivotPose, toPivotPose } from './components/transform';
 import { createAssetGroup, disposeAssetGroup, type AssetDefinition } from './assets/model';
 import { renderSceneSnapshot } from './scene-snapshot';
@@ -246,7 +246,8 @@ export class Stage {
     if (preview) {
       if (this.dragEntityId === preview.id) this.copyIconToShot();
       else this.applyPose(this.shotCamera, evaluateTransform(preview, time), false);
-      if (this.shotCamera.fov !== preview.fov) { this.shotCamera.fov = preview.fov; this.shotCamera.updateProjectionMatrix(); }
+      const fov = evaluateFov(preview, time);
+      if (this.shotCamera.fov !== fov) { this.shotCamera.fov = fov; this.shotCamera.updateProjectionMatrix(); }
     }
     this.previewRenderer.domElement.hidden = !preview;
     const validSelectedId = selectedId && (selectedId === this.iconCameraId || this.views.has(selectedId)) ? selectedId : null;
@@ -634,7 +635,7 @@ export class Stage {
       this.groupPivot.scale.setScalar(1); this.groupPivot.updateMatrixWorld();
     } else if (this.selectedId && !this.dragging) {
       const item = this.currentDoc?.objects.find(item => item.id === this.selectedId), root = this.rootFor(this.selectedId);
-      if (item && root) { this.applyPose(this.objectPivot, toPivotPose(this.readPose(root), item.components)); this.objectPivot.updateMatrixWorld(); }
+      if (item && root) { this.applyPose(this.objectPivot, toPivotPose(this.readPose(root), evaluateComponents(item, this.currentTime))); this.objectPivot.updateMatrixWorld(); }
     }
     this.uniformHandles(this.selectedIds.length > 1);
     this.gizmo.setSpace(this.tool === 'scale' && this.selectedIds.length < 2 ? 'local' : this.precision.space);
@@ -691,7 +692,7 @@ export class Stage {
       }
     } else if (object === this.objectPivot) {
       const item = this.currentDoc?.objects.find(item => item.id === this.dragEntityId), root = this.rootFor(this.dragEntityId);
-      if (item && root) this.applyPose(root, fromPivotPose(this.readPose(object), item.components));
+      if (item && root) this.applyPose(root, fromPivotPose(this.readPose(object), evaluateComponents(item, this.currentTime)));
     }
     if (this.dragEntityId !== null && this.dragEntityId === this.iconCameraId) this.copyIconToShot();
     if (!this.options.onTransform(this.currentUpdates(), 'change', this.dragPoses.size > 1)) this.finishGizmo(true);

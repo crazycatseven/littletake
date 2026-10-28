@@ -1,0 +1,28 @@
+.property-key { width:20px; height:20px; padding:0; color:#aab79e; font-size:14px; line-height:1; }
+.property-key.animated { color:#87a66f; }
+.property-key.on-key { color:#c99650; }
+.property-key:hover:not(:disabled) { background:#e9efdf; }
+.property-label-key { display:flex; align-items:center; justify-content:space-between; }
+.transform-key-actions { display:flex; align-items:center; gap:4px; }
+.transform-key-actions button { padding:4px 6px; background:#edf3e6; color:#728968; font-size:9px; }
+.animation-toolbar { display:flex; align-items:center; gap:7px; margin-left:auto; color:#859779; font-size:10px; }
+.animation-toolbar input { width:48px; padding:3px; font-size:10px; }
+.animation-toolbar select { font-size:10px; }
+.animation-ruler-window { min-width:0; overflow:hidden; }
+.animation-ruler-window .time-ruler { width:var(--animation-lane-width,100%); }
+.timeline-panel .timeline-rows { overflow:auto; }
+.timeline-panel .timeline-row { grid-template-columns:var(--track-label-width) var(--animation-lane-width,1fr); min-width:calc(var(--track-label-width) + var(--animation-lane-width,0px)); }
+.timeline-panel .track-label { position:sticky; left:0; z-index:5; background:#f8faf2; }
+.timeline-panel .track-label.selected { background:#eaf2dd; }
+.pending-animation { padding:8px 0; color:#b27850; font-size:10px; }
+.pending-animation button { color:#a66c42; text-decoration:underline; font-size:10px; }
+.animation-axis-row .track-label { padding-left:38px; font-size:10px; }
+.animation-row .track-label small, .animation-axis-row .track-label small { margin-left:auto; color:#a3b29a; }
+.animation-axis { font-weight:600; }
+.animation-axis.x { color:#c28472; }.animation-axis.y { color:#7c9b6b; }.animation-axis.z { color:#79a2b8; }
+.property-marker { position:absolute; z-index:4; top:6px; width:18px; height:18px; padding:0; transform:translateX(-50%); background:transparent!important; touch-action:none; }
+.property-marker:after { content:''; position:absolute; left:5px; top:5px; width:8px; height:8px; transform:rotate(45deg); background:#8eab6e; border:1px solid #f7f9f0; }
+.property-marker.selected:after { background:#c28c58; }
+.animation-take { position:absolute; top:6px; height:18px; border:1px solid #b7d2a3; border-radius:3px; background:#e1edd3; color:#7e9b6f; font-size:9px; padding:2px 5px; cursor:grab; touch-action:none; overflow:hidden; }
+.animation-take span { position:absolute; top:0; bottom:0; width:7px; background:#a5bb91; cursor:ew-resize; }
+.animation-take [data-take-edge="left"] { left:0; }.animation-take [data-take-edge="right"] { right:0; }

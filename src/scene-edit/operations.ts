@@ -61,6 +61,7 @@ export type SceneOperation = z.infer<typeof operationSchema>;
 export type EditPlan = z.infer<typeof editPlanSchema>;
 
 function poseTarget(item: SceneEntity, target: z.infer<typeof pose>) {
+  if (item.animation) throw new Error(`${item.id} has property animation. Edit its keys before changing its pose.`);
   if (target === 'static') {
     if (item.track) throw new Error(`${item.id} is animated. Edit its start/end pose or translate its whole path.`);
     return item.transform;
@@ -108,6 +109,7 @@ export function applyProjectOperations(source: ProjectContent, operations: Scene
         for (const target of [item.transform, ...(item.track ? trackPoses(item.track) : [])]) {
           target.position = target.position.map((value, index) => value + operation.offset[index]) as Vec3;
         }
+        if(item.animation)for(const [index,axis] of (['x','y','z'] as const).entries())for(const key of item.animation.curves[`position.${axis}`]??[])key.value+=operation.offset[index];
         break;
       }
       case 'set_transform': Object.assign(poseTarget(find(operation.id), operation.pose), structuredClone(operation.transform)); break;
@@ -115,7 +117,7 @@ export function applyProjectOperations(source: ProjectContent, operations: Scene
         const item = find(operation.id);
         if (operation.track === null) item.transform = evaluateTransform(item, time);
         else item.transform = structuredClone(operation.track.from);
-        item.track = structuredClone(operation.track); break;
+        delete item.animation;item.track = structuredClone(operation.track); break;
       }
       case 'aim_camera': {
         const eye = new Vector3(...operation.position), target = new Vector3(...operation.target);

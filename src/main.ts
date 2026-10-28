@@ -15,8 +15,11 @@ import { bindComponents, componentInspector } from './components/inspector';
 import { inputController } from './components/model';
 import { applyTransformModifiers } from './components/transform';
 import { PerformanceSession } from './performance/session';
-import { repositionTrack, trackPoses } from './performance/motion';
-import { createObject, cloneDocument, evaluateTransform, parseDocument, serializeDocument, History, createEmptyScene, createCamera, createShot, addIndependentShot, shotCamera, MAX_CAMERAS, sceneEntity, validateDocument } from './model';
+import { trackPoses, transformSchema } from './performance/motion';
+import { createObject, cloneDocument, evaluateComponents, evaluateFov, evaluateTransform, animationFor, ensureAnimation, parseDocument, serializeDocument, History, createEmptyScene, createCamera, createShot, addIndependentShot, shotCamera, MAX_CAMERAS, sceneEntity, validateDocument } from './model';
+import { emptyAnimation, evaluateProperty, frameAtTime, keepRecordedTake, movePropertyKeys, duplicatePropertyKeys, propertyPaths, putKey, putTransformKeys, putVectorKeys, removePropertyKeys, retimeTake, setKeyInterpolation, timeAtFrame, type PropertyPath, type VectorProperty } from './animation/model';
+import { groupPaths, keyButton, keyState, renderPropertyRows, type PropertyGroup, type SelectedPropertyKey } from './animation/panel';
+import './animation/panel.css';
 import type { Axis, MotionTrack, PrimitiveKind, SceneDocument, SceneEntity, SceneObject, ProjectContent, Shot, ToolMode, Transform } from './types';
 import { ReferenceDialog } from './reference/dialog';
 import { SceneEditPanel } from './scene-edit/panel';
@@ -89,15 +92,15 @@ app.innerHTML = `
 </main>
 <section class="timeline-panel" id="timelinePanel" aria-label="Animation timeline">
   <div class="panel-resize-handle" id="timelineResizeHandle" role="separator" aria-label="Resize timeline" aria-orientation="horizontal" aria-controls="timelinePanel" tabindex="0" title="Drag to resize · Double-click to reset"></div>
-  <div class="timeline-toolbar"><button id="timelineToggle" data-action="timeline" aria-expanded="false" aria-controls="timelineRows" title="Show or hide tracks">${icon('timeline')}Timeline<span class="timeline-chevron">⌃</span></button><div class="transport"><button data-action="rewind" class="icon-button" aria-label="Go to start">${icon('rewind')}</button><button data-action="play" id="playButton" class="play-button" aria-label="Play">${icon('play')}</button><span class="timecode" id="timecode" data-current-time>00:00.00</span><span class="timecode-separator">/</span><span class="timecode" id="endTimecode" data-end-time>00:05.00</span></div><label class="duration-control">Duration <input type="number" id="duration" aria-label="Scene duration" min="1" max="60" step="1"/> s</label></div>
-  <div class="timeline-content" id="timelineContent"><div class="timeline-ruler-row"><div class="track-heading">SHOT / SCENE ENTITY</div><div id="timeRuler" class="time-ruler" role="slider" tabindex="0" aria-label="Timeline playhead" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"></div></div><div id="timelineRows" class="timeline-rows"></div></div>
+  <div class="timeline-toolbar"><button id="timelineToggle" data-action="timeline" aria-expanded="false" aria-controls="timelineRows" title="Show or hide tracks">${icon('timeline')}Timeline<span class="timeline-chevron">⌃</span></button><div class="transport"><button data-action="rewind" class="icon-button" aria-label="Go to start">${icon('rewind')}</button><button data-action="play" id="playButton" class="play-button" aria-label="Play">${icon('play')}</button><span class="timecode" id="timecode" data-current-time>00:00.00</span><span class="timecode-separator">/</span><span class="timecode" id="endTimecode" data-end-time>00:05.00</span></div><div class="animation-toolbar"><button data-action="auto-key" id="autoKey" aria-pressed="false">● Auto Key Off</button><label>Frame <input type="number" id="animationFrame" aria-label="Current frame" min="0" step="1"/></label><select id="animationFps" aria-label="Timeline frame rate"><option value="24">24 fps</option><option value="30">30 fps</option></select><select id="animationInterpolation" aria-label="Keyframe interpolation" disabled><option value="linear">Linear</option><option value="constant">Hold</option><option value="smooth">Smooth</option><option value="quaternion">Quaternion</option></select><button data-action="duplicate-key" id="duplicateKey" disabled>Duplicate</button><button data-action="delete-key" id="deleteKey" disabled>Delete</button><button data-action="samples" id="samplesToggle" hidden>Show all samples</button></div><label class="duration-control">Duration <input type="number" id="duration" aria-label="Scene duration" min="1" max="60" step="1"/> s</label></div>
+  <div class="timeline-content" id="timelineContent"><div class="timeline-ruler-row"><div class="track-heading">SHOT / PROPERTY</div><div class="animation-ruler-window"><div id="timeRuler" class="time-ruler" role="slider" tabindex="0" aria-label="Timeline playhead" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"></div></div></div><div id="timelineRows" class="timeline-rows"></div></div>
 </section>
 <footer class="status-bar"><section id="assetPanel" aria-label="Asset manager"></section><span id="statusText" role="status">Ready</span><button data-action="shortcuts">${icon('help')}Shortcuts</button></footer>
 <dialog id="newProjectDialog"><div class="dialog-heading"><h2>Start an empty project?</h2></div><p>Your current project and chats will be downloaded first.</p><div class="change-actions"><button data-action="cancel-new-project">Cancel</button><button data-action="confirm-new-project" class="primary-button">Download &amp; start empty</button></div></dialog>
 <input id="openFile" type="file" accept=".json,application/json" hidden/>
 <dialog id="sceneSnapshotDialog" aria-labelledby="sceneSnapshotTitle"><div class="dialog-heading"><h2 id="sceneSnapshotTitle">Top view</h2><button data-action="close-snapshot" aria-label="Close top view">✕</button></div><img id="sceneSnapshotImage" class="scene-snapshot-image" alt="Top-down scene layout with object IDs"/><div class="snapshot-footer"><span id="sceneSnapshotInfo"></span><div><button data-action="refresh-snapshot">Refresh</button><button data-action="download-snapshot" class="primary-button">Download PNG</button></div></div></dialog>
 <dialog id="previewDialog" aria-labelledby="previewTitle"><div class="dialog-heading"><h2 id="previewTitle">Shot preview</h2><button data-action="close-preview" aria-label="Close shot preview">✕</button></div><div id="expandedPreview"></div><div class="preview-transport"><button class="play-button" data-action="play" aria-label="Play">${icon('play')}</button><span class="timecode" data-current-time></span><span class="timecode-separator">/</span><span class="timecode" data-end-time></span></div></dialog>
-<dialog id="shortcutsDialog"><div class="dialog-heading"><h2>Make yourself at home.</h2><button data-action="close-shortcuts" aria-label="Close shortcuts">✕</button></div><p class="muted">A few controls for your little stage.</p><dl class="shortcut-list"><dt>Orbit / pan / zoom</dt><dd>Left drag / Middle drag / Scroll</dd><dt>Fly around the scene</dt><dd>Hold right mouse + W A S D · Q / E up & down</dd><dt>Asset drawer</dt><dd>B · configurable in the bottom bar</dd><dt>Object controls</dt><dd>W/S forward/back · A/D turn · R record · Esc exit</dd><dt>Move / rotate / scale</dt><dd>G / R / S</dd><dt>Constrain an axis</dt><dd>X / Y / Z</dd><dt>Box select / add to selection</dt><dd>Shift drag empty space / Ctrl Shift drag</dd><dt>Multi-select in Hierarchy</dt><dd>Ctrl click / Shift click a range</dd><dt>Drop to surface</dt><dd>Double-click the green Y move handle</dd><dt>View orientation</dt><dd>Click an axis / drag the upper-right gizmo</dd><dt>Focus selection</dt><dd>F</dd><dt>Play / pause</dt><dd>Space</dd><dt>Duplicate / delete</dt><dd>Ctrl D / Delete</dd><dt>Undo / redo</dt><dd>Ctrl Z / Ctrl Shift Z</dd><dt>Save locally</dt><dd>Ctrl S</dd></dl><p class="dialog-note">Animate with Start and End poses. The camera has its own track.</p></dialog>
+<dialog id="shortcutsDialog"><div class="dialog-heading"><h2>Make yourself at home.</h2><button data-action="close-shortcuts" aria-label="Close shortcuts">✕</button></div><p class="muted">A few controls for your little stage.</p><dl class="shortcut-list"><dt>Orbit / pan / zoom</dt><dd>Left drag / Middle drag / Scroll</dd><dt>Fly around the scene</dt><dd>Hold right mouse + W A S D · Q / E up & down</dd><dt>Asset drawer</dt><dd>B · configurable in the bottom bar</dd><dt>Object controls</dt><dd>W/S forward/back · A/D turn · R record · Esc exit</dd><dt>Move / rotate / scale</dt><dd>G / R / S</dd><dt>Constrain an axis</dt><dd>X / Y / Z</dd><dt>Box select / add to selection</dt><dd>Shift drag empty space / Ctrl Shift drag</dd><dt>Multi-select in Hierarchy</dt><dd>Ctrl click / Shift click a range</dd><dt>Drop to surface</dt><dd>Double-click the green Y move handle</dd><dt>View orientation</dt><dd>Click an axis / drag the upper-right gizmo</dd><dt>Focus selection</dt><dd>F</dd><dt>Insert property key</dt><dd>Hover or focus a property · I</dd><dt>Play / pause</dt><dd>Space</dd><dt>Duplicate / delete</dt><dd>Ctrl D / Delete</dd><dt>Undo / redo</dt><dd>Ctrl Z / Ctrl Shift Z</dd><dt>Save locally</dt><dd>Ctrl S</dd></dl><p class="dialog-note">Use Key Transform for a whole pose, or key an individual property and expand its axes in the timeline.</p></dialog>
 `;
 
 const projectStorage = new ProjectStorage({ getItem: key => localStorage.getItem(key), setItem: (key, value) => localStorage.setItem(key, value) });
@@ -108,7 +111,7 @@ const emptyView = createEmptyScene('empty-view', 'No scene');
 let doc: SceneDocument = project.scenes.find(scene => scene.id === project.activeSceneId) ?? emptyView;
 let history = new History<ProjectContent>(projectContent(project));
 const selection = new EditorSelection(doc.objects.find(item=>!item.track)?.id ?? doc.objects[0]?.id ?? null);
-let transformEdit: { before: SceneEntity[]; time: number; wholeMotion: boolean; changed: boolean } | null = null;
+let transformEdit: { before: SceneEntity[]; time: number; wholeMotion: boolean; changed: boolean; drafts: Map<string,{time:number;value:number}> } | null = null;
 let tool: ToolMode = 'translate';
 let axis: Axis | null = null;
 let time = 0;
@@ -127,6 +130,14 @@ let performanceSession: PerformanceSession | null = null;
 let storageAvailable = true;
 let timelineOpen = false;
 let timelineHeight = window.innerHeight <= 720 ? 180 : 220;
+let autoKey = false, showAxisKeys = false, showAllSamples = false, animationZoom=1;
+let openProperties = new Set<PropertyGroup>(), selectedPropertyKey: SelectedPropertyKey | null = null;
+let hoveredProperty: PropertyGroup | null = null;
+const unkeyed = new Map<string, {time:number;value:number}>();
+$('#animationFps').insertAdjacentHTML('afterend','<select id="animationZoom" aria-label="Timeline zoom"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select>');
+function applyTimelineZoom(){const width=$('.animation-ruler-window').clientWidth;if(width)$('#timelinePanel').style.setProperty('--animation-lane-width',`${Math.round(width*animationZoom)}px`);$('#timeRuler').style.transform=`translateX(-${$('#timelineRows').scrollLeft}px)`;}
+new ResizeObserver(applyTimelineZoom).observe($('.animation-ruler-window'));
+$('#timelineRows').addEventListener('scroll',()=>{$('#timeRuler').style.transform=`translateX(-${$('#timelineRows').scrollLeft}px)`;});
 try { const saved=Number(localStorage.getItem('littletake.timeline.height')); if(Number.isFinite(saved)&&saved>0)timelineHeight=saved; } catch {}
 let libraryTab: 'objects'|'assets' = 'objects';
 let editPreview: ProjectContent | null = null;
@@ -153,6 +164,7 @@ function syncDocument(){
 }
 function replaceContent(next:ProjectContent,focus?:{sceneId:string|null;shotId:string|null}){
   const content=updateAssetInstances(validateProjectContent(next),libraryAssets).project; if(!content.assets)delete project.assets;Object.assign(project,content);
+  for(const key of unkeyed.keys()){const [sceneId,id]=key.split('|'),scene=project.scenes.find(item=>item.id===sceneId);if(!scene||!sceneEntity(scene,id))unkeyed.delete(key);}
   if(focus){project.activeSceneId=focus.sceneId;project.activeShotId=focus.shotId;}
   syncDocument();
 }
@@ -247,6 +259,7 @@ function pause() { const wasPlaying=playing; playing=false; renderTransport(); i
 function select(id: string | null) { selectIds(id ? [id] : [], 'replace'); }
 function selectIds(ids: string[], mode: SelectionMode, range = false) {
   if(performanceSession)return;flushFieldEdit();
+  const previous=selection.active;
   const objects=visibleScene().objects.map(item=>item.id),cameraId=ids.find(id=>visibleScene().cameras.some(camera=>camera.id===id));
   if(cameraId)selection.active=cameraId;
   else {
@@ -255,6 +268,7 @@ function selectIds(ids: string[], mode: SelectionMode, range = false) {
     else selection.set(ids.filter(id=>objects.includes(id)),mode);
   }
   const id=selection.active;if(id)setLibraryTab('objects');
+  if(previous!==id){selectedPropertyKey=null;openProperties.clear();renderTimeline();}
   if(selection.ids.length>1)pause();
   const scene=visibleScene(),camera=scene.cameras.find(item=>item.id===id);
   if(camera&&activeShot()?.cameraId!==camera.id){
@@ -267,25 +281,101 @@ function selectIds(ids: string[], mode: SelectionMode, range = false) {
 }
 function setSidePanel(panel: 'muse'|'inspector') { $('#sceneAI').hidden=panel!=='muse';$('#inspector').hidden=panel!=='inspector';document.querySelectorAll<HTMLButtonElement>('[data-panel]').forEach(button=>{const active=button.dataset.panel===panel;button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;}); }
 function clamp(value: number,min: number,max: number) { return Math.max(min,Math.min(max,value)); }
-function atEndpoint(item: SceneEntity) { if(item.track?.samples)return true;return !item.track || Math.abs(time-item.track.start)<0.025 || Math.abs(time-(item.track.start+item.track.duration))<0.025; }
-function endpoint(item: SceneEntity): 'from'|'to' { return item.track && Math.abs(time-(item.track.start+item.track.duration)) < Math.abs(time-item.track.start) ? 'to':'from'; }
-function setPose(item: SceneEntity, pose: Transform) { const safe=copyPose(pose); safe.position=safe.position.map((v,i)=>clamp(Number.isFinite(v)?v:item.transform.position[i],-1000,1000)) as Transform['position']; safe.rotation=safe.rotation.map((v,i)=>clamp(Number.isFinite(v)?v:item.transform.rotation[i],-360000,360000)) as Transform['rotation']; safe.scale=safe.scale.map((v,i)=>clamp(Number.isFinite(v)?v:item.transform.scale[i],0.01,100)) as Transform['scale']; if(item.track?.samples){repositionTrack(item.track,evaluateTransform(item,time),safe);item.transform=copyPose(item.track.from);}else if(item.track) item.track[endpoint(item)]=safe; else item.transform=safe; }
-function syncStage() { const item=entity(), visibleDoc=visibleScene(),session=performanceSession;
+const fps = () => doc.fps ?? 24;
+const snapFrame = (value:number) => clamp(timeAtFrame(frameAtTime(value,fps()),fps()),0,doc.duration);
+const draftId = (item:SceneEntity,path:PropertyPath) => `${doc.id}|${item.id}|${path}`;
+function currentDraft(item:SceneEntity,path:PropertyPath) {
+  const draft=unkeyed.get(draftId(item,path)); return draft && Math.abs(draft.time-time)<1e-6 ? draft : undefined;
+}
+function propertyValue(item:SceneEntity,path:PropertyPath):number {
+  const draft=currentDraft(item,path);if(draft)return draft.value;
+  if(path==='fov')return 'fov' in item?evaluateFov(item,time):45;
+  const [group,axis]=path.split('.') as [VectorProperty,'x'|'y'|'z'],index='xyz'.indexOf(axis);
+  if(group==='pivot') {
+    const pivot='kind' in item?evaluateComponents(item,time)?.find(component=>component.type==='pivot'):undefined;
+    return pivot?.type==='pivot'?pivot.offset[index]:0;
+  }
+  return evaluateTransform(item,time)[group][index];
+}
+function displayedPose(item:SceneEntity):Transform {
+  const pose=evaluateTransform(item,time);
+  for(const group of ['position','rotation','scale'] as const) for(const [index,axis] of ['x','y','z'].entries()){
+    const draft=currentDraft(item,`${group}.${axis}` as PropertyPath);if(draft)pose[group][index]=draft.value;
+  }
+  return pose;
+}
+function sceneWithDrafts(scene:SceneDocument):SceneDocument {
+  const overlay=(item:SceneEntity):SceneEntity=>{
+    const paths=['position','rotation','scale','pivot'].flatMap(group=>propertyPaths(group as VectorProperty)).concat('fov');
+    if(!paths.some(path=>currentDraft(item,path)))return item;
+    const copy=structuredClone(item);copy.transform=displayedPose(item);copy.track=null;delete copy.animation;
+    if('fov' in copy && 'fov' in item)copy.fov=propertyValue(item,'fov');
+    if('kind' in copy && 'kind' in item){copy.components=structuredClone(evaluateComponents(item,time));const pivot=copy.components?.find(component=>component.type==='pivot');if(pivot?.type==='pivot')pivot.offset=['x','y','z'].map(axis=>propertyValue(item,`pivot.${axis}` as PropertyPath)) as Transform['position'];}
+    return copy;
+  };
+  return {...scene,objects:scene.objects.map(item=>overlay(item) as SceneObject),cameras:scene.cameras.map(item=>overlay(item) as typeof item)};
+}
+function propertyValues(item:SceneEntity,group:PropertyGroup):number[] {
+  return groupPaths(group).map(path=>propertyValue(item,path));
+}
+function editProperty(item:SceneEntity,path:PropertyPath,value:number):boolean {
+  const animation=animationFor(item),keys=animation?.curves[path]??[],existing=keys.some(key=>Math.abs(key.time-time)<1e-6);
+  const [group,axis]=path.split('.') as [VectorProperty,'x'|'y'|'z'];const index='xyz'.indexOf(axis);
+  if(autoKey||existing) {
+    const next=ensureAnimation(item);
+    if(autoKey && path!=='fov'){
+      const values=propertyValues(item,group) as Transform['position'];values[index]=value;putVectorKeys(next,group,time,values);
+      groupPaths(group).forEach(key=>{if(currentDraft(item,key))unkeyed.delete(draftId(item,key));});
+    }else{
+      const orientation=group==='rotation'?displayedPose(item).rotation:undefined;if(orientation)orientation[index]=value;
+      putKey(next,path,time,value,orientation);if(currentDraft(item,path))unkeyed.delete(draftId(item,path));
+    }
+    return true;
+  }
+  if(!keys.length){
+    if(path==='fov'&&'fov' in item)item.fov=value;
+    else if(group==='pivot'&&'kind' in item){const pivot=item.components?.find(component=>component.type==='pivot');if(pivot?.type==='pivot')pivot.offset[index]=value;}
+    else if(group!=='pivot')item.transform[group][index]=value;
+    return true;
+  }
+  const pending=unkeyed.get(draftId(item,path));
+  if(pending&&Math.abs(pending.time-time)>1e-6){status('An unkeyed change is waiting at another time · Review it first');return false;}
+  unkeyed.set(draftId(item,path),{time,value});status('Unkeyed change · Insert a key to keep it');return false;
+}
+function keyProperty(item:SceneEntity,group:PropertyGroup,toggle:boolean):void {
+  const paths=groupPaths(group),animation=animationFor(item),remove=toggle&&keyState(animation,group,time)==='on-key'&&!paths.some(path=>currentDraft(item,path)),values=propertyValues(item,group);
+  const target=ensureAnimation(item);
+  if(remove)removePropertyKeys(target,paths,time);
+  else if(group==='fov')putKey(target,'fov',time,values[0]);
+  else putVectorKeys(target,group,time,values as Transform['position']);
+  paths.forEach(path=>{if(currentDraft(item,path))unkeyed.delete(draftId(item,path));});
+  selectedPropertyKey=remove?null:{group,time};changed(remove?'Property key removed':'Property key added');
+}
+function keyTransform(item:SceneEntity):void {
+  const pose=displayedPose(item),target=ensureAnimation(item);
+  if('fov' in item){putVectorKeys(target,'position',time,pose.position);putVectorKeys(target,'rotation',time,pose.rotation);}
+  else putTransformKeys(target,time,pose);
+  for(const group of ['position','rotation','scale'] as const)for(const path of propertyPaths(group))if(currentDraft(item,path))unkeyed.delete(draftId(item,path));
+  selectedPropertyKey=null;changed('Transform keyed');
+}
+function syncStage() { const item=entity(), visibleDoc=sceneWithDrafts(visibleScene()),session=performanceSession;
   const component=inputController(session?.before.components);stage?.setControlled(session?{id:session.before.id,pose:session.preview(time),world:component?.type==='movement'&&component.space==='world'}:null);
-  stage?.update(visibleDoc,Math.min(time,visibleDoc.duration),selection.ids,Boolean(editPreview) || !!session || playing || Boolean(selection.ids.length===1 && item && !atEndpoint(item)), editPreview ? previewShotId : project.activeShotId,(editPreview??project).assets??[]); }
+  stage?.update(visibleDoc,Math.min(time,visibleDoc.duration),selection.ids,Boolean(editPreview) || !!session || playing, editPreview ? previewShotId : project.activeShotId,(editPreview??project).assets??[]); }
 function seek(value: number) { time=clamp(value,0,visibleScene().duration); renderTime(); syncStage(); if(!playing)renderInspector(); }
 function renderTransport() { document.querySelectorAll<HTMLButtonElement>('[data-action="play"]').forEach(button=>{button.innerHTML=icon(playing?'pause':'play');button.setAttribute('aria-label',playing?'Pause':'Play');button.classList.toggle('is-playing',playing);}); }
 function renderTime() {
   const doc=visibleScene(), shot=activeShot();
   const camera=shotCamera(doc,shot?.id??null)??doc.cameras.find(item=>item.id===selection.active)??doc.cameras[0];
   $('#shotFrameStatus').textContent=shot?(time<shot.start||time>shot.start+shot.duration?'Outside shot range':camera?.name+' · 16:9'):camera?camera.name+' · Preview':'No camera';
-  $<HTMLButtonElement>('[data-action="export-shot"]').disabled=!shot||!!editPreview||!!performanceSession;
+  $<HTMLButtonElement>('[data-action="export-shot"]').disabled=!shot||!!editPreview||!!performanceSession||[...unkeyed.keys()].some(key=>key.startsWith(`${doc.id}|`));
   document.querySelectorAll<HTMLElement>('[data-current-time]').forEach(node=>node.textContent=timecode(time)); document.querySelectorAll<HTMLElement>('[data-end-time]').forEach(node=>node.textContent=timecode(doc.duration));
   const fraction=time/doc.duration*100;
   document.querySelectorAll<HTMLElement>('.lane-playhead').forEach(node=>node.style.left=`${fraction}%`);
   const label=$<HTMLElement>('[data-playhead-time]');label.textContent=time.toFixed(2);label.style.transform=`translateX(${fraction<4?0:fraction>96?-100:-50}%)`;
   $('#timeRuler').setAttribute('aria-valuenow',String(num(time))); $('#timeRuler').setAttribute('aria-valuemax',String(doc.duration));
   $('#timeRuler').setAttribute('aria-valuetext',`${time.toFixed(2)} seconds`);
+  const frame=$<HTMLInputElement>('#animationFrame');if(document.activeElement!==frame)frame.value=String(frameAtTime(time,fps()));frame.max=String(frameAtTime(doc.duration,fps()));
+  $<HTMLSelectElement>('#animationFps').value=String(fps());$('#autoKey').textContent=`● Auto Key ${autoKey?'On':'Off'}`;$('#autoKey').setAttribute('aria-pressed',String(autoKey));
 }
 function renderSelection() {
   document.querySelectorAll<HTMLElement>('[data-select]').forEach(node=>{ const selected=selection.ids.includes(node.dataset.select!);node.classList.toggle('selected',selected);node.classList.toggle('active-selection',node.dataset.select===selection.active);node.setAttribute('aria-pressed',String(selected)); });
@@ -342,15 +432,13 @@ function visibilityCard(items: SceneObject[]): string {
   const hidden=items.filter(item=>item.hidden).length,all=hidden===items.length;
   return '<div class="visibility-card"><div>'+(all?'Hidden':hidden?'Mixed visibility':'Visible')+'<small>'+(hidden?hidden+' hidden · excluded from preview and export':'Shown in scene, preview and export')+'</small></div><button data-action="'+(all?'show-selection':'hide-selection')+'">'+(all?'Show':'Hide')+'</button></div>';
 }
-function poseFields(label: string,group: keyof Transform,values: number[],disabled: boolean) {
-  return `<div class="property-group"><label class="property-label">${label}</label><div class="vector-inputs">${['X','Y','Z'].map((a,i)=>`<label class="vector-field axis-${a.toLowerCase()}"><span>${a}</span><input type="number" aria-label="${label} ${a}" data-pose="${group}" data-component="${i}" step="${group==='rotation'?5:0.1}" value="${num(values[i])}" ${group==='scale'?'min="0.01" max="100"':''} ${disabled?'disabled':''}/></label>`).join('')}</div></div>`;
+function poseFields(label: string,group: keyof Transform,values: number[],disabled: boolean,item:SceneEntity) {
+  const animation=animationFor(item);
+  return `<div class="property-group"><div class="property-label property-label-key"><span>${label}</span>${keyButton(animation,group,time,disabled)}</div><div class="vector-inputs">${['X','Y','Z'].map((a,i)=>{const path=`${group}.${a.toLowerCase()}` as PropertyPath,key=animation?.curves[path]?.some(k=>Math.abs(k.time-time)<1e-6);return `<label class="vector-field axis-${a.toLowerCase()}"><span>${a}</span><input type="number" aria-label="${label} ${a}" data-pose="${group}" data-component="${i}" step="${group==='rotation'?5:0.1}" value="${num(values[i])}" ${group==='scale'?'min="0.01" max="100"':''} ${disabled?'disabled':''}/>${showAxisKeys?`<button type="button" class="property-key ${key?'on-key':''}" data-key-path="${path}" aria-label="${key?'Remove':'Insert'} ${label} ${a} keyframe" ${disabled?'disabled':''}>${key?'◆':'◇'}</button>`:''}</label>`;}).join('')}</div></div>`;
 }
-function motionFields(item:SceneEntity,locked:boolean){
-  const track=item.track;
-  const controls=track?.samples?'<div class="recorded-note">Recorded '+track.duration.toFixed(1)+' s · '+(track.samples.length+2)+' frames<br/>Placement moves the entire motion path.'+('kind' in item?'<button data-action="record-performance" class="primary-button">Record Again</button>':'')+'</div>':track?
-    '<div class="keyframe-switch"><button data-endpoint="from" class="'+(!locked&&endpoint(item)==='from'?'active':'')+'">'+icon('key')+'Start<span>'+num(track.start)+'s</span></button><button data-endpoint="to" class="'+(!locked&&endpoint(item)==='to'?'active':'')+'">'+icon('key')+'End<span>'+num(track.start+track.duration)+'s</span></button></div><div class="timing-fields"><label>Starts at<input id="trackStart" aria-label="Motion start time" type="number" min="0" max="'+(visibleScene().duration-track.duration)+'" step="0.1" value="'+num(track.start)+'"/></label><label>Duration<input id="trackDuration" aria-label="Motion duration" type="number" min="0.1" max="'+(visibleScene().duration-track.start)+'" step="0.1" value="'+num(track.duration)+'"/></label></div><p class="property-note">'+(locked?'Choose Start or End to edit a pose.':'Adjust this pose in the scene or with the fields above.')+'</p>':
-    '<button class="add-motion" data-action="add-motion">'+icon('plus')+'Add motion</button><p class="property-note">Set a start and end pose. LittleTake fills the space between.</p>';
-  return '<div class="inspector-section animation-section"><div class="section-label">'+('fov' in item?'CAMERA MOTION':'ANIMATION')+(track?'<button class="icon-button" data-action="remove-motion" aria-label="Remove motion">'+icon('trash')+'</button>':'')+'</div>'+controls+'</div>';
+function componentAxisKey(item:SceneEntity,group:'pivot',index:number,disabled:boolean):string {
+  if(!showAxisKeys)return '';const axis='xyz'[index],path=`${group}.${axis}` as PropertyPath,key=animationFor(item)?.curves[path]?.some(value=>Math.abs(value.time-time)<1e-6);
+  return `<button type="button" class="property-key ${key?'on-key':''}" data-key-path="${path}" aria-label="${key?'Remove':'Insert'} Pivot Offset ${axis.toUpperCase()} keyframe" ${disabled?'disabled':''}>${key?'◆':'◇'}</button>`;
 }
 function renderInspector() {
   if(!performanceSession && !editPreview && document.activeElement instanceof HTMLInputElement && $('#inspector').contains(document.activeElement)) return;
@@ -367,33 +455,41 @@ function renderInspector() {
     return;
   }
   if(!item){$('#inspector').innerHTML='<div class="empty-inspector">'+icon('move')+'<h3>Nothing selected</h3><p>Select an object or camera to edit its properties.</p></div>';return;}
-  const pose=performanceSession?.preview(time)??evaluateTransform(item,Math.min(time,inspectedDoc.duration)),locked=Boolean(editPreview)||!!performanceSession||playing||!atEndpoint(item)||('kind' in item&&!!item.hidden),isCamera='fov' in item;
+  const pose=performanceSession?.preview(time)??displayedPose(item),locked=Boolean(editPreview)||!!performanceSession||playing||('kind' in item&&!!item.hidden),isCamera='fov' in item;
   const shot=isCamera&&activeShot()?.cameraId===item.id?activeShot():undefined,linked=inspectedDoc.shots.filter(shot=>shot.cameraId===item.id);
   const colors=['#b8ccce','#e8a28e','#f0d48d','#aebfa1','#9faed0','#e5d9c3','#b2a4bc','#555f66'];
   const title='<div class="inspector-title"><span class="entity-type">'+icon(isCamera?'camera':item.kind)+(isCamera?'CAMERA':item.kind.toUpperCase())+'</span><div><button data-action="duplicate" class="icon-button" aria-label="Duplicate selection">'+icon('duplicate')+'</button><button data-action="delete" class="icon-button" aria-label="Delete selection">'+icon('trash')+'</button></div></div><input class="entity-name" aria-label="Object name" id="entityName" maxlength="120" value="'+esc(item.name)+'"/>';
-  const transform='<div class="inspector-section"><div class="section-label">Transform'+(item.track?'<span class="pose-badge">'+(item.track.samples?'RECORDED':locked?'PREVIEW':endpoint(item)==='from'?'START POSE':'END POSE')+'</span>':'')+'</div>'+poseFields('Position','position',pose.position,locked)+poseFields('Rotation','rotation',pose.rotation,locked)+(isCamera?'<label class="property-label">Field of view <span class="input-unit">degrees</span><input type="number" id="cameraFov" aria-label="Camera field of view" min="10" max="120" step="1" value="'+item.fov+'"/></label>':poseFields('Scale','scale',pose.scale,locked))+'<div class="axis-constraint-row"><span>Constrain axis</span><div class="axis-tools" aria-label="Axis constraint"><button data-axis="X" class="axis-x" aria-label="Constrain X axis">X</button><button data-axis="Y" class="axis-y" aria-label="Constrain Y axis">Y</button><button data-axis="Z" class="axis-z" aria-label="Constrain Z axis">Z</button></div></div></div>';
+  const transform='<div class="inspector-section"><div class="section-label">Transform <div class="transform-key-actions"><button data-action="axis-keys" aria-pressed="'+showAxisKeys+'">'+(showAxisKeys?'Hide axis keys':'Axis keys')+'</button><button data-action="key-transform" '+(locked?'disabled':'')+'>◇ Key Transform</button></div></div>'+poseFields('Position','position',pose.position,locked,item)+poseFields('Rotation','rotation',pose.rotation,locked,item)+(isCamera?'<div class="property-label-key"><label class="property-label" for="cameraFov">Field of view <span class="input-unit">degrees</span></label>'+keyButton(animationFor(item),'fov',time,locked)+'</div><input type="number" id="cameraFov" aria-label="Camera field of view" min="10" max="120" step="1" value="'+num(propertyValue(item,'fov'))+'" '+(locked?'disabled':'')+'/>' :poseFields('Scale','scale',pose.scale,locked,item))+'<div class="axis-constraint-row"><span>Constrain axis</span><div class="axis-tools" aria-label="Axis constraint"><button data-axis="X" class="axis-x" aria-label="Constrain X axis">X</button><button data-axis="Y" class="axis-y" aria-label="Constrain Y axis">Y</button><button data-axis="Z" class="axis-z" aria-label="Constrain Z axis">Z</button></div></div></div>';
   const links=isCamera?'<div class="camera-shot-links">'+(linked.length?linked.map(shot=>'<button data-shot="'+esc(shot.id)+'">'+icon('camera')+esc(shot.name)+'</button>').join(''):'<button data-action="camera-shot">'+icon('plus')+'Create shot with this camera</button>')+'</div>'+(linked.length>1?'<p class="property-note">These '+linked.length+' shots share this camera’s framing and motion. Duplicate a shot for independent framing.</p>':''):'';
   const material='kind' in item?'<div class="inspector-section"><div class="section-label">MATERIAL</div><div class="color-palette">'+colors.map(color=>'<button class="color-swatch '+(item.color===color?'active':'')+'" style="--swatch:'+color+'" data-color="'+color+'" aria-label="Set color '+color+'"></button>').join('')+'<label class="custom-color" title="Custom color"><input type="color" aria-label="Custom object color" id="objectColor" value="'+item.color+'"/></label></div></div>':'';
   $('#inspector').innerHTML=title+links+('kind' in item?visibilityCard([item]):'')+transform+
-    ('kind' in item?componentInspector(item,Boolean(editPreview)||playing||!!performanceSession||!!item.hidden,performanceSession?.mode==='control'):'')+
+    ('kind' in item?componentInspector({...item,components:evaluateComponents(item,time)?.map(component=>component.type==='pivot'?{...component,offset:['x','y','z'].map(axis=>propertyValue(item,`pivot.${axis}` as PropertyPath)) as Transform['position']}:component)},Boolean(editPreview)||playing||!!performanceSession||!!item.hidden,performanceSession?.mode==='control',false,group=>keyButton(animationFor(item),group,time,locked),(group,index)=>componentAxisKey(item,group,index,locked)):'')+
     (isCamera?'<button class="add-motion camera-align" data-action="use-view">'+icon('eye')+'Use current scene view</button>':'')+
-    material+motionFields(item,locked)+(shot?shotFields(shot,inspectedDoc):'');
-  if('kind' in item){$('#inspector').insertAdjacentHTML('beforeend','<button class="asset-save-button" data-action="save-asset">☆ Create Independent Prefab…</button>');bindComponents($('#inspector'),item,()=>{(document.activeElement as HTMLElement)?.blur();changed('Component settings saved');},()=>performanceSession?exitPerformance():beginPerformance());}
+    material+(shot?shotFields(shot,inspectedDoc):'');
+  const pending=[...unkeyed.entries()].filter(([key,draft])=>key.startsWith(`${doc.id}|${item.id}|`)&&Math.abs(draft.time-time)<1e-6);
+  if(pending.length)$('#inspector').insertAdjacentHTML('beforeend',pending.map(([key])=>`<div class="pending-animation">Unkeyed ${esc(key.split('|')[2])} · <button data-discard-draft="${esc(key)}">Discard</button></div>`).join(''));
+  if('kind' in item){$('#inspector').insertAdjacentHTML('beforeend','<button class="asset-save-button" data-action="save-asset">☆ Create Independent Prefab…</button>');bindComponents($('#inspector'),item,()=>{(document.activeElement as HTMLElement)?.blur();if(item.animation&&!item.components?.some(component=>component.type==='pivot'))for(const path of propertyPaths('pivot'))delete item.animation.curves[path];changed('Component settings saved');},()=>performanceSession?exitPerformance():beginPerformance(),true);}
   if('asset' in item&&item.asset)$('#entityName').insertAdjacentHTML('afterend',`<button class="asset-instance-edit" data-action="edit-asset">◇ Edit Prefab</button>`);
   if(performanceSession){const button=$('#inspector').querySelector<HTMLElement>('[data-component-action]');if(button&&performanceSession.mode!=='control')button.textContent=performanceSession.mode==='record'?'Recording…':'Review Recording';}
   if(performanceSession)$('#inspector').querySelectorAll<HTMLInputElement|HTMLButtonElement>('.entity-name,[data-action],[data-color],#objectColor').forEach(node=>node.disabled=true);
 }
 function renderTimeline() {
   const doc=visibleScene(),tickCount=Math.min(10,Math.ceil(doc.duration));
-  $('#timeRuler').innerHTML=Array.from({length:tickCount+1},(_,i)=>'<span class="time-tick" style="left:'+(i/tickCount*100)+'%">'+num(i/tickCount*doc.duration)+'s</span>').join('')+'<span class="lane-playhead ruler-playhead"><span data-playhead-time class="playhead-time"></span></span>';
+  $('#timeRuler').innerHTML=Array.from({length:tickCount+1},(_,i)=>'<span class="time-tick" style="left:'+(i/tickCount*100)+'%">'+Math.round(i/tickCount*doc.duration*fps())+'f</span>').join('')+'<span class="lane-playhead ruler-playhead"><span data-playhead-time class="playhead-time"></span></span>';
   const shots=doc.shots.map(shot=>{
     const camera=shotCamera(doc,shot.id)!;
     return '<div class="timeline-row shot-row"><button class="track-label" data-shot="'+esc(shot.id)+'" aria-label="Select shot '+esc(shot.name)+'">'+icon('camera')+'<span>'+esc(shot.name)+'<small>→ '+esc(camera.name)+'</small></span></button><div class="track-lane"><button class="shot-range" data-shot="'+esc(shot.id)+'" data-shot-clip="'+esc(shot.id)+'" aria-label="Select '+esc(shot.name)+' range" title="Select scene time · drag to move or trim" style="left:'+(shot.start/doc.duration*100)+'%;width:'+(shot.duration/doc.duration*100)+'%"><span class="clip-edge" data-trim="left"></span><span>'+esc(shot.name)+' · '+num(shot.start)+'–'+num(shot.start+shot.duration)+'s</span><span class="clip-edge" data-trim="right"></span></button><span class="lane-playhead"></span></div></div>';
   }).join('');
-  const motion=[...doc.objects,...doc.cameras].map(item=>performanceSession?.draft&&performanceSession.before.id===item.id?{...item,track:performanceSession.draft}:item).map(item=>
-    '<div class="timeline-row"><button class="track-label" data-select="'+esc(item.id)+'">'+icon('fov' in item?'camera':item.kind)+'<span>'+esc(item.name)+'</span></button><div class="track-lane" data-lane="'+esc(item.id)+'">'+(item.track?'<div class="motion-clip '+('fov' in item?'camera-clip':'')+'" data-clip="'+esc(item.id)+'" style="left:'+(item.track.start/doc.duration*100)+'%;width:'+(item.track.duration/doc.duration*100)+'%" title="Drag to move; drag edges to trim"><span class="clip-edge" data-trim="left"></span><span class="clip-diamond">◆</span><span class="clip-title">'+('fov' in item?'Camera move':item.track.samples?(performanceSession?.before.id===item.id?'Review':'Recorded'):'Motion')+'</span><span class="clip-diamond end-diamond">◆</span><span class="clip-edge" data-trim="right"></span></div>':'<button class="empty-track" data-motion-for="'+esc(item.id)+'">+ Add motion</button>')+'<span class="lane-playhead"></span></div></div>'
-  ).join('');
-  $('#timelineRows').innerHTML='<div class="timeline-group">SHOTS <span>One camera · a range of scene time</span><button data-action="add-shot" aria-label="Add shot">'+icon('plus')+'New shot</button></div>'+shots+'<div class="timeline-group">SCENE MOTION</div>'+motion;
+  const item=sceneEntity(doc,selection.active),animation=item?animationFor(item):undefined;
+  const groups:PropertyGroup[]=item?('fov' in item?['position','rotation','fov']:['position','rotation','scale',...(item.components?.some(component=>component.type==='pivot')?['pivot' as const]:[])]):[];
+  const pending=[...unkeyed.entries()].filter(([key])=>key.startsWith(`${doc.id}|`));
+  const summary=item?esc(item.name):'Select an object or camera';
+  $('#timelineRows').innerHTML='<div class="timeline-group">SHOTS <span>One camera · a range of scene time</span><button data-action="add-shot" aria-label="Add shot">'+icon('plus')+'New shot</button></div>'+shots+'<div class="timeline-group">PROPERTIES <span>'+summary+'</span>'+(pending.length?'<button data-action="review-draft">'+pending.length+' unkeyed change · Review</button>':'')+'</div>'+renderPropertyRows(animation,groups,openProperties,selectedPropertyKey,doc.duration,fps(),showAllSamples);
+  const selected=selectedPropertyKey,paths=selected?(selected.path?[selected.path]:groupPaths(selected.group)):[],key=selected?paths.flatMap(path=>animation?.curves[path]??[]).find(key=>Math.abs(key.time-selected.time)<1e-6):undefined;
+  $<HTMLButtonElement>('#duplicateKey').disabled=!key;$<HTMLButtonElement>('#deleteKey').disabled=!key;
+  const interpolation=$<HTMLSelectElement>('#animationInterpolation');interpolation.disabled=!key;if(key)interpolation.value=key.interpolation;
+  const samples=$<HTMLButtonElement>('#samplesToggle');samples.hidden=!animation?.takes.length;samples.textContent=showAllSamples?'Show fewer samples':'Show all samples';
+  applyTimelineZoom();
 }
 function renderAll() {
   renderNavigation();
@@ -401,19 +497,12 @@ function renderAll() {
   ($<HTMLInputElement>('#duration')).value=String(visibleScene().duration);
   renderOutliner();renderTimeline();syncStage();renderInspector();renderSelection();renderTransport();renderTime();assetsPanel?.update(project.assets);renderPerformance();
 }
-function addMotion(id=selection.active) {
-  const item=entity(id);if(!item || item.track)return;
-  pause();selection.active=item.id;const from=copyPose(item.transform),to=copyPose(from);
-  if('fov' in item)to.position[2]-=1.5;else to.position[0]+=2;
-  const shot=activeShot()?.cameraId===item.id?activeShot():undefined;
-  item.track={start:shot?.start??0,duration:shot?.duration??doc.duration,from,to};time=item.track.start+item.track.duration;setTimelineOpen(true);changed('Motion added · edit Start and End poses');
-}
 function duplicate() {
   if(selection.ids.length>1){
     const items=doc.objects.filter(item=>selection.ids.includes(item.id));
     if(doc.objects.length+items.length>100){status('This scene supports up to 100 objects');return;}
     pause();const copies:SceneObject[]=[];
-    for(const item of items){const copy=structuredClone(item);copy.id=nextId('object',[...doc.objects,...doc.cameras,...copies]);copy.name=item.name.slice(0,110)+' copy';copy.transform.position[0]=clamp(copy.transform.position[0]+1,-1000,1000);if(copy.track)for(const pose of trackPoses(copy.track))pose.position[0]=clamp(pose.position[0]+1,-1000,1000);copies.push(copy);}
+    for(const item of items){const copy=structuredClone(item);copy.id=nextId('object',[...doc.objects,...doc.cameras,...copies]);copy.name=item.name.slice(0,110)+' copy';copy.transform.position[0]=clamp(copy.transform.position[0]+1,-1000,1000);if(copy.track)for(const pose of trackPoses(copy.track))pose.position[0]=clamp(pose.position[0]+1,-1000,1000);if(copy.animation)for(const key of copy.animation.curves['position.x']??[])key.value=clamp(key.value+1,-1000,1000);copies.push(copy);}
     doc.objects.push(...copies);selection.set(copies.map(item=>item.id));changed(`${copies.length} objects duplicated`);return;
   }
   const item=entity();if(!item)return;pause();if(!('kind' in item)){if(doc.cameras.length>=MAX_CAMERAS){status('Scene camera limit reached');return;}const copy=structuredClone(item);copy.id=nextId('camera',[...doc.objects,...doc.cameras,...doc.shots]);copy.name=item.name.slice(0,110)+' copy';doc.cameras.push(copy);project.activeShotId=null;selection.active=copy.id;changed('Camera duplicated');return;}
@@ -421,6 +510,7 @@ function duplicate() {
   const next=structuredClone(item);next.id=nextObjectId();next.name=`${item.name.slice(0,110)} copy`;
   next.transform.position[0]=clamp(next.transform.position[0]+1,-1000,1000);
   if(next.track)for(const pose of trackPoses(next.track))pose.position[0]=clamp(pose.position[0]+1,-1000,1000);
+  if(next.animation)for(const key of next.animation.curves['position.x']??[])key.value=clamp(key.value+1,-1000,1000);
   doc.objects.push(next);selection.active=next.id;changed('Object duplicated');
 }
 function nextObjectIndex(){for(let index=1;;index++)if(!sceneEntity(doc,`object-${index}`))return index;}
@@ -428,9 +518,9 @@ function nextObjectId(){return `object-${nextObjectIndex()}`;}
 function insertAsset(asset:AssetDefinition,pose:Transform){
   if(editPreview||performanceSession||storageError)return;
   ensureScene();if(doc.objects.length>=100){status('This scene supports up to 100 objects');return;}
-  pause();flushFieldEdit();project.assets??=[];
-  project.assets=[...project.assets.filter(a=>a.id!==asset.id),structuredClone(asset)];
-  const item=instantiateAsset(asset,nextObjectId(),pose.position,doc.duration);item.transform=copyPose(pose);
+  pause();flushFieldEdit();
+  let item:SceneObject;try{item=instantiateAsset(asset,nextObjectId(),pose.position,doc.duration);}catch(error){status((error as Error).message);return;}
+  project.assets??=[];project.assets=[...project.assets.filter(a=>a.id!==asset.id),structuredClone(asset)];item.transform=copyPose(pose);
   const count=doc.objects.filter(o=>o.asset?.id===asset.id).length;if(count)item.name=`${asset.name.slice(0,110)} ${count+1}`;
   doc.objects.push(item);selection.active=item.id;time=0;setSidePanel('inspector');changed(`${item.name} placed in scene · Independent instance`);
 }
@@ -460,35 +550,43 @@ function beginPerformance(){
   const item=entity();if(performanceSession||editPreview||!item||!('kind' in item)||item.hidden||!inputController(item.components))return;
   pause();flushFieldEdit();sceneEditor?.sceneChanged();performanceSession=new PerformanceSession(item,time);assetsPanel?.setOpen(false);setSidePanel('inspector');renderAll();stage?.focusCanvas();status('Control active · R records · Esc keeps position and exits');
 }
-function applyPlacement(){
-  if(!performanceSession)return;
-  const item=entity(performanceSession.before.id);if(!item||!('kind' in item))return;
-  const next=performanceSession.placement();if(JSON.stringify(next)!==JSON.stringify(item)){Object.assign(item,next);changed('Placement saved · Entire motion path moved');}
+function applyPlacement():boolean{
+  if(!performanceSession)return false;
+  const item=entity(performanceSession.before.id);if(!item||!('kind' in item))return false;
+  try{const next=performanceSession.placement();if(JSON.stringify(next)!==JSON.stringify(item)){Object.assign(item,next);changed('Placement saved · Entire motion path moved');}return true;}
+  catch(error){status(`${error instanceof Error?error.message:'Placement could not be saved'} Use Discard Position to exit.`);return false;}
 }
-function exitPerformance(){if(!performanceSession)return;if(performanceSession.mode==='record'){stopPerformanceRecord();return;}if(performanceSession.mode==='review')return;applyPlacement();performanceSession=null;pause();renderAll();persist();synchronizeAssets(libraryAssets);}
+function exitPerformance(){if(!performanceSession)return;if(performanceSession.mode==='record'){stopPerformanceRecord();return;}if(performanceSession.mode==='review')return;if(!applyPlacement())return;performanceSession=null;pause();renderAll();persist();synchronizeAssets(libraryAssets);}
+function discardPosition(){if(!performanceSession||performanceSession.mode!=='control')return;performanceSession=null;pause();renderAll();persist();synchronizeAssets(libraryAssets);status('Positioning discarded');}
 function startPerformanceRecord(){
   if(!performanceSession||performanceSession.mode!=='control')return;
-  applyPlacement();performanceSession.start(doc.duration);time=performanceSession.time;playing=false;setTimelineOpen(true);renderAll();stage?.focusCanvas();
+  if(!applyPlacement())return;performanceSession.start(doc.duration);time=performanceSession.time;playing=false;setTimelineOpen(true);renderAll();stage?.focusCanvas();
 }
 function stopPerformanceRecord(){if(!performanceSession)return;performanceSession.stop();playing=false;time=performanceSession.time;renderAll();stage?.focusCanvas();}
 function discardPerformance(retry=false){if(!performanceSession)return;playing=false;performanceSession.discard();time=performanceSession.time;renderAll();if(retry)startPerformanceRecord();else stage?.focusCanvas();}
 function keepPerformance(){
   const session=performanceSession,item=session?entity(session.before.id):null;if(!session?.draft||!item)return;
-  Object.assign(item,session.keep());performanceSession=null;playing=false;changed('Recording kept · Shared across shots · Undo available');persist();synchronizeAssets(libraryAssets);
+  try{
+    const track=session.draft,frames=[{time:track.start,transform:track.from},...(track.samples??[]).map(sample=>({time:track.start+sample.at*track.duration,transform:sample.transform})),{time:track.start+track.duration,transform:track.to}];
+    const current=animationFor(item)??emptyAnimation();let n=1;while(current.takes.some(take=>take.id===`take-${n}`))n++;
+    item.animation=keepRecordedTake(current,`take-${n}`,frames,doc.duration);item.track=null;
+    performanceSession=null;playing=false;openProperties.clear();changed('Recording kept · Shared across shots · Undo available');persist();synchronizeAssets(libraryAssets);
+  }catch(error){status((error as Error).message);}
 }
 function renderPerformance(){
   const session=performanceSession,active=!!session,bar=$('#performanceBar');bar.hidden=!active;
   $('.stage-panel').classList.toggle('performance-active',active);
   $('#sceneAI').inert=active;$('#timelineContent').inert=active;$('.library-panel').inert=active;$('.app-header').inert=active;
   $<HTMLInputElement>('#duration').disabled=active||!!editPreview||doc===emptyView;$<HTMLSelectElement>('#shotSelect').disabled=active;
+  $<HTMLInputElement>('#animationFrame').disabled=active||!!editPreview;$<HTMLSelectElement>('#animationFps').disabled=active||!!editPreview;$<HTMLButtonElement>('#autoKey').disabled=active||!!editPreview;
   document.querySelectorAll<HTMLButtonElement>('[data-action="add-shot"],[data-action="rewind"],[data-action="top-view"]').forEach(b=>b.disabled=active||doc===emptyView);
   document.querySelectorAll<HTMLButtonElement>('[data-action="play"]').forEach(b=>b.disabled=!!session&&session.mode!=='review');
   if(!session)return;
   bar.dataset.mode=session.mode;
   const header=`<div><strong>${session.mode==='record'?'● Recording':session.mode==='review'?'Review Take':'Positioning'} · ${esc(session.before.name)}</strong><small>${session.mode==='review'?session.draft!.duration.toFixed(1)+' s · Awaiting review':inputController(session.before.components)?.type==='hinge'?'W/S open/close · Camera stays fixed':'W/S move · A/D turn · Camera stays fixed'}</small></div>`;
-  bar.innerHTML=header+(session.mode==='control'?'<button data-performance="record" class="primary-button">● Record <kbd>R</kbd></button><button data-performance="exit">Stop Control <kbd>Esc</kbd></button>':session.mode==='record'?`<span id="performanceClock">${timecode(time)}</span><button data-performance="stop" class="record-button">■ Stop Recording</button>`:'<button data-performance="preview">▷ Play Take</button><button data-performance="retry">↻ Record Again</button><button data-performance="discard">Discard</button><button data-performance="keep" class="primary-button">✓ Keep Take</button>');
+  bar.innerHTML=header+(session.mode==='control'?'<button data-performance="record" class="primary-button">● Record <kbd>R</kbd></button><button data-performance="exit">Stop Control <kbd>Esc</kbd></button><button data-performance="discard-position">Discard Position</button>':session.mode==='record'?`<span id="performanceClock">${timecode(time)}</span><button data-performance="stop" class="record-button">■ Stop Recording</button>`:'<button data-performance="preview">▷ Play Take</button><button data-performance="retry">↻ Record Again</button><button data-performance="discard">Discard</button><button data-performance="keep" class="primary-button">✓ Keep Take</button>');
   bar.querySelectorAll<HTMLButtonElement>('[data-performance]').forEach(button=>button.onclick=()=>{
-    switch(button.dataset.performance){case 'record':startPerformanceRecord();break;case 'exit':exitPerformance();break;case 'stop':stopPerformanceRecord();break;case 'preview':togglePlay();button.textContent=playing?'Ⅱ Pause':'▷ Play Take';break;case 'retry':discardPerformance(true);break;case 'discard':discardPerformance();break;case 'keep':keepPerformance();break;}
+    switch(button.dataset.performance){case 'record':startPerformanceRecord();break;case 'exit':exitPerformance();break;case 'discard-position':discardPosition();break;case 'stop':stopPerformanceRecord();break;case 'preview':togglePlay();button.textContent=playing?'Ⅱ Pause':'▷ Play Take';break;case 'retry':discardPerformance(true);break;case 'discard':discardPerformance();break;case 'keep':keepPerformance();break;}
   });
 }
 function remove(){if(!selection.ids.length)return;try{const operations=selection.ids.map(id=>({type:doc.objects.some(item=>item.id===id)?'remove_object' as const:'remove_camera' as const,sceneId:doc.id,id}));replaceContent(applyProjectOperations(projectContent(project),operations,time));changed('Selection removed');}catch(error){status((error as Error).message);}}
@@ -510,23 +608,30 @@ function editSelection(updates:PoseUpdate[],phase:TransformPhase,wholeMotion:boo
   if(phase==='start'){
     flushFieldEdit();pause();
     const items=updates.map(update=>entity(update.id));if(items.some(item=>!item))return false;
-    transformEdit={before:structuredClone(items as SceneEntity[]),time,wholeMotion,changed:false};return true;
+    if(wholeMotion&&items.some(item=>item&&[...unkeyed.keys()].some(key=>key.startsWith(`${doc.id}|${item.id}|`)))){status('Insert or discard unkeyed changes before moving the whole selection');return false;}
+    transformEdit={before:structuredClone(items as SceneEntity[]),time,wholeMotion,changed:false,drafts:new Map(unkeyed)};return true;
   }
   const edit=transformEdit;if(!edit)return false;
   if(phase==='cancel'){
-    for(const before of edit.before){const item=entity(before.id);if(item){item.transform=before.transform;item.track=before.track;}}
+    for(const before of edit.before){const item=entity(before.id);if(item){delete item.animation;Object.assign(item,before);}}
+    unkeyed.clear();for(const [key,value] of edit.drafts)unkeyed.set(key,value);
     transformEdit=null;renderAll();return true;
   }
   if(phase==='end'){
-    transformEdit=null;if(edit.changed)changed('Selection transform updated');else syncStage();return true;
+    transformEdit=null;if(edit.changed)changed('Selection transform updated');else{renderTimeline();renderInspector();syncStage();}return true;
   }
+  const beforeStep=updates.map(update=>entity(update.id)).filter((item):item is SceneEntity=>!!item).map(item=>structuredClone(item)),draftsBeforeStep=new Map(unkeyed);
   try {
-    const next=transformSelection(edit.before,updates,edit.time,edit.wholeMotion);
-    for(const replacement of next){const item=entity(replacement.id);if(!item)throw new Error('An object was removed during this edit.');}
-    for(const replacement of next){const item=entity(replacement.id)!;item.transform=replacement.transform;item.track=replacement.track;}
-    edit.changed=JSON.stringify(next)!==JSON.stringify(edit.before);
+    updates.forEach(update=>transformSchema.parse(update.transform));
+    if(edit.wholeMotion){const replacements=transformSelection(edit.before,updates,edit.time,true);for(const replacement of replacements){const item=entity(replacement.id);if(!item)throw new Error('An object was removed during this edit.');delete item.animation;Object.assign(item,replacement);}edit.changed=JSON.stringify(replacements)!==JSON.stringify(edit.before);syncStage();renderInspector();return true;}
+    for(const update of updates){const item=entity(update.id);if(!item)throw new Error('An object was removed during this edit.');const before=displayedPose(item);
+      for(const group of ['position','rotation','scale'] as const)for(const [index,axis] of ['x','y','z'].entries()){
+        const value=update.transform[group][index];if(Math.abs(before[group][index]-value)>1e-8)editProperty(item,`${group}.${axis}` as PropertyPath,value);
+      }
+    }
+    edit.changed=JSON.stringify(updates.map(update=>entity(update.id)))!==JSON.stringify(edit.before);
     syncStage();renderInspector();return true;
-  } catch { status('This transform exceeds the scene limits. The whole edit was cancelled.');return false; }
+  } catch(error) {for(const before of beforeStep){const item=entity(before.id);if(item){delete item.animation;Object.assign(item,before);}}unkeyed.clear();for(const [key,value] of draftsBeforeStep)unkeyed.set(key,value);status(error instanceof Error?error.message:'The transform was cancelled.');return false; }
 }
 
 try {
@@ -563,6 +668,10 @@ function captureTopView() {
 app.addEventListener('click',event=>{
   if(assetEditor)return;
   const target=(event.target as HTMLElement).closest<HTMLElement>('button');if(!target || target.hasAttribute('disabled'))return;
+  if(target.dataset.discardDraft){unkeyed.delete(target.dataset.discardDraft);renderAll();status('Unkeyed change discarded');return;}
+  if(target.dataset.keyGroup){const item=entity();if(item&&!editPreview&&!performanceSession){event.preventDefault();pause();try{keyProperty(item,target.dataset.keyGroup as PropertyGroup,true);}catch(error){status((error as Error).message);}}return;}
+  if(target.dataset.keyPath){const item=entity(),path=target.dataset.keyPath as PropertyPath;if(item&&!editPreview&&!performanceSession){event.preventDefault();pause();try{const value=propertyValue(item,path),animation=ensureAnimation(item),existing=animation.curves[path]?.some(key=>Math.abs(key.time-time)<1e-6);if(existing&&!currentDraft(item,path))removePropertyKeys(animation,[path],time);else{const orientation=path.startsWith('rotation.')?displayedPose(item).rotation:undefined;putKey(animation,path,time,value,orientation);unkeyed.delete(draftId(item,path));}selectedPropertyKey=existing?null:{group:path.split('.')[0] as PropertyGroup,path,time};changed('Axis key updated');}catch(error){status((error as Error).message);}}return;}
+  if(target.dataset.animationToggle){const group=target.dataset.animationToggle as PropertyGroup;if(group!=='fov'){openProperties.has(group)?openProperties.delete(group):openProperties.add(group);renderTimeline();renderTime();}return;}
   if(performanceSession && !target.closest('#performanceBar,.control-component') && !['play','timeline'].includes(target.dataset.action??''))return;
   target.closest<HTMLDetailsElement>('details.studio-menu')?.removeAttribute('open');
   if(target.dataset.library){setLibraryTab(target.dataset.library as 'objects'|'assets');return;}
@@ -575,9 +684,13 @@ app.addEventListener('click',event=>{
   if(target.dataset.axis){chooseAxis(axis===target.dataset.axis?null:target.dataset.axis as Axis);return;}
   if(target.dataset.add){ensureScene();if(doc.objects.length>=100){status('This scene supports up to 100 objects');return;}pause();const item=createObject(target.dataset.add as Exclude<PrimitiveKind,'asset'>,nextObjectIndex());doc.objects.push(item);selection.active=item.id;time=0;setLibraryTab('objects');changed(`${item.name} added`);return;}
   if(target.dataset.color){const item=entity();if(item && 'color' in item){item.color=target.dataset.color;changed();}return;}
-  if(target.dataset.endpoint){const item=entity();if(item?.track){pause();seek(target.dataset.endpoint==='from'?item.track.start:item.track.start+item.track.duration);}return;}
-  if(target.dataset.motionFor){addMotion(target.dataset.motionFor);return;}
   switch(target.dataset.action){
+    case 'axis-keys':showAxisKeys=!showAxisKeys;renderInspector();break;
+    case 'key-transform':{const item=entity();if(item){pause();try{keyTransform(item);}catch(error){status((error as Error).message);}}break;}
+    case 'auto-key':autoKey=!autoKey;renderTime();break;
+    case 'samples':showAllSamples=!showAllSamples;if(showAllSamples&&animationZoom<4){animationZoom=4;$<HTMLSelectElement>('#animationZoom').value='4';}renderTimeline();renderTime();break;
+    case 'review-draft':{const entry=[...unkeyed.entries()].find(([key])=>key.startsWith(`${doc.id}|`));if(entry){const [,id,path]=entry[0].split('|');select(id);openProperties.add(path.split('.')[0] as PropertyGroup);pause();seek(entry[1].time);renderTimeline();renderTime();}break;}
+    case 'duplicate-key':case 'delete-key':{const item=entity(),key=selectedPropertyKey;if(item&&key){try{const animation=structuredClone(animationFor(item)??emptyAnimation()),paths=key.path?[key.path]:groupPaths(key.group);if(target.dataset.action==='delete-key'){removePropertyKeys(animation,paths,key.time);selectedPropertyKey=null;}else{const next=timeAtFrame(frameAtTime(key.time,fps())+1,fps());if(next>doc.duration)throw new Error('No next frame in the scene.');duplicatePropertyKeys(animation,paths,key.time,next);selectedPropertyKey={...key,time:next};time=next;}item.animation=animation;item.track=null;changed('Keyframe updated');}catch(error){status((error as Error).message);}}break;}
     case 'hide-selection':setHidden(selection.ids,true);break;
     case 'show-selection':setHidden(selection.ids,false);break;
     case 'show-all':setHidden(doc.objects.map(item=>item.id),false);break;
@@ -588,15 +701,13 @@ app.addEventListener('click',event=>{
     case 'focus':stage?.focusSelection();break;
     case 'ground':pause();stage?.dropSelection();break;
     case 'reset-view':stage?.resetView();break;
-    case 'use-view':{const view=stage?.captureView(),item=entity();if(!view||!item||!('fov' in item))break;pause();if(item.track){time=item.track.start+item.track.duration;item.track.to=copyPose(view.transform);}else item.transform=copyPose(view.transform);item.fov=clamp(view.fov,10,120);changed('Framing aligned to scene view');break;}
+    case 'use-view':{const view=stage?.captureView(),item=entity();if(!view||!item||!('fov' in item))break;pause();let saved=false;for(const group of ['position','rotation'] as const)for(const [i,axis] of ['x','y','z'].entries())saved=editProperty(item,`${group}.${axis}` as PropertyPath,view.transform[group][i])||saved;saved=editProperty(item,'fov',clamp(view.fov,10,120))||saved;if(saved)changed('Framing aligned to scene view');else{renderAll();status('Framing previewed · Insert keys to keep it');}break;}
     case 'undo':flushFieldEdit();restore(history.undo());status('Undo');break;
     case 'redo':flushFieldEdit();restore(history.redo());status('Redo');break;
     case 'duplicate':duplicate();break;
     case 'delete':remove();break;
     case 'play':togglePlay();break;
     case 'rewind':pause();seek(activeShot()?.start??0);break;
-    case 'add-motion':addMotion();break;
-    case 'remove-motion':{const item=entity();if(item){item.transform=evaluateTransform(item,time);item.track=null;changed('Motion removed');}break;}
     case 'save':persist();status(storageAvailable?'Scene saved on this device':'Local storage unavailable · export the scene to keep it');break;
     case 'export':downloadProject();break;
     case 'export-scene':exportScene();break;
@@ -608,13 +719,13 @@ app.addEventListener('click',event=>{
     case 'remove-shot':removeShot();break;
     case 'edit-shot':{const shot=activeShot();if(shot)switchShot(shot.id);else addShot();break;}
     case 'build-with-muse':setSidePanel('muse');$<HTMLTextAreaElement>('#sceneInstruction').focus();break;
-    case 'new-project':$<HTMLDialogElement>('#newProjectDialog').showModal();break;
+    case 'new-project':if(unkeyed.size)status('Insert or discard unkeyed changes before starting another project');else $<HTMLDialogElement>('#newProjectDialog').showModal();break;
     case 'cancel-new-project':$<HTMLDialogElement>('#newProjectDialog').close();break;
     case 'confirm-new-project':downloadProject();openProject(createProject(null));$<HTMLDialogElement>('#newProjectDialog').close();break;
     case 'export-project':downloadProject();break;
     case 'recover-storage':downloadProject(true);break;
     case 'reload':location.reload();break;
-    case 'open':$<HTMLInputElement>('#openFile').click();break;
+    case 'open':if(unkeyed.size)status('Insert or discard unkeyed changes before opening another project');else $<HTMLInputElement>('#openFile').click();break;
     case 'reference':if(project.scenes.length>=24){status('This project supports up to 24 scenes');break;}pause();flushFieldEdit();referenceDialog.open();break;
     case 'top-view':case 'refresh-snapshot':captureTopView();break;
     case 'close-snapshot':$<HTMLDialogElement>('#sceneSnapshotDialog').close();break;
@@ -635,8 +746,14 @@ $('.panel-tabs').addEventListener('keydown',event=>{if(event.key==='ArrowLeft'||
 const onPropertyInput = (event: Event)=>{
   if(assetEditor)return;
   if((event.target as HTMLElement).id==='hierarchySearch')return;
-  const input=event.target as HTMLInputElement;if(input.hasAttribute('data-component-field')||input.hasAttribute('data-component-enabled')||performanceSession)return;if(!(input instanceof HTMLInputElement)||input.type==='file'||editPreview)return;
+  const input=event.target as HTMLInputElement;if(!(input instanceof HTMLInputElement)||input.type==='file'||editPreview||performanceSession)return;
+  if(input.dataset.componentField==='offset'&&input.closest('#inspector')){
+    if(event.type==='input'&&input.value!==''){const item=entity(),value=Number(input.value),index=Number(input.dataset.componentAxis);if(item&&'kind' in item&&Number.isFinite(value)){if(editProperty(item,`pivot.${'xyz'[index]}` as PropertyPath,clamp(value,-1000,1000)))changed('Component value updated');else{renderTimeline();syncStage();renderTime();}}}
+    return;
+  }
+  if(input.hasAttribute('data-component-field')||input.hasAttribute('data-component-enabled'))return;
   const value=Number(input.value),item=entity();
+  if(input.id==='animationFrame'){if(input.value!==''&&Number.isFinite(value)){pause();seek(timeAtFrame(value,fps()));}return;}
   if(input.dataset.placement){if(event.type!=='change'||!Number.isFinite(value))return;pause();input.blur();stage?.transformGroup(input.dataset.placement as 'position'|'rotation'|'scale',Number(input.dataset.index),value);return;}
   if(input.id==='projectName'){project.name=input.value.trim().slice(0,120)||'Untitled take';changed();return;}
   if(input.id==='sceneName'&&project.activeSceneId){doc.name=input.value.trim().slice(0,120)||'Untitled scene';changed();return;}
@@ -644,17 +761,19 @@ const onPropertyInput = (event: Event)=>{
   if(input.id==='shotName'&&activeShot()){activeShot()!.name=input.value.trim().slice(0,120)||'Untitled shot';changed();return;}
   if(input.id==='objectColor' && item && 'color' in item){item.color=input.value;changed();return;}
   if(!Number.isFinite(value)){renderAll();return;}
-  if(input.dataset.pose && item && atEndpoint(item) && !playing){const before=evaluateTransform(item,time),pose=copyPose(before),group=input.dataset.pose as keyof Transform,index=Number(input.dataset.component);pose[group][index]=group==='scale'?clamp(value,0.01,100):group==='position'?clamp(value,-1000,1000):clamp(value,-360000,360000);if('kind' in item)applyTransformModifiers(before,pose,item.components);setPose(item,pose);changed();}
-  if(input.id==='cameraFov'&&item&&'fov' in item){item.fov=clamp(value,10,120);changed();}
+  if(input.dataset.pose && item && !playing){const before=displayedPose(item),pose=copyPose(before),group=input.dataset.pose as keyof Transform,index=Number(input.dataset.component);pose[group][index]=group==='scale'?clamp(value,0.01,100):group==='position'?clamp(value,-1000,1000):clamp(value,-360000,360000);if('kind' in item)applyTransformModifiers(before,pose,evaluateComponents(item,time));let saved=false;for(const g of ['position','rotation','scale'] as const)for(const [i,axis] of ['x','y','z'].entries())if(Math.abs(before[g][i]-pose[g][i])>1e-8)saved=editProperty(item,`${g}.${axis}` as PropertyPath,pose[g][i])||saved;if(saved)changed();else{renderTimeline();renderTime();syncStage();}}
+  if(input.id==='cameraFov'&&item&&'fov' in item){if(editProperty(item,'fov',clamp(value,10,120)))changed();else{renderTimeline();renderTime();syncStage();}}
   if(input.id==='duration'){pause();try{replaceContent(applyProjectOperations(projectContent(project),[{type:'set_duration',sceneId:doc.id,duration:clamp(value,1,60)}],time));changed('Scene duration updated · motion timing kept');}catch(error){status('Shorten existing shots and motion first. '+(error as Error).message);}return;}
   if((input.id==='shotStart'||input.id==='shotDuration')&&activeShot()){pause();const shot=activeShot()!;try{const next=applyProjectOperations(projectContent(project),[{type:'set_shot_range',sceneId:doc.id,id:shot.id,cameraId:shot.cameraId,start:input.id==='shotStart'?value:shot.start,duration:input.id==='shotDuration'?value:shot.duration}],time);replaceContent(next);changed('Shot range updated · scene motion unchanged');}catch(error){status((error as Error).message);}return;}
-  if((input.id==='trackStart'||input.id==='trackDuration') && item?.track){pause();if(input.id==='trackStart')item.track.start=clamp(value,0,doc.duration-item.track.duration);else item.track.duration=clamp(value,0.1,doc.duration-item.track.start);time=item.track.start;changed('Motion timing updated');}
 };
 app.addEventListener('change',event=>{
   const select=event.target;if(!(select instanceof HTMLSelectElement))return;
   if(performanceSession)return;
   if(select.id==='sceneSelect'){switchScene(select.value);return;}
   if(select.id==='shotSelect'){switchShot(select.value);return;}
+  if(select.id==='animationFps'){doc.fps=Number(select.value)===30?30:24;$<HTMLInputElement>('#animationFrame').value=String(frameAtTime(time,fps()));changed('Frame rate updated · Key times unchanged');return;}
+  if(select.id==='animationZoom'){animationZoom=Number(select.value);applyTimelineZoom();return;}
+  if(select.id==='animationInterpolation'&&selectedPropertyKey&&entity()){const item=entity()!,key=selectedPropertyKey,mode=select.value;if(mode!=='quaternion'){setKeyInterpolation(ensureAnimation(item),key.path?[key.path]:groupPaths(key.group),key.time,mode as 'linear'|'constant'|'smooth');changed('Interpolation updated');}return;}
   if(select.id==='shotCameraSelect'&&!editPreview){const shot=activeShot();if(shot){pause();shot.cameraId=select.value;selection.active=shot.cameraId;changed('Shot now uses the selected camera’s framing and motion');}}
 });
 app.addEventListener('change',onPropertyInput);
@@ -694,19 +813,29 @@ timelineResizeHandle.onkeydown=event=>{
 window.addEventListener('resize',()=>setTimelineHeight(timelineHeight));
 
 let timelineDrag: {element:HTMLElement;id:string;kind:'shot'|'motion';mode:string;initialX:number;laneWidth:number;initialRange:{start:number;duration:number};before:ProjectContent;moved:boolean}|null=null;
+let propertyDrag: {element:HTMLElement;group:PropertyGroup;path?:PropertyPath;from:number;to:number;initialX:number;laneWidth:number;moved:boolean;take?:string;mode?:string;start?:number;end?:number}|null=null;
 let scrubbing=false;
-function scrubAt(clientX:number){const rect=$('#timeRuler').getBoundingClientRect();pause();seek((clientX-rect.left)/rect.width*doc.duration);}
+function scrubAt(clientX:number){const rect=$('#timeRuler').getBoundingClientRect();pause();seek(snapFrame((clientX-rect.left)/rect.width*doc.duration));}
 $('#timelineContent').addEventListener('pointerdown',event=>{
   if(event.button!==0||performanceSession)return;const target=event.target as HTMLElement;
   if(target.closest('#timeRuler')){scrubbing=true;$('#timeRuler').focus({preventScroll:true});$('#timeRuler').setPointerCapture(event.pointerId);scrubAt(event.clientX);event.preventDefault();return;}
   if(editPreview)return;
+  const marker=target.closest<HTMLElement>('[data-animation-group]'),band=target.closest<HTMLElement>('[data-take]');
+  if(marker||band){
+    const item=entity();if(!item)return;pause();
+    if(marker){const group=marker.dataset.animationGroup as PropertyGroup,path=marker.dataset.animationPath as PropertyPath|undefined,from=Number(marker.dataset.animationTime);selectedPropertyKey={group,path,time:from};time=from;propertyDrag={element:marker,group,path,from,to:from,initialX:event.clientX,laneWidth:marker.parentElement!.getBoundingClientRect().width,moved:false};}
+    else if(band){const take=animationFor(item)?.takes.find(take=>take.id===band.dataset.take);if(!take)return;propertyDrag={element:band,group:'position',from:take.start,to:take.start,initialX:event.clientX,laneWidth:band.parentElement!.getBoundingClientRect().width,moved:false,take:take.id,mode:target.dataset.takeEdge??'move',start:take.start,end:take.end};}
+    const active=propertyDrag!;active.element.setPointerCapture(event.pointerId);renderInspector();renderTime();syncStage();event.preventDefault();return;
+  }
   const clip=target.closest<HTMLElement>('[data-clip],[data-shot-clip]');if(!clip)return;
   const shot=doc.shots.find(item=>item.id===clip.dataset.shotClip),item=entity(clip.dataset.clip),range=shot??item?.track;if(!range)return;
   sceneEditor?.sceneChanged();pause();if(shot)switchShot(shot.id);else select(item!.id);
   timelineDrag={element:clip,id:shot?.id??item!.id,kind:shot?'shot':'motion',mode:target.dataset.trim||'move',initialX:event.clientX,laneWidth:clip.parentElement!.getBoundingClientRect().width,initialRange:{start:range.start,duration:range.duration},before:structuredClone(projectContent(project)),moved:false};clip.setPointerCapture(event.pointerId);clip.classList.add('dragging');event.preventDefault();
 });
 $('#timelineContent').addEventListener('pointermove',event=>{
-  if(scrubbing){scrubAt(event.clientX);return;}if(!timelineDrag)return;
+  if(scrubbing){scrubAt(event.clientX);return;}
+  if(propertyDrag){const drag=propertyDrag,delta=(event.clientX-drag.initialX)/drag.laneWidth*doc.duration;if(Math.abs(event.clientX-drag.initialX)>3)drag.moved=true;if(!drag.moved)return;if(drag.take){const start=drag.start!,end=drag.end!,length=end-start;if(drag.mode==='left'){drag.from=Math.min(end-.1,snapFrame(start+delta));drag.to=end;}else if(drag.mode==='right'){drag.from=start;drag.to=Math.max(start+.1,snapFrame(end+delta));}else{drag.from=clamp(snapFrame(start+delta),0,doc.duration-length);drag.to=drag.from+length;}drag.element.style.left=`${drag.from/doc.duration*100}%`;drag.element.style.width=`${(drag.to-drag.from)/doc.duration*100}%`;}else{drag.to=snapFrame(drag.from+delta);drag.element.style.left=`${drag.to/doc.duration*100}%`;}return;}
+  if(!timelineDrag)return;
   const drag=timelineDrag,range=drag.kind==='shot'?doc.shots.find(item=>item.id===drag.id):entity(drag.id)?.track;if(!range)return;
   const delta=(event.clientX-drag.initialX)/drag.laneWidth*doc.duration,initial=drag.initialRange;
   if(Math.abs(event.clientX-drag.initialX)>2)drag.moved=true; if(!drag.moved)return;
@@ -715,21 +844,35 @@ $('#timelineContent').addEventListener('pointermove',event=>{
   else range.start=clamp(initial.start+delta,0,doc.duration-initial.duration);
   drag.element.style.left=`${range.start/doc.duration*100}%`;drag.element.style.width=`${range.duration/doc.duration*100}%`;time=range.start;renderTime();renderInspector();syncStage();
 });
-function finishTimelineDrag(cancel=false){scrubbing=false;if(!timelineDrag)return;const drag=timelineDrag;timelineDrag=null;if(cancel){replaceContent(drag.before);renderAll();}else if(drag.moved)changed(drag.kind==='shot'?'Shot range updated · scene motion unchanged':'Motion timing updated');else{renderAll();}}
+function finishTimelineDrag(cancel=false){
+  scrubbing=false;
+  if(propertyDrag){const drag=propertyDrag;propertyDrag=null;const item=entity();if(!cancel&&drag.moved&&item){try{const next=structuredClone(animationFor(item)??emptyAnimation());if(drag.take)retimeTake(next,drag.take,drag.from,drag.to,doc.duration);else{movePropertyKeys(next,drag.path?[drag.path]:groupPaths(drag.group),drag.from,drag.to);selectedPropertyKey={group:drag.group,path:drag.path,time:drag.to};time=drag.to;}item.animation=next;item.track=null;changed(drag.take?'Recording timing updated':'Keyframe moved');}catch(error){status((error as Error).message);renderAll();}}else renderAll();return;}
+  if(!timelineDrag)return;const drag=timelineDrag;timelineDrag=null;if(cancel){replaceContent(drag.before);renderAll();}else if(drag.moved)changed(drag.kind==='shot'?'Shot range updated · scene motion unchanged':'Motion timing updated');else{renderAll();}
+}
 $('#timelineContent').addEventListener('pointerup',()=>finishTimelineDrag());
 $('#timelineContent').addEventListener('pointercancel',()=>finishTimelineDrag(true));
-$('#timeRuler').addEventListener('keydown',event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();pause();seek(time+(event.key==='ArrowRight'?0.1:-0.1));}else if(event.key==='Home'){event.preventDefault();pause();seek(0);}else if(event.key==='End'){event.preventDefault();pause();seek(doc.duration);}});
+$('#timeRuler').addEventListener('keydown',event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();pause();seek(snapFrame(time+(event.key==='ArrowRight'?1/fps():-1/fps())));}else if(event.key==='Home'){event.preventDefault();pause();seek(0);}else if(event.key==='End'){event.preventDefault();pause();seek(doc.duration);}});
+$('#inspector').addEventListener('pointerover',event=>{const target=event.target as HTMLElement,input=target.closest<HTMLInputElement>('[data-pose],#cameraFov,[data-component-field="offset"]'),button=target.closest<HTMLElement>('[data-key-group]');hoveredProperty=input?(input.id==='cameraFov'?'fov':input.dataset.pose as PropertyGroup||'pivot'):button?.dataset.keyGroup as PropertyGroup??null;});
+$('#inspector').addEventListener('pointerleave',()=>{hoveredProperty=null;});
 window.addEventListener('keydown',event=>{
   if(assetEditor)return;
   if(event.defaultPrevented||storageError||editPreview||event.isComposing)return;
-  const target=event.target as HTMLElement;if(target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || document.querySelector('dialog[open]'))return;
+  const target=event.target as HTMLElement;
+  if(event.code==='KeyI'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!performanceSession&&!document.querySelector('dialog[open]')){
+    const input=target instanceof HTMLInputElement?target:null,group=input?(input.id==='cameraFov'?'fov':input.dataset.pose?input.dataset.pose as PropertyGroup:input.dataset.componentField==='offset'?'pivot':null):hoveredProperty,item=entity();
+    if(group&&item){event.preventDefault();pause();try{
+      if(input&&showAxisKeys&&group!=='fov'){const index=Number(input.dataset.component??input.dataset.componentAxis),path=`${group}.${'xyz'[index]}` as PropertyPath,value=propertyValue(item,path),orientation=group==='rotation'?displayedPose(item).rotation:undefined;putKey(ensureAnimation(item),path,time,value,orientation);if(currentDraft(item,path))unkeyed.delete(draftId(item,path));selectedPropertyKey={group,path,time};changed('Axis key added');}
+      else keyProperty(item,group,false);
+    }catch(error){status((error as Error).message);}return;}
+  }
+  if(target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || document.querySelector('dialog[open]'))return;
   if(!performanceSession&&assetsPanel?.key(event))return;
   const key=event.code.startsWith('Key')?event.code.slice(3).toLowerCase():event.code==='Space'?' ':event.key.toLowerCase(),mod=event.ctrlKey||event.metaKey;
   if(performanceSession){if(mod||event.altKey)return;event.preventDefault();if(key==='escape'&&!event.repeat){performanceSession.mode==='record'?stopPerformanceRecord():performanceSession.mode==='control'?exitPerformance():discardPerformance();return;}if(key==='r'&&!event.repeat){performanceSession.mode==='record'?stopPerformanceRecord():performanceSession.mode==='control'?startPerformanceRecord():undefined;return;}if(performanceSession.mode==='review'){if(key===' '&&!event.repeat)togglePlay();return;}if(['w','a','s','d','f','v','shift',' '].includes(key))performanceSession.keys.add(key);return;}
   if(mod&&key==='z'){event.preventDefault();flushFieldEdit();restore(event.shiftKey?history.redo():history.undo());return;}
   if(mod&&key==='y'){event.preventDefault();flushFieldEdit();restore(history.redo());return;}
   if(mod&&key==='s'){event.preventDefault();persist();status('Scene saved on this device');return;}
-  if(mod&&key==='d'){event.preventDefault();duplicate();return;}
+  if(mod&&key==='d'){event.preventDefault();if(selectedPropertyKey&&!$<HTMLButtonElement>('#duplicateKey').disabled)$<HTMLButtonElement>('#duplicateKey').click();else duplicate();return;}
   if(key==='h'&&!mod&&!event.repeat){event.preventDefault();setHidden(event.altKey?doc.objects.map(item=>item.id):selection.ids,!event.altKey);return;}
   if(mod&&key==='a'&&target.closest('#viewport,#outliner')){event.preventDefault();selectIds(doc.objects.map(item=>item.id),'replace');setSidePanel('inspector');return;}
   if(mod||event.altKey)return;
@@ -737,7 +880,7 @@ window.addEventListener('keydown',event=>{
   if(key==='g'||key==='r'||key==='s'){event.preventDefault();chooseTool(key==='g'?'translate':key==='r'?'rotate':'scale');}
   if(key==='x'||key==='y'||key==='z')chooseAxis(axis===key.toUpperCase()?null:key.toUpperCase() as Axis);
   if(key==='f'){event.preventDefault();stage?.focusSelection();}
-  if(key==='delete'||key==='backspace'){event.preventDefault();remove();}
+  if(key==='delete'||key==='backspace'){event.preventDefault();if(selectedPropertyKey&&!$<HTMLButtonElement>('#deleteKey').disabled)$<HTMLButtonElement>('#deleteKey').click();else remove();}
   if(key==='escape'){chooseAxis(null);pause();document.querySelectorAll<HTMLDetailsElement>('details.studio-menu[open]').forEach(menu=>menu.open=false);}
 });
 window.addEventListener('keyup',event=>performanceSession?.keys.delete(event.code.startsWith('Key')?event.code.slice(3).toLowerCase():event.code==='Space'?' ':event.key.toLowerCase()));
@@ -747,7 +890,7 @@ function tick(now:number){const delta=Math.min((now-lastFrame)/1000,0.05);lastFr
 if(playing){const shot=activeShot(),take=performanceSession?.draft,end=take?take.start+take.duration:shot?shot.start+shot.duration:doc.duration;time=Math.min(time+delta,end);if(time>=end){pause();renderInspector();if(performanceSession?.mode==='review')renderPerformance();}renderTime();syncStage();}requestAnimationFrame(tick);}
 window.addEventListener('storage',event=>{if(event.key===PROJECT_STORAGE_KEY)persist();});
 window.addEventListener('pagehide',()=>{sceneEditor?.session.cancel('This response was interrupted. Retry when you are ready.');persist();});
-window.addEventListener('beforeunload',event=>{if(!storageAvailable||performanceSession){event.preventDefault();event.returnValue='';}});
+window.addEventListener('beforeunload',event=>{if(!storageAvailable||performanceSession||unkeyed.size){event.preventDefault();event.returnValue='';}});
 function openAssetEditor(asset:AssetDefinition) {
   if(assetEditor||editPreview||storageError||performanceSession)return;
   pause();flushFieldEdit();assetsPanel?.setOpen(false);sceneEditor?.session.cancel('Asset editing opened. The scene conversation is retained.');

@@ -3,6 +3,7 @@ import { createAsset, recipeBounds, validateAsset, type AssetDefinition, type As
 import { builtinAssets as furnitureAssets } from './builtin.ts';
 import { movement, pivotOffset, type ObjectComponent } from '../components/model.ts';
 import { trackPoses } from '../performance/motion.ts';
+import { validateAnimation } from '../animation/model.ts';
 import type { ProjectContent, SceneObject, Transform, Vec3 } from '../types.ts';
 
 type Part = AssetRecipe['parts'][number];
@@ -35,7 +36,9 @@ export function instantiateAsset(asset:AssetDefinition,id:string,position:Vec3,d
   transform.position=[...position];
   const track=structuredClone(asset.template?.track??null);
   if(track){track.start=0;track.duration=Math.min(track.duration,duration);for(const pose of trackPoses(track))pose.position=pose.position.map((v,i)=>v+position[i]) as Vec3;}
-  return {id,name:asset.name,kind:'asset',asset:{id:asset.id},color:'#ffffff',transform,track,components:structuredClone(asset.template?.components??[])};
+  const animation=asset.template?.animation?structuredClone(asset.template.animation):undefined;
+  if(animation){for(const [index,axis] of (['x','y','z'] as const).entries())for(const key of animation.curves[`position.${axis}`]??[])key.value+=position[index];validateAnimation(animation,duration);}
+  return {id,name:asset.name,kind:'asset',asset:{id:asset.id},color:'#ffffff',transform,track,...(animation?{animation}:{}),components:structuredClone(asset.template?.components??[])};
 }
 export function saveObjectAsset(object:SceneObject,assets:AssetDefinition[],id:string):AssetDefinition {
   const source=assets.find(a=>a.id===object.asset?.id);
@@ -46,9 +49,10 @@ export function saveObjectAsset(object:SceneObject,assets:AssetDefinition[],id:s
   const asset=validateAsset({...structuredClone(source),...metadata,parts,id,source:'edited',createdAt:new Date().toISOString(),bounds:recipeBounds({...metadata,parts,...(source?.construction?{construction:source.construction}:{})})});
   // Match the renderer's linear-light tint, then neutralize the linked instance's tint once.
   if(object.color.toLowerCase()!=='#ffffff')for(const p of asset.parts)p.color='#'+new Color(p.color).multiply(new Color(object.color)).getHexString();
-  const transform=structuredClone(object.transform),track=structuredClone(object.track);
+  const transform=structuredClone(object.transform),track=structuredClone(object.track),animation=object.animation?structuredClone(object.animation):undefined;
   if(track)for(const pose of trackPoses(track))pose.position=pose.position.map((v,i)=>v-transform.position[i]) as Vec3;
-  transform.position=[0,0,0];asset.template={transform,components:structuredClone(object.components??[]),track};return asset;
+  if(animation)for(const [index,axis] of (['x','y','z'] as const).entries())for(const key of animation.curves[`position.${axis}`]??[])key.value-=transform.position[index];
+  transform.position=[0,0,0];asset.template={transform,components:structuredClone(object.components??[]),track,...(animation?{animation}: {})};return validateAsset(asset);
 }
 
 /** Detach only this object from its previous prefab; other instances keep their original reference. */
