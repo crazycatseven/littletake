@@ -1,6 +1,8 @@
 import './dialog.css';
 import type { ShotRenderer } from '../shot-export/renderer';
 import type { Shot } from '../types';
+import { exportVideo, videoExportIssue } from '../shot-export/export';
+import { briefInput, videoPackage, type BriefFrame, type VideoBrief } from './brief';
 import { lookSubjects } from './subjects';
 
 interface Frame { time: number; label: string; previs: string; result?: string; message: string; state: 'waiting' | 'running' | 'done' | 'failed' }
@@ -34,11 +36,13 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number)
     <label class="look-check"><input type="checkbox" data-anchor checked> Keep the look consistent across frames and shots</label>
     <p class="look-anchor" hidden>Matching the approved look of this scene · <button data-reset>Reset look</button></p>
     <p class="look-note">Composition, camera and blocking come from the previs. Each frame costs one Muse Image call.</p></fieldset></div>
-    <p class="look-message" role="status"></p><div class="look-actions"><button data-cancel hidden>Cancel</button><button data-render class="primary-button">Render look frames</button></div>`;
+    <section class="look-brief" hidden><div class="look-brief-head"><small>VIDEO BRIEF · MUSE SPARK</small><button data-copy>Copy prompt</button></div><p data-prompt></p>
+    <dl><dt>Camera</dt><dd data-camera></dd><dt>Beats</dt><dd><ol data-beats></ol></dd><dt>Avoid</dt><dd data-negative></dd></dl></section>
+    <p class="look-message" role="status"></p><div class="look-actions"><button data-cancel hidden>Cancel</button><button data-brief title="Muse Spark writes a prompt for any image-to-video model from these frames and the shot's timing">Write video brief</button><button data-package hidden>Download package</button><button data-render class="primary-button">Render look frames</button></div>`;
   const find = <T extends HTMLElement = HTMLElement>(selector: string) => dialog.querySelector<T>(selector)!;
   find('.look-subtitle').textContent = `${shot.name} · ${camera.name} · composition locked to the shot camera`;
   const direction = find<HTMLTextAreaElement>('textarea'); direction.value = storage.get(DIRECTION_KEY) ?? '';
-  let mode: 'current' | 'keys' = 'keys', frames: Frame[] = [], style: string | undefined, busy = false, available = false, controller: AbortController | null = null;
+  let mode: 'current' | 'keys' = 'keys', frames: Frame[] = [], style: string | undefined, busy = false, available = false, controller: AbortController | null = null, brief: VideoBrief | null = null;
   const message = (text: string) => { find('.look-message').textContent = text; };
 
   const capture = () => {
@@ -66,9 +70,18 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number)
     find<HTMLFieldSetElement>('.look-settings').disabled = busy;
     find('[data-cancel]').hidden = !busy;
     const render = find<HTMLButtonElement>('[data-render]'); render.textContent = busy ? 'Rendering…' : 'Render look frames'; render.disabled = busy || !available;
+    find<HTMLButtonElement>('[data-brief]').disabled = busy || !available;
+    const pack = find<HTMLButtonElement>('[data-package]'); pack.hidden = !brief; pack.disabled = busy;
     find('.look-anchor').hidden = !(anchors.has(doc.id) && find<HTMLInputElement>('[data-anchor]').checked);
     dialog.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(button => { const active = button.dataset.mode === mode; button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1; });
   };
+  const showBrief = () => {
+    find('.look-brief').hidden = !brief;
+    if (!brief) return;
+    find('[data-prompt]').textContent = brief.prompt; find('[data-camera]').textContent = brief.camera; find('[data-negative]').textContent = brief.negative || '—';
+    find('[data-beats]').replaceChildren(...brief.beats.map(beat => { const item = document.createElement('li'); item.textContent = `${beat.at.toFixed(2)} s · ${beat.action}`; return item; }));
+  };
+  const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => { const image = new Image(); image.onload = () => resolve(image); image.onerror = () => reject(new Error('A frame could not be read.')); image.src = src; });
   const cleanup = () => { renderer.dispose(); dialog.remove(); };
   dialog.addEventListener('close', () => { controller?.abort(); if (!busy) cleanup(); });
   find('[data-close]').onclick = () => dialog.close();
@@ -76,7 +89,43 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number)
   find('[data-reset]').onclick = () => { anchors.delete(doc.id); update(); };
   find('[data-anchor]').onchange = update;
   direction.oninput = () => storage.set(DIRECTION_KEY, direction.value);
-  dialog.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(button => button.onclick = () => { mode = button.dataset.mode as typeof mode; capture(); draw(); update(); });
+  dialog.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(button => button.onclick = () => { mode = button.dataset.mode as typeof mode; brief = null; capture(); draw(); showBrief(); update(); });
+  find('[data-copy]').onclick = () => { if (brief) navigator.clipboard.writeText(brief.prompt).then(() => message('Prompt copied.'), () => message('Copy failed. Select the prompt text instead.')); };
+  find('[data-brief]').onclick = async () => {
+    if (busy) return;
+    busy = true; controller = new AbortController(); update(); message('Muse Spark is writing the video brief…');
+    try {
+      const sent: BriefFrame[] = [];
+      for (const frame of frames.slice(0, 3)) {
+        const image = await loadImage(frame.result ?? frame.previs);
+        sent.push({ at: Math.max(0, frame.time - shot.start), image: toJPEG(image, image.naturalWidth, image.naturalHeight, 960), kind: frame.result ? 'look' : 'previs' });
+      }
+      const response = await fetch('/api/brief', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(briefInput(doc, shot, direction.value, sent)), signal: controller.signal });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error?.message ?? 'The video brief could not be written.');
+      brief = data as VideoBrief; showBrief();
+      message(sent.some(frame => frame.kind === 'look') ? 'Video brief ready.' : 'Video brief ready from previs frames. Render look frames first for a styled brief.');
+    } catch (error) { message(controller.signal.aborted ? 'Cancelled.' : (error as Error).message); }
+    finally { busy = false; if (dialog.open) update(); else cleanup(); }
+  };
+  find('[data-package]').onclick = async () => {
+    if (busy || !brief) return;
+    busy = true; controller = new AbortController(); update();
+    let previs: Blob | null = null;
+    try {
+      if (!videoExportIssue()) {
+        renderer.resize(1280, 720);
+        try { previs = await exportVideo(renderer, shot, doc.fps ?? 24, controller.signal, (done, total) => message(`Rendering previs ${done} / ${total} frames…`)); }
+        catch (error) { if (controller.signal.aborted) throw error; }
+      }
+      const blob = await videoPackage(doc, shot, brief, direction.value, frames.map(frame => ({ at: Math.max(0, frame.time - shot.start), look: frame.result, previs: frame.previs })), previs);
+      const url = URL.createObjectURL(blob), link = document.createElement('a');
+      link.href = url; link.download = (shot.name.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'shot') + '-video-package.zip'; link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+      message(`Package ready · ${(blob.size / 1024 / 1024).toFixed(2)} MB${previs ? '' : ' · previs video skipped: this browser cannot encode WebM'}`);
+    } catch (error) { message(controller.signal.aborted ? 'Cancelled. No package was saved.' : (error as Error).message); }
+    finally { busy = false; if (dialog.open) update(); else cleanup(); }
+  };
   find<HTMLInputElement>('input[type=file]').onchange = async event => {
     const file = (event.target as HTMLInputElement).files?.[0]; style = undefined;
     if (!file) return;

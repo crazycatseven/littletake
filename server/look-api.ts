@@ -1,5 +1,6 @@
-import type { AIEnvironment } from './ai/index.ts';
-import { AIError } from './ai/provider.ts';
+import { aiConnection, createAIProvider, type AIEnvironment } from './ai/index.ts';
+import { AIError, type AIProvider } from './ai/provider.ts';
+import { parseBriefInput, writeVideoBrief } from './look/brief.ts';
 import { generateLookFrame, LOOK_LIMITS, parseLookInput } from './look/generate.ts';
 
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
@@ -44,6 +45,23 @@ export function createLookHandler(env: AIEnvironment = process.env, transport: t
     } catch (error) {
       if (error instanceof AIError) return json({ error: { code: error.code, message: error.message } }, error.status);
       return json({ error: { code: 'look_failed', message: 'The look frame could not be rendered. Your scene is unchanged.' } }, 500);
+    }
+  };
+}
+
+/** Muse Spark turns a shot's frames, blocking and camera into a brief any video model can use. */
+export function createBriefHandler(env: AIEnvironment = process.env, providerFactory = (): AIProvider => createAIProvider(env)) {
+  return async (request: Request): Promise<Response> => {
+    if (request.method === 'GET') return json(aiConnection(env));
+    if (request.method !== 'POST') return new Response(null, { status: 405, headers: { Allow: 'GET, POST' } });
+    try {
+      const origin = request.headers.get('origin');
+      if (origin && origin !== new URL(request.url).origin) throw new AIError('wrong_origin', 'Open LittleTake directly to write a video brief.', 403);
+      const input = parseBriefInput(await readJSON(request));
+      return json(await writeVideoBrief(input, providerFactory(), request.signal));
+    } catch (error) {
+      if (error instanceof AIError) return json({ error: { code: error.code, message: error.message } }, error.status);
+      return json({ error: { code: 'brief_failed', message: 'The video brief could not be written. Your scene is unchanged.' } }, 500);
     }
   };
 }

@@ -32,5 +32,16 @@
 .look-message { font-size:11px; line-height:1.6; color:var(--accent); min-height:18px; margin-top:16px; }
 .look-actions { display:flex; justify-content:flex-end; gap:8px; }
 .look-actions [hidden] { display:none; }
+
+.look-brief { margin-top:18px; padding:14px 16px; border:1px solid var(--line); border-radius:8px; background:#f2f5eb; font-size:12px; line-height:1.6; }
+.look-brief[hidden] { display:none; }
+.look-brief-head { display:flex; justify-content:space-between; align-items:center; }
+.look-brief-head small { font-size:9px; letter-spacing:.15em; color:var(--muted); }
+.look-brief-head button { font-size:11px; }
+.look-brief p { margin:8px 0 10px; }
+.look-brief dl { display:grid; grid-template-columns:70px 1fr; gap:4px 12px; margin:0; font-size:11px; }
+.look-brief dt { color:var(--muted); }
+.look-brief dd { margin:0; }
+.look-brief ol { margin:0; padding-left:16px; }
 @keyframes look-pulse { 50% { opacity:.55; } }
 @media(max-width:760px) { .look-layout { grid-template-columns:1fr; } }
