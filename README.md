@@ -48,7 +48,7 @@ Desktop scope: mouse/keyboard authoring, text prompts and reference clips.
 | P | Module | Scope | Status |
 | --- | --- | --- | --- |
 | **P0** | **Muse Video generation** | Combine proxy previs and creative prompts to guide final video generation; validate Muse Video reference-input and API support. | Todo |
-| **P2** | **Look-frame generation** | Image-model integration for visual direction before video generation. | Todo |
+| **P0** | **Look-frame generation** | Muse Image renders finished film stills from clean previs frames with the shot composition locked; the first approved frame anchors the look of later frames and shots. | Partial |
 
 ### Assets
 
@@ -112,6 +112,10 @@ For video analysis, copy `.env.example` to `.env.local` and set `MODEL_API_KEY` 
 Provider adapters live in `server/ai/`; the video-analysis workflow and validated scene conversion live in `server/reference/`. The editor consumes ordinary `SceneDocument` data. Replacing the AI provider requires an adapter and a factory entry, without changing the editor.
 
 Reference import currently accepts MP4/WebM clips of 1–60 seconds, up to 3 MB. It builds a coarse single-shot draft with separate objects, basic motion and a camera bound to the shot. Review it before adding it as a new scene; Undo removes that addition. Geometry, depth and motion are AI estimates, with simplifications shown in the review.
+
+### Look frames
+
+**Look** in the shot preview header renders the current frame, or the shot's start, middle and end, as finished film stills with Muse Image (`muse-image-1.0`, `POST /v1/images/edits`). The clean previs frame is always `@Image1`, so camera, framing and blocking come from the scene. Each request also lists the visible objects with their screen side and depth in that camera, so the model can map each proxy to what it stands for. With **Keep the look consistent** on, the first finished frame of a scene is sent as an approved reference for every later frame and shot while the page is open; an optional style image only guides palette and style. Each frame is one Muse Image call. `server/look/` builds the prompt and request; `/api/look` reuses `MODEL_API_KEY` and accepts `MUSE_IMAGE_MODEL`. Request bodies stay under Vercel's 4.5 MB limit by sending 1280×720 JPEG frames and downscaled references.
 
 ### Asset library and modeling expert
 
