@@ -18,6 +18,11 @@ export type SceneEntity = SceneObject | SceneCamera;
 export interface SceneDocument { format: 'LittleTake.scene'; version: 3; id: string; name: string; duration: number; fps?: 24 | 30; objects: SceneObject[]; cameras: SceneCamera[]; shots: Shot[] }
 export interface ProjectContent { name: string; scenes: SceneDocument[]; assets?: AssetDefinition[] }
 export interface StageOptions {
+  onFrame?(time: number): void;
+  canEnterXR?(): boolean;
+  onXRChange?(active: boolean): void;
+  onXRAction?(action: 'play' | 'undo'): void;
+  xrMenuState?(): { playing: boolean; canUndo: boolean };
   viewport: HTMLElement;
   preview: HTMLElement;
   onSelect(ids: string[], mode: SelectionMode): void;

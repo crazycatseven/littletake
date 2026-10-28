@@ -638,7 +638,32 @@ try {
   $('.viewport-heading .transform-tools').insertAdjacentHTML('afterend','<div id="placementTools"></div>');
   $('.stage-panel').insertAdjacentHTML('beforeend','<div id="hiddenCount" class="hidden-count" hidden></div>');
   $('.shot-heading h2').insertAdjacentHTML('afterend','<button class="shot-export-button" data-action="export-shot" title="Export the current shot as an image or video">'+icon('download')+'Export</button>');
-  stage=new Stage({viewport:$('#viewport'),preview:$('#preview'),onSelect:selectIds,onStatus:message=>$('#viewHint').textContent=message,onTransform:editSelection});
+  stage=new Stage({viewport:$('#viewport'),preview:$('#preview'),onSelect:selectIds,onStatus:message=>$('#viewHint').textContent=message,onTransform:editSelection,
+    onFrame:tick,
+    canEnterXR:()=>!assetEditor&&!editPreview&&!performanceSession&&!storageError&&!unkeyed.size&&!document.querySelector('dialog[open]'),
+    onXRChange:active=>{
+      pause();flushFieldEdit();lastFrame=performance.now();
+      if(active)sceneEditor?.session.cancel('VR opened. Retry after returning to the desktop editor.');
+      app.classList.toggle('xr-presenting',active);
+      app.querySelectorAll<HTMLElement>(':scope > header,:scope > main,:scope > .timeline-panel,:scope > footer').forEach(element=>element.inert=active);
+      persist();
+    },
+    onXRAction:action=>{if(action==='play')togglePlay();else{flushFieldEdit();restore(history.undo());}},
+    xrMenuState:()=>({playing,canUndo:history.canUndo&&!editPreview&&!performanceSession&&!assetEditor}),
+  });
+  const xrButton=document.createElement('button');xrButton.id='enterVR';xrButton.textContent='Checking VR…';xrButton.disabled=true;
+  xrButton.title='Trigger selects · Grip empty space to navigate · Two grips rotate and scale the free view';
+  $('.header-actions').prepend(xrButton);
+  if(!window.isSecureContext||!navigator.xr){xrButton.textContent='VR unavailable';xrButton.title='Use a WebXR headset browser over HTTPS.';}
+  else void navigator.xr.isSessionSupported('immersive-vr').then(supported=>{
+    xrButton.disabled=!supported;xrButton.textContent=supported?'Enter VR':'VR unavailable';
+    if(!supported)xrButton.title='No immersive VR device is available in this browser.';
+  }).catch(()=>{xrButton.textContent='VR unavailable';xrButton.title='The browser could not check VR support.';});
+  xrButton.onclick=async()=>{
+    xrButton.disabled=true;
+    try{await stage.enterXR();}catch(error){status(error instanceof Error?error.message:'Unable to enter VR');}
+    finally{xrButton.disabled=false;}
+  };
   stage.setTool(tool);
   placementPanel=new PlacementPanel($('#placementTools'),settings=>stage.setPrecision(settings),(axis,edge)=>stage.alignSelection(axis,edge));
   assetsPanel=new AssetPanel($('#assetPanel'),stage,insertAsset,()=>!storageError&&!editPreview&&!performanceSession&&!assetEditor,asset=>openAssetEditor(asset),synchronizeAssets,(source,folder)=>void createObjectPrefab(source,folder));assetsPanel.update(project.assets);
@@ -666,6 +691,7 @@ function captureTopView() {
 }
 
 app.addEventListener('click',event=>{
+  if(stage?.presentingXR)return;
   if(assetEditor)return;
   const target=(event.target as HTMLElement).closest<HTMLElement>('button');if(!target || target.hasAttribute('disabled'))return;
   if(target.dataset.discardDraft){unkeyed.delete(target.dataset.discardDraft);renderAll();status('Unkeyed change discarded');return;}
@@ -855,6 +881,7 @@ $('#timeRuler').addEventListener('keydown',event=>{if(event.key==='ArrowLeft'||e
 $('#inspector').addEventListener('pointerover',event=>{const target=event.target as HTMLElement,input=target.closest<HTMLInputElement>('[data-pose],#cameraFov,[data-component-field="offset"]'),button=target.closest<HTMLElement>('[data-key-group]');hoveredProperty=input?(input.id==='cameraFov'?'fov':input.dataset.pose as PropertyGroup||'pivot'):button?.dataset.keyGroup as PropertyGroup??null;});
 $('#inspector').addEventListener('pointerleave',()=>{hoveredProperty=null;});
 window.addEventListener('keydown',event=>{
+  if(stage?.presentingXR)return;
   if(assetEditor)return;
   if(event.defaultPrevented||storageError||editPreview||event.isComposing)return;
   const target=event.target as HTMLElement;
@@ -887,7 +914,7 @@ window.addEventListener('keyup',event=>performanceSession?.keys.delete(event.cod
 window.addEventListener('blur',()=>{performanceSession?.keys.clear();if(performanceSession?.mode==='record')stopPerformanceRecord();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){performanceSession?.keys.clear();if(performanceSession?.mode==='record')stopPerformanceRecord();}});
 function tick(now:number){const delta=Math.min((now-lastFrame)/1000,0.05);lastFrame=now;if(performanceSession&&performanceSession.mode!=='review'){const stopped=performanceSession.update(delta,doc.duration);time=performanceSession.time;renderTime();syncStage();$('#inspector').querySelectorAll<HTMLInputElement>('[data-pose]').forEach(input=>input.value=String(num(performanceSession!.pose[input.dataset.pose as keyof Transform][Number(input.dataset.component)])));if(stopped)renderAll();else if(performanceSession.mode==='record')$('#performanceClock').textContent=timecode(time);}
-if(playing){const shot=activeShot(),take=performanceSession?.draft,end=take?take.start+take.duration:shot?shot.start+shot.duration:doc.duration;time=Math.min(time+delta,end);if(time>=end){pause();renderInspector();if(performanceSession?.mode==='review')renderPerformance();}renderTime();syncStage();}requestAnimationFrame(tick);}
+if(playing){const shot=activeShot(),take=performanceSession?.draft,end=take?take.start+take.duration:shot?shot.start+shot.duration:doc.duration;time=Math.min(time+delta,end);if(time>=end){pause();renderInspector();if(performanceSession?.mode==='review')renderPerformance();}renderTime();syncStage();}}
 window.addEventListener('storage',event=>{if(event.key===PROJECT_STORAGE_KEY)persist();});
 window.addEventListener('pagehide',()=>{sceneEditor?.session.cancel('This response was interrupted. Retry when you are ready.');persist();});
 window.addEventListener('beforeunload',event=>{if(!storageAvailable||performanceSession||unkeyed.size){event.preventDefault();event.returnValue='';}});
@@ -900,4 +927,4 @@ function openAssetEditor(asset:AssetDefinition) {
   }});}catch(error){status(error instanceof Error?error.message:'Could not open asset editor');}
 }
 window.addEventListener('focus',()=>{void assetsPanel?.refresh();});
-setTimelineHeight(timelineHeight);setTimelineOpen(timelineHeight>62);renderAll();persist();void assetsPanel?.refresh();status(recovered?'Local project restored':'Your first take · select a shape and make it move');requestAnimationFrame(tick);
+setTimelineHeight(timelineHeight);setTimelineOpen(timelineHeight>62);renderAll();persist();void assetsPanel?.refresh();status(recovered?'Local project restored':'Your first take · select a shape and make it move');
