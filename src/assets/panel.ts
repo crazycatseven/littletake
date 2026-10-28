@@ -84,7 +84,7 @@ export class AssetPanel {
   private render():void {
     this.root.querySelector('#assetCount')!.textContent=`${this.assets.length} 项`;
     this.root.querySelectorAll<HTMLElement>('[data-filter]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.filter===this.filter)));
-    const list=this.assets.filter(a=>(this.filter==='all'||a.tags.includes(this.filter))&&[a.name,a.description,...a.tags].join(' ').toLowerCase().includes(this.query));
+    const list=this.assets.filter(a=>(this.filter==='all'||(this.filter==='saved'?a.source!=='builtin':a.tags.includes(this.filter)))&&[a.name,a.description,...a.tags].join(' ').toLowerCase().includes(this.query));
     this.grid.innerHTML=list.map(a=>`<div class="asset-card-entry"><button class="asset-card" draggable="true" data-asset="${esc(a.id)}@${a.version}" aria-label="资产 ${esc(a.name)} v${a.version}，双击放入片场"><img draggable="false" src="${this.thumbnail(a)}" alt="${esc(a.name)}的三维缩略图"/><strong>${esc(a.name)} <span>v${a.version}</span></strong><small>${a.template?.track?'含录制动作 · ':''}${esc(a.tags[0])} · ${evaluateAsset(a).parts.filter(p=>p.kind!=='group').length} 个部件</small></button>${this.edit?`<button class="asset-card-edit" data-asset-edit="${esc(a.id)}@${a.version}" aria-label="编辑资产 ${esc(a.name)} v${a.version}">编辑资产</button>`:''}</div>`).join('')||'<p class="asset-empty">没有匹配的资产。选中场景物体后，可以保存为自己的资产。</p>';
   }
 }

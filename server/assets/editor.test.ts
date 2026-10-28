@@ -4,7 +4,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { builtinAssets } from '../../src/assets/builtin.ts';
-import { builtinAssets as catalogAssets } from '../../src/assets/library.ts';
+import { builtinAssets as catalogAssets, instantiateAsset, saveObjectAsset } from '../../src/assets/library.ts';
 import { AssetDraftStore, draftFromAsset, editAsset, reviseAsset, updateAssetInstances } from '../../src/assets/edit.ts';
 import { validateAsset, measureAsset } from '../../src/assets/model.ts';
 import { movement } from '../../src/components/model.ts';
@@ -70,6 +70,42 @@ test('asset revision API publishes immutable versions, recovers identical retrie
   const translated=editAsset(draftFromAsset(saved),saved.parts.map(p=>({type:'set_part' as const,id:p.id,changes:{position:p.position.map((v,i)=>v+(i===0?10:0)) as [number,number,number]}})));
   const preview=await handler(request({action:'preview',base:saved,draft:translated})); assert.equal(preview.headers.get('content-type'),'image/png'); assert.ok((await preview.arrayBuffer()).byteLength>1500);
   assert.equal(calls,0); assert.equal((await library.list()).length,count);
+});
+
+test('saving a scene object publishes once, survives reopening, and preserves edited versions and performance across projects', async () => {
+  const directory=await mkdtemp(path.join(tmpdir(),'littletake-saved-assets-')), library=new AssetLibrary(directory);
+  const noModel=()=>{throw new Error('Saving and reusing assets must not call a model');};
+  let handler=createAssetsHandler(library,noModel);
+  const post=(value:unknown)=>handler(new Request('http://localhost/api/assets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(value)}));
+  const source=builtinAssets[0], object=instantiateAsset(source,'chair-in-a',[3,0,2],5);
+  object.components=[movement('drive',2)];object.transform.scale=[1.2,1,1];
+  object.track={start:0,duration:2,from:structuredClone(object.transform),to:{...structuredClone(object.transform),position:[5,0,2]},samples:[{at:.5,transform:{...structuredClone(object.transform),position:[4,0,2]}}]};
+  const projectA=createProject(createEmptyScene());projectA.assets=[source];projectA.scenes[0].objects=[object];
+  const original=serializeProject(projectA), saved=saveObjectAsset(object,[source],'saved-shared-chair');
+  const responses=await Promise.all([post({action:'register',asset:saved}),post({action:'register',asset:saved})]);
+  assert.deepEqual(responses.map(r=>r.status),[200,200]);
+  for(const response of responses)assert.deepEqual((await response.json()).asset,saved);
+  assert.equal((await library.list()).filter(a=>a.id===saved.id).length,1);
+  assert.equal((await post({action:'register',asset:{...saved,name:'Conflicting version'}})).status,409);
+  assert.equal((await post({action:'register',asset:{...source,name:'Overwrite built-in'}})).status,409);
+  assert.equal((await post({action:'register',asset:{...saved,id:'invalid-bounds',bounds:{...saved.bounds,size:[99,99,99]}}})).status,400);
+  assert.equal(serializeProject(projectA),original);
+  handler=createAssetsHandler(new AssetLibrary(directory),noModel);
+  const listing=await (await handler(new Request('http://localhost/api/assets'))).json();
+  assert.deepEqual(listing.assets.find((a:any)=>a.id===saved.id),saved);
+  const base=await (await handler(new Request(`http://localhost/api/assets?id=${saved.id}&version=1`))).json();
+  const draft=editAsset(draftFromAsset(base),[{type:'set_metadata',changes:{name:'Edited shared chair'}}]);
+  const revision=await post({action:'save',base,draft});assert.equal(revision.status,200);
+  const edited=validateAsset((await revision.json()).asset);assert.equal(edited.version,2);assert.equal(edited.source,'edited');
+  const restarted=new AssetLibrary(directory);assert.deepEqual(await restarted.read(saved.id,1),saved);assert.deepEqual(await restarted.read(saved.id,2),edited);
+  const projectB=createProject(createEmptyScene());projectB.assets=[await restarted.read(saved.id,2)];
+  projectB.scenes[0].objects=[instantiateAsset(projectB.assets[0],'chair-in-b',[7,0,-1],5)];
+  const reused=projectB.scenes[0].objects[0];assert.deepEqual(reused.components,object.components);
+  assert.deepEqual(reused.transform.scale,object.transform.scale);assert.deepEqual(reused.track!.from.position,[7,0,-1]);assert.deepEqual(reused.track!.to.position,[9,0,-1]);
+  assert.deepEqual(reused.track!.samples![0].transform.position,[8,0,-1]);
+  assert.deepEqual(parseProject(serializeProject(projectB)),projectB);assert.equal(serializeProject(projectA),original);
+  projectB.scenes[0].objects[0].transform.position[0]=11;assert.equal(serializeProject(projectA),original);
+  assert.deepEqual((await restarted.search('Edited shared chair')).candidates[0].id,saved.id);
 });
 
 test('the native asset specialist shares the draft reducer, must inspect its latest edit, retains history/raw tools, and stops on errors or budget without publication', async () => {

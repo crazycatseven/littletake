@@ -30,12 +30,25 @@ export class AssetLibrary {
     if (!asset) throw new Error('Asset ID/version was not found. Search the library again.');
     return validateAsset(asset);
   }
-  async register(asset: AssetDefinition): Promise<void> {
-    validateAsset(asset); await mkdir(path.join(this.directory, 'definitions'), { recursive: true });
+  async register(asset: AssetDefinition): Promise<AssetDefinition> {
+    asset = validateAsset(asset);
+    const builtin = builtinAssets.find(a => a.id === asset.id && a.version === asset.version);
+    if (builtin) {
+      if (JSON.stringify(validateAsset(builtin)) !== JSON.stringify(asset)) throw new AssetConflict('A built-in asset version cannot be replaced.');
+      return asset;
+    }
+    await mkdir(path.join(this.directory, 'definitions'), { recursive: true });
     // Publish only a complete immutable version; link is atomic and refuses an existing destination.
     const target = path.join(this.directory, 'definitions', `${asset.id}.${asset.version}.json`), temporary = target + '.' + crypto.randomUUID() + '.tmp';
     await writeFile(temporary, JSON.stringify(asset), { flag: 'wx' });
-    try { await link(temporary, target); } finally { await unlink(temporary); }
+    try { await link(temporary, target); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const existing = validateAsset(JSON.parse(await readFile(target, 'utf8')));
+      if (JSON.stringify(existing) !== JSON.stringify(asset)) throw new AssetConflict('This asset version already exists with different content.');
+      return existing;
+    } finally { await unlink(temporary); }
+    return asset;
   }
   async revise(base: AssetDefinition, value: AssetDraft): Promise<AssetDefinition> {
     base = validateAsset(base); const draft = assetDraft(value), all = await this.list();
@@ -49,10 +62,10 @@ export class AssetLibrary {
       throw new AssetConflict(`Version ${latest.version} already exists. Your draft is retained; reopen the latest version before editing.`);
     }
     const asset = reviseAsset(base, draft);
-    if (!stored) { try { await this.register(base); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; const found = await this.read(base.id, base.version); if (JSON.stringify(found) !== JSON.stringify(base)) throw new AssetConflict('Conflicting imported asset.'); } }
+    if (!stored) await this.register(base);
     try { await this.register(asset); }
     catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if (!(error instanceof AssetConflict)) throw error;
       const found = await this.read(asset.id, asset.version); if (sameDraft(found)) return found;
       throw new AssetConflict('Another editor saved this version first. Your draft has been retained.');
     }

@@ -1,6 +1,8 @@
 export type Vec3 = [number, number, number];
 import type { AssetDefinition, AssetReference } from './assets/model';
 import type { ObjectComponent } from './components/model';
+import type { SelectionMode } from './placement/selection';
+import type { PoseUpdate, TransformPhase } from './placement/transforms';
 export type PrimitiveKind = 'cube' | 'sphere' | 'cylinder' | 'cone' | 'plane' | 'human' | 'asset';
 export type ToolMode = 'translate' | 'rotate' | 'scale';
 export type Axis = 'X' | 'Y' | 'Z';
@@ -17,7 +19,7 @@ export interface ProjectContent { name: string; scenes: SceneDocument[]; assets?
 export interface StageOptions {
   viewport: HTMLElement;
   preview: HTMLElement;
-  onSelect(id: string | null): void;
-  onTransform(id: string, transform: Transform, phase: 'start' | 'change' | 'end'): void;
+  onSelect(ids: string[], mode: SelectionMode): void;
+  onTransform(updates: PoseUpdate[], phase: TransformPhase, wholeMotion: boolean): boolean;
   onStatus(message: string): void;
 }

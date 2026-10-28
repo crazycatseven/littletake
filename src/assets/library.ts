@@ -40,7 +40,7 @@ export function saveObjectAsset(object:SceneObject,assets:AssetDefinition[],id:s
   const source=assets.find(a=>a.id===object.asset?.id&&a.version===object.asset.version);
   const parts=source?structuredClone(source.parts):object.kind==='human'?person(object.color):[part('shape',object.kind==='plane'?'cube':object.kind as Part['kind'],[0,object.kind==='plane'?.01:.5,0],[1,object.kind==='plane'?.02:1,1],object.color)];
   const metadata={name:object.name,description:'Saved scene object',tags:['我的资产','saved']};
-  const asset=source?validateAsset({...structuredClone(source),...metadata,id,version:1,source:'edited',createdAt:new Date().toISOString()}):createAsset({...metadata,parts},id);
+  const asset=source?validateAsset({...structuredClone(source),...metadata,id,version:1,source:'edited',createdAt:new Date().toISOString()}):createAsset({...metadata,parts},id,1,'edited');
   if(source && object.color!=='#ffffff') { /* Colour is already an instance tint; bake it into the reusable parts. */
     for(const p of asset.parts){const a=parseInt(p.color.slice(1),16),b=parseInt(object.color.slice(1),16);p.color='#'+[16,8,0].map(s=>Math.round(((a>>s)&255)*((b>>s)&255)/255).toString(16).padStart(2,'0')).join('');}
   }

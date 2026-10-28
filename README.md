@@ -22,6 +22,8 @@ Demo input: **The Grand Budapest Hotel — Interview with Zero**, source 0:33–
 
 Desktop scope: mouse/keyboard authoring, text prompts and reference clips.
 
+**Current scope, before November 2026:** Generated and edited assets use local storage. The cloud demo assumes a single shared user. Durable cloud asset storage and account separation are deferred.
+
 ### AI Understanding
 
 | P | Module | Scope | Status |
@@ -69,6 +71,11 @@ Desktop scope: mouse/keyboard authoring, text prompts and reference clips.
 | --- | --- | --- | --- |
 | **P0** | **Vercel deployment** | Publish an HTTPS desktop web demo with Git-based production and preview deployments. | Done |
 
+Deferred Todo:
+
+- [ ] Multi-account support: sign-in, per-account project management and private asset libraries.
+- [ ] Durable cloud asset storage and synchronization.
+
 ## Development
 
 ```sh
@@ -109,6 +116,8 @@ Reference import currently accepts MP4/WebM clips of 1–60 seconds, up to 3 MB.
 The local library persists ready definitions and complete expert job histories under `.littletake/assets/`, or `LITTLETAKE_ASSET_DIR`, excluded from Git. Vercel uses the runtime's temporary directory by default because its application filesystem is read-only ([runtime documentation](https://vercel.com/docs/functions/runtimes)); that cache is temporary and is not shared reliably between function instances. No durable cloud library is configured. Instances reference an immutable asset ID/version and own their transform, tint, components and motion. Referenced definitions are embedded once per project so saved/exported projects remain renderable and their assets reusable without the server cache. Locally, registered assets remain reusable after discarding a scene preview or undoing an instance. Expert failures retain their input, raw replies and errors but do not register an asset or alter the scene.
 
 ### Asset editing mode
+
+**保存为资产** on a scene object publishes its geometry, components and motion to the same server library used by the modeling expert. A successful save is immediately reusable in other projects connected to that library, including after restarting the local server. **我的资产** includes generated and edited assets without requiring a special tag. Unsaved workshop drafts remain browser-local until **保存新版本** publishes them.
 
 Open **编辑资产** on an instance, or **打开资产编辑器** on a library card. Asset mode stays inside the existing studio shell: the left Hierarchy shows asset parts, the right Inspector edits the selection, and the center viewport isolates the asset. Header, sidebar widths, timeline and status bar keep their positions. A viewport breadcrumb returns to the scene with its previous selection and camera view; the scene timeline is inactive while editing the asset. This isolated draft is not a project scene. It provides add/duplicate/remove, parent assignment, numeric transforms, move/rotate/size handles, colors and joint limits/pivots. Bounds and front/side/isometric geometry renders update with the draft. Joint sliders and movement/hinge component trials reset without recording motion. Part sizes scale only their mesh; children inherit position/rotation, not mesh dimensions. Joint axes and pivots are expressed inside the already-rotated part's local frame. Revisions preserve the asset origin rather than recentering every edit.
 

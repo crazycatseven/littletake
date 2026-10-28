@@ -81,10 +81,12 @@ test('missing asset is delegated, rendered, inspected and persisted; a restarted
   assert.ok((await fresh.preview(asset)).length > 1000);
   const reuse = transportFor('reuse', asset.id), next = await proposeSceneEdit(input(), reuse.provider, undefined, newDiagnostic(), fresh);
   assert.equal(next.status, 'ready'); assert.equal(reuse.counts().expertCalls, 0); assert.equal((await fresh.list()).length, catalogAssets.length + 1);
-  const duplicate = await Promise.allSettled([fresh.register(asset), fresh.register(asset)]); assert.ok(duplicate.every(r => r.status === 'rejected'));
+  const duplicate = await Promise.all([fresh.register(asset), fresh.register(asset)]); assert.ok(duplicate.every(a => a.id === asset.id));
+  assert.equal((await fresh.list()).filter(a => a.id === asset.id && a.version === 1).length, 1);
   const variant = { ...asset, id: 'concurrent-publication' };
-  const concurrent = await Promise.allSettled([fresh.register(variant), fresh.register(variant)]);
-  assert.equal(concurrent.filter(r => r.status === 'fulfilled').length, 1); assert.deepEqual(await fresh.read(variant.id, 1), variant);
+  const concurrent = await Promise.allSettled([fresh.register(variant), fresh.register({...variant,name:'Conflicting chair'})]);
+  assert.equal(concurrent.filter(r => r.status === 'fulfilled').length, 1);
+  assert.deepEqual(await fresh.read(variant.id, 1), concurrent.find(r => r.status === 'fulfilled')!.value);
 });
 
 test('rejected visual reviews and interrupted jobs retain raw evidence, spend a bounded number of calls and never register a ready asset', async () => {

@@ -7,6 +7,7 @@ import { assetDraftSchema, reviseAsset } from '../../src/assets/edit.ts';
 import { AssetExpertError, reviseWithExpert } from './revision-expert.ts';
 
 const inputSchema = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('register'), asset: assetSchema }),
   z.strictObject({ action: z.literal('save'), base: assetSchema, draft: assetDraftSchema }),
   z.strictObject({ action: z.literal('preview'), base: assetSchema, draft: assetDraftSchema }),
   z.strictObject({ action: z.literal('expert'), base: assetSchema, draft: assetDraftSchema, prompt: z.string().trim().min(1).max(3000), history: z.array(z.strictObject({ role: z.enum(['user','assistant']), text: z.string().max(4000) })).max(16) }),
@@ -27,7 +28,9 @@ export function createAssetsHandler(library = new AssetLibrary(), providerFactor
     const params = new URL(request.url).searchParams;
     try {
       if (request.method === 'POST') {
-        const input = inputSchema.parse(await body(request)), base = validateAsset(input.base);
+        const input = inputSchema.parse(await body(request));
+        if (input.action === 'register') return json({ asset: await library.register(input.asset) });
+        const base = validateAsset(input.base);
         if (input.action === 'save') return json({ asset: await library.revise(base, input.draft) });
         if (input.action === 'expert') return json(await reviseWithExpert(base, input.draft, input.prompt, input.history, providerFactory(), library, request.signal));
         return new Response(Buffer.from(await library.preview(reviseAsset(base, input.draft, base.version))), { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' } });

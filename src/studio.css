@@ -84,7 +84,7 @@ kbd { margin-left: auto; color: #a0a893; font-family: inherit; font-size: 10px; 
 .transform-tools button svg { width: 15px; height: 15px; }
 .transform-tools button.active { border-color: #c9d6b6; background: #e7efd9; color: #526c3c; }
 .viewport-caption { position: absolute; right: 20px; bottom: 13px; left: 20px; overflow: hidden; color: #77836b; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
-.shot-panel { position: absolute; z-index: 6; top: 61px; right: 20px; width: clamp(220px, 20vw, 280px); overflow: hidden; border: 1px solid #d5ddc9; border-radius: 10px; background: #fbfcf7f2; box-shadow: 0 5px 22px #30452012; backdrop-filter: blur(10px); }
+.shot-panel { position: absolute; z-index: 6; top: 192px; right: 20px; width: clamp(220px, 20vw, 280px); overflow: hidden; border: 1px solid #d5ddc9; border-radius: 10px; background: #fbfcf7f2; box-shadow: 0 5px 22px #30452012; backdrop-filter: blur(10px); }
 .shot-heading { display: flex; align-items: center; justify-content: space-between; height: 41px; padding: 0 10px 0 13px; }
 .shot-heading h2 { display: inline-flex; align-items: center; gap: 8px; color: #56694b; font-size: 12px; font-weight: 500; }
 .shot-heading h2 svg { width: 14px; height: 14px; }
@@ -267,4 +267,18 @@ dialog::backdrop { background: #2b3c2445; backdrop-filter: blur(4px); }
   .shot-panel { width: 210px; }
   .timeline-toolbar { gap: 14px; padding-right: 15px; padding-left: 15px; }
 }
-@media (max-height: 720px) { .app-header { flex-basis: 60px; } .shot-panel { top: 54px; } }
+@media (max-height: 720px) { .app-header { flex-basis: 60px; } .shot-panel { top: 180px; width: 190px; } }
+
+.view-navigation { position: absolute; z-index: 7; top: 58px; right: 20px; width: 112px; display: grid; justify-items: center; user-select: none; }
+.view-navigation svg { width: 112px; height: 100px; overflow: visible; touch-action: none; cursor: grab; }
+.view-navigation.dragging svg { cursor: grabbing; }
+.view-navigation g { cursor: inherit; outline: none; }
+.view-navigation g line { pointer-events: none; }
+.view-navigation g:hover circle, .view-navigation g:focus-visible circle { stroke: #fffdf5; stroke-width: 2; }
+.view-navigation text { fill: white; font: 600 10px ui-sans-serif, system-ui, sans-serif; pointer-events: none; }
+.view-navigation button { padding: 3px 9px; font-size: 10px; color: #7c8971; border: 1px solid #d5ddc9; background: #fbfcf7df; border-radius: 12px; }
+.viewport-selection-box { position: absolute; z-index: 4; border: 1px solid #80975c; background: #9cb77320; pointer-events: none; }
+.viewport-selection-box[hidden] { display: none; }
+.object-row.active-selection.selected { box-shadow: inset 3px 0 #81945d; }
+.selection-members { display: flex; flex-wrap: wrap; gap: 5px; margin: 10px 0 22px; }
+.selection-members span { background: #edf1e5; padding: 4px 8px; border-radius: 5px; font-size: 11px; color: #6a795c; }
