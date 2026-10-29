@@ -78,12 +78,19 @@ export async function generateLookFrame(input: LookInput, config: { apiKey: stri
     throw new AIError('provider_unavailable', 'Muse Image could not finish the frame. Please try again.', 504);
   }
   if (!response.ok) {
-    // Never echo an upstream error body: it can contain request data or credentials.
+    // Never echo an upstream error body: it can contain request data or credentials. Only short identifier-like
+    // fields (type, code, param) are kept so a rejection can be diagnosed from the editor.
+    let detail = '';
+    try {
+      const error = ((await response.json()) as { error?: Record<string, unknown> }).error ?? {};
+      detail = ['type', 'code', 'param'].map(key => error[key]).filter((value): value is string => typeof value === 'string' && /^[\w.\[\]-]{1,60}$/.test(value)).join(' / ');
+    } catch {}
+    const suffix = detail ? ` (${detail}, HTTP ${response.status})` : ` (HTTP ${response.status})`;
     if (response.status === 402) throw new AIError('credits_required', 'Muse Image needs API credits before it can render frames.', 503);
     if (response.status === 401 || response.status === 403) throw new AIError('provider_auth', 'Muse Image is not authorized on this server.', 503);
     if (response.status === 429) throw new AIError('rate_limited', 'Muse Image is busy. Please wait a moment and try again.', 429);
-    if (response.status === 400) throw new AIError('provider_rejected', 'Muse Image declined this frame. Try a different look description.', 422);
-    throw new AIError('provider_error', 'Muse Image could not finish the frame. Please try again.');
+    if (response.status === 400) throw new AIError('provider_rejected', `Muse Image rejected the request${suffix}.`, 422);
+    throw new AIError('provider_error', `Muse Image could not finish the frame${suffix}. Please try again.`);
   }
   let b64: unknown;
   try { b64 = (await response.json() as { data?: { b64_json?: string }[] }).data?.[0]?.b64_json; } catch { b64 = null; }
