@@ -6,6 +6,8 @@ A project for the **Meta Global AI Developer Hackathon**.
 
 Live demo: [littletake.vercel.app](https://littletake.vercel.app).
 
+Experimental WebXR: See [XR control](docs/webxr.md).
+
 ## Why
 
 AI video models are powerful, but describing actions, camera movement, and relationships between objects through long prompts remains difficult. LittleTake lets everyday creators express those intentions through an editable 3D scene and a rough performance.
