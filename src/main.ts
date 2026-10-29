@@ -1,7 +1,8 @@
+import { XRKeyframeReader, deleteXRKeyframe } from './xr/timeline';
 import './style.css';
 import { Stage } from './stage';
 import { EditorSelection, type SelectionMode } from './placement/selection';
-import { transformSelection, type PoseUpdate, type TransformPhase } from './placement/transforms';
+import { transformSelection, type PoseUpdate, type TransformPhase, type TransformScope } from './placement/transforms';
 import { PlacementPanel } from './placement/panel';
 import { openShotExport } from './shot-export/dialog';
 import { AssetPanel } from './assets/panel';
@@ -111,7 +112,7 @@ const emptyView = createEmptyScene('empty-view', 'No scene');
 let doc: SceneDocument = project.scenes.find(scene => scene.id === project.activeSceneId) ?? emptyView;
 let history = new History<ProjectContent>(projectContent(project));
 const selection = new EditorSelection(doc.objects.find(item=>!item.track)?.id ?? doc.objects[0]?.id ?? null);
-let transformEdit: { before: SceneEntity[]; time: number; wholeMotion: boolean; changed: boolean; drafts: Map<string,{time:number;value:number}> } | null = null;
+let transformEdit: { before: SceneEntity[]; time: number; wholeMotion: TransformScope; changed: boolean; drafts: Map<string,{time:number;value:number}> } | null = null;
 let tool: ToolMode = 'translate';
 let axis: Axis | null = null;
 let time = 0;
@@ -352,12 +353,14 @@ function keyProperty(item:SceneEntity,group:PropertyGroup,toggle:boolean):void {
   selectedPropertyKey=remove?null:{group,time};changed(remove?'Property key removed':'Property key added');
 }
 function keyTransform(item:SceneEntity):void {
-  const pose=displayedPose(item),target=ensureAnimation(item);
+  const pose=displayedPose(item),copy=structuredClone(item),target=ensureAnimation(copy);
   if('fov' in item){putVectorKeys(target,'position',time,pose.position);putVectorKeys(target,'rotation',time,pose.rotation);}
   else putTransformKeys(target,time,pose);
+  Object.assign(item,copy);
   for(const group of ['position','rotation','scale'] as const)for(const path of propertyPaths(group))if(currentDraft(item,path))unkeyed.delete(draftId(item,path));
   selectedPropertyKey=null;changed('Transform keyed');
 }
+const xrKeyframes = new XRKeyframeReader();
 function syncStage() { const item=entity(), visibleDoc=sceneWithDrafts(visibleScene()),session=performanceSession;
   const component=inputController(session?.before.components);stage?.setControlled(session?{id:session.before.id,pose:session.preview(time),world:component?.type==='movement'&&component.space==='world'}:null);
   stage?.update(visibleDoc,Math.min(time,visibleDoc.duration),selection.ids,Boolean(editPreview) || !!session || playing, editPreview ? previewShotId : project.activeShotId,(editPreview??project).assets??[]); }
@@ -603,7 +606,7 @@ const referenceDialog = new ReferenceDialog(next => {
   changed('Reference scene loaded · every object and camera is editable'); persist(); stage?.resetView();
 });
 
-function editSelection(updates:PoseUpdate[],phase:TransformPhase,wholeMotion:boolean):boolean {
+function editSelection(updates:PoseUpdate[],phase:TransformPhase,wholeMotion:TransformScope):boolean {
   if(editPreview||performanceSession||storageError)return false;
   if(phase==='start'){
     flushFieldEdit();pause();
@@ -623,7 +626,7 @@ function editSelection(updates:PoseUpdate[],phase:TransformPhase,wholeMotion:boo
   const beforeStep=updates.map(update=>entity(update.id)).filter((item):item is SceneEntity=>!!item).map(item=>structuredClone(item)),draftsBeforeStep=new Map(unkeyed);
   try {
     updates.forEach(update=>transformSchema.parse(update.transform));
-    if(edit.wholeMotion){const replacements=transformSelection(edit.before,updates,edit.time,true);for(const replacement of replacements){const item=entity(replacement.id);if(!item)throw new Error('An object was removed during this edit.');delete item.animation;Object.assign(item,replacement);}edit.changed=JSON.stringify(replacements)!==JSON.stringify(edit.before);syncStage();renderInspector();return true;}
+    if(edit.wholeMotion){const replacements=transformSelection(edit.before,updates,edit.time,edit.wholeMotion);for(const replacement of replacements){const item=entity(replacement.id);if(!item)throw new Error('An object was removed during this edit.');delete item.animation;Object.assign(item,replacement);}edit.changed=JSON.stringify(replacements)!==JSON.stringify(edit.before);syncStage();renderInspector();return true;}
     for(const update of updates){const item=entity(update.id);if(!item)throw new Error('An object was removed during this edit.');const before=displayedPose(item);
       for(const group of ['position','rotation','scale'] as const)for(const [index,axis] of ['x','y','z'].entries()){
         const value=update.transform[group][index];if(Math.abs(before[group][index]-value)>1e-8)editProperty(item,`${group}.${axis}` as PropertyPath,value);
@@ -649,6 +652,22 @@ try {
       persist();
     },
     onXRAction:action=>{if(action==='play')togglePlay();else{flushFieldEdit();restore(history.undo());}},
+    xrTimelineState:()=>({time,duration:visibleScene().duration,fps:fps(),selection:xrKeyframes.read(sceneEntity(visibleScene(),selection.active),visibleScene().duration)}),
+    onXRSeek:seek,
+    onXRAddKeyframe:()=>{
+      const item=entity();
+      if(!item||!('kind' in item)||item.hidden||playing||transformEdit||editPreview||performanceSession||storageError||assetEditor)return;
+      try{flushFieldEdit();keyTransform(item);}catch(error){status(error instanceof Error?error.message:'Could not add keyframe');}
+    },
+    onXRDeleteKeyframe:()=>{
+      const item=entity();
+      if(!item||!('kind' in item)||item.hidden||playing||transformEdit||editPreview||performanceSession||storageError||assetEditor)return;
+      try{
+        flushFieldEdit();const next=deleteXRKeyframe(item,time);if(!next)return;
+        Object.assign(item,next);selectedPropertyKey=null;changed('Keyframe deleted');
+      }catch(error){status(error instanceof Error?error.message:'Could not delete keyframe');}
+    },
+    onXRTimelineChange:active=>{if(active)pause();},
     xrMenuState:()=>({playing,canUndo:history.canUndo&&!editPreview&&!performanceSession&&!assetEditor}),
   });
   const xrButton=document.createElement('button');xrButton.id='enterVR';xrButton.textContent='Checking VR…';xrButton.disabled=true;

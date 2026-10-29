@@ -2,7 +2,7 @@ export type Vec3 = [number, number, number];
 import type { AssetDefinition, AssetReference } from './assets/model';
 import type { ObjectComponent } from './components/model';
 import type { SelectionMode } from './placement/selection';
-import type { PoseUpdate, TransformPhase } from './placement/transforms';
+import type { PoseUpdate, TransformPhase, TransformScope } from './placement/transforms';
 import type { PropertyAnimation } from './animation/model';
 export type PrimitiveKind = 'cube' | 'sphere' | 'cylinder' | 'cone' | 'plane' | 'human' | 'asset';
 export type ToolMode = 'translate' | 'rotate' | 'scale';
@@ -21,11 +21,16 @@ export interface StageOptions {
   onFrame?(time: number): void;
   canEnterXR?(): boolean;
   onXRChange?(active: boolean): void;
+  xrTimelineState?(): import('./xr/timeline').XRTimelineState;
+  onXRSeek?(time: number): void;
+  onXRAddKeyframe?(): void;
+  onXRDeleteKeyframe?(): void;
+  onXRTimelineChange?(active: boolean): void;
   onXRAction?(action: 'play' | 'undo'): void;
   xrMenuState?(): { playing: boolean; canUndo: boolean };
   viewport: HTMLElement;
   preview: HTMLElement;
   onSelect(ids: string[], mode: SelectionMode): void;
-  onTransform(updates: PoseUpdate[], phase: TransformPhase, wholeMotion: boolean): boolean;
+  onTransform(updates: PoseUpdate[], phase: TransformPhase, wholeMotion: TransformScope): boolean;
   onStatus(message: string): void;
 }

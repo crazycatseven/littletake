@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { XRControls } from './xr-controls';
+import { XRControls } from './xr/controls';
+import { setXRObjectCulling } from './xr/culling';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { evaluateComponents, evaluateFov, evaluateTransform } from './model';
@@ -215,15 +216,22 @@ export class Stage {
       if (this.disposed || this.options.canEnterXR?.() === false) throw new Error('The editor changed while entering VR. Try again.');
       this.xrControls ??= new XRControls(this.renderer, {
         targets: () => [...this.views.values()].filter(view => view.root.visible).map(view => view.root).concat(this.cameraIcon.visible ? [this.cameraIcon] : []),
+        selected: () => this.selectedIds.map(id => this.rootFor(id)).filter((root): root is THREE.Object3D => !!root && root.visible),
         editable: () => !this.playing && !this.controlled && this.options.canEnterXR?.() !== false,
         select: id => this.options.onSelect([id], 'replace'),
         pose: id => { const root = this.rootFor(id); return root ? this.readPose(root) : undefined; },
-        transform: (id, transform, phase) => this.options.onTransform([{ id, transform }], phase, true),
+        transform: (id, transform, phase) => this.options.onTransform([{ id, transform }], phase, 'keyframe-pose'),
         action: action => this.options.onXRAction?.(action),
         followCamera: () => this.previewCameraId ? this.shotCamera : null,
+        timelineState: this.options.xrTimelineState,
+        addKeyframe: this.options.onXRAddKeyframe,
+        deleteKeyframe: this.options.onXRDeleteKeyframe,
+        timelineObject: id => this.views.get(id)?.root,
+        seek: time => this.options.onXRSeek?.(time),
+        timelineChanged: active => this.options.onXRTimelineChange?.(active),
         menuState: () => this.options.xrMenuState?.() ?? { playing: this.playing, canUndo: false },
       });
-      this.scene.add(this.xrControls.rig);
+      this.scene.add(this.xrControls.rig, this.xrControls.menuRoot, this.xrControls.timelineRoot, this.xrControls.keyframeGhosts.root, this.xrControls.nearSelection.root, this.xrControls.feedbackRoot);
       await this.renderer.xr.setSession(session);
       this.xrControls.start(session, this.orbit.target);
     } catch (error) {
@@ -234,6 +242,7 @@ export class Stage {
 
   private onXRStart = (): void => {
     this.finishGizmo(true); this.clearNavigation(); this.viewTween = null;
+    for (const view of this.views.values()) setXRObjectCulling(view.root, true);
     // Three.js reserves layers 1 and 2 for the two XR eyes. Keep editor helpers binocular.
     this.scene.traverse(node => { if (node.layers.isEnabled(1)) { node.layers.disable(1); node.layers.enable(3); } });
     this.orbit.enabled = false; this.gizmo.detach(); this.gizmo.enabled = false;
@@ -243,6 +252,7 @@ export class Stage {
 
   private onXREnd = (): void => {
     this.xrControls?.stop(); this.lastFrame = 0;
+    for (const view of this.views.values()) setXRObjectCulling(view.root, false);
     this.scene.traverse(node => { if (node !== this.xrControls?.camera && node.layers.isEnabled(3)) { node.layers.disable(3); node.layers.enable(1); } });
     this.orbit.enabled = !this.controlled; this.syncSelection(); this.resize();
     this.options.onXRChange?.(false); this.options.onStatus(NAV_HINT);
@@ -275,6 +285,7 @@ export class Stage {
           view.accent.dispose();
         }
         view = this.createEntity(object);
+        if (this.presentingXR) setXRObjectCulling(view.root, true);
         this.views.set(object.id, view);
         this.scene.add(view.root);
       }
@@ -1071,7 +1082,7 @@ export class Stage {
     if (this.disposed) return;
     this.options.onFrame?.(time);
     if (this.presentingXR && this.xrControls) {
-      this.xrControls.updateView(frame);
+      this.xrControls.updateView(frame, time);
       this.xrControls.rig.updateMatrixWorld(true);
       this.renderer.xr.updateCamera(this.xrControls.camera);
       this.xrControls.update(frame);
