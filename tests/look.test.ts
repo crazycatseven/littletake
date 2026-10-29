@@ -63,6 +63,7 @@ test('a single image uses the plain image field and provider failures stay gener
   await assert.rejects(fail(402), { code: 'credits_required' });
   await assert.rejects(fail(429), { code: 'rate_limited' });
   await assert.rejects(fail(400), (error: Error & { code: string }) => error.code === 'provider_rejected' && !error.message.includes('secret'));
+  await assert.rejects(generateLookFrame(parseLookInput(input()), { apiKey: 'k', model: 'm' }, async () => Response.json({ error: { type: 'invalid_request_error', code: 'size_not_supported', param: 'size', message: 'echo LLM|secret prompt' } }, { status: 400 })), (error: Error) => error.message.includes('invalid_request_error / size_not_supported / size, HTTP 400') && !error.message.includes('secret'));
   await assert.rejects(generateLookFrame(parseLookInput(input()), { apiKey: 'k', model: 'm' }, async () => Response.json({ data: [{ b64_json: 'bm90IGFuIGltYWdl' }] })), { code: 'invalid_response' });
 });
 
