@@ -23,8 +23,8 @@ const request = (body: unknown, headers: Record<string, string> = {}) => new Req
 test('reference proposal becomes ordinary independently editable objects and an aimed camera', () => {
   const { scene } = sceneFromProposal(proposal(), 6);
   assert.deepEqual(scene.objects.map(item => [item.id, item.kind, item.color]), [['object-1', 'human', '#deded7'], ['object-2', 'cube', '#deded7']]);
-  const forward = new Vector3(0, 0, -1).applyEuler(new Euler(...scene.camera.transform.rotation.map(MathUtils.degToRad) as [number, number, number]));
-  const target = new Vector3(0, 0.9, 0).sub(new Vector3(...scene.camera.transform.position)).normalize();
+  const forward = new Vector3(0, 0, -1).applyEuler(new Euler(...scene.shots[0].transform.rotation.map(MathUtils.degToRad) as [number, number, number]));
+  const target = new Vector3(0, 0.9, 0).sub(new Vector3(...scene.shots[0].transform.position)).normalize();
   assert.ok(forward.distanceTo(target) < 1e-8);
   scene.objects[0].transform.position[0] = 99;
   assert.equal(scene.objects[1].transform.position[0], 2);

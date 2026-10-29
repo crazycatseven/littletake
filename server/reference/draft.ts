@@ -44,12 +44,13 @@ export function sceneFromProposal(value: unknown, duration: number): { scene: Sc
     }));
     const cameraMotion = proposal.camera.motion;
     const scene = validateDocument({
-      format: 'LittleTake.scene', version: 1, name: proposal.name, duration, objects,
-      camera: {
-        id: 'camera', name: 'Shot camera', fov: proposal.camera.fov,
+      format: 'LittleTake.scene', version: 2, id: 'scene-1', name: proposal.name, duration, objects,
+      cameras: [{ id: 'camera', name: 'Camera 1', fov: proposal.camera.fov, transform: cameraTransform(proposal.camera.position, proposal.camera.target), track: null }],
+      shots: [{
+        id: 'shot-1', name: 'Shot 1', cameraId: 'camera', start: 0, duration, fov: proposal.camera.fov,
         transform: cameraTransform(proposal.camera.position, proposal.camera.target),
         track: cameraMotion ? { ...trackTime(cameraMotion), from: cameraTransform(cameraMotion.from.position, cameraMotion.from.target), to: cameraTransform(cameraMotion.to.position, cameraMotion.to.target) } : null,
-      },
+      }],
     });
     return { scene, summary: proposal.summary, assumptions: proposal.assumptions };
   } catch { throw new AIError('invalid_scene', 'The AI scene could not be loaded safely. Your current scene is unchanged. Please try again.'); }

@@ -20,11 +20,11 @@ test('the initial five-second scene is valid, deterministic, and its camera look
   assert.deepEqual(validateDocument(doc), doc);
   assert.equal(doc.duration, 5);
   assert.ok(doc.objects.some(obj => obj.track));
-  assert.ok(doc.camera.track);
-  const forward = new Vector3(0, 0, -1).applyQuaternion(rotationQuaternion(doc.camera.transform.rotation));
-  const target = new Vector3(0.3, 0.9, 0).sub(new Vector3(...doc.camera.transform.position)).normalize();
+  assert.ok(doc.shots[0].track);
+  const forward = new Vector3(0, 0, -1).applyQuaternion(rotationQuaternion(doc.shots[0].transform.rotation));
+  const target = new Vector3(0.3, 0.9, 0).sub(new Vector3(...doc.shots[0].transform.position)).normalize();
   close(forward.dot(target), 1);
-  const end = doc.camera.track!.to;
+  const end = doc.shots[0].track!.to;
   const endForward = new Vector3(0, 0, -1).applyQuaternion(rotationQuaternion(end.rotation));
   close(endForward.dot(new Vector3(0.3, 0.9, 0).sub(new Vector3(...end.position)).normalize()), 1);
 });
@@ -67,13 +67,13 @@ test('an unanimated entity returns an independent copy of its static transform',
 test('object and camera tracks use independent start and duration', () => {
   const doc = createDocument();
   doc.objects[0].track = { start: 2, duration: 1, from: transform(0), to: transform(10) };
-  doc.camera.track = { start: 0, duration: 5, from: transform(0), to: transform(20) };
+  doc.shots[0].track = { start: 0, duration: 5, from: transform(0), to: transform(20) };
   close(evaluateTransform(doc.objects[0], 1).position[0], 0);
-  close(evaluateTransform(doc.camera, 1).position[0], 4);
+  close(evaluateTransform(doc.shots[0], 1).position[0], 4);
   close(evaluateTransform(doc.objects[0], 2.5).position[0], 5);
-  close(evaluateTransform(doc.camera, 2.5).position[0], 10);
+  close(evaluateTransform(doc.shots[0], 2.5).position[0], 10);
   close(evaluateTransform(doc.objects[0], 4).position[0], 10);
-  close(evaluateTransform(doc.camera, 4).position[0], 16);
+  close(evaluateTransform(doc.shots[0], 4).position[0], 16);
 });
 
 test('rotation crosses 360 degrees by the shortest quaternion arc', () => {
@@ -93,9 +93,9 @@ test('serialization preserves all editable state and detaches imported data', ()
   restored.objects[0].track!.to.position[0] = 99;
   assert.notEqual(original.objects[0].track!.to.position[0], 99);
   const copy = cloneDocument(original);
-  copy.camera.track!.from.rotation[0] = 99;
+  copy.shots[0].track!.from.rotation[0] = 99;
   copy.objects.push(createObject('plane', 4));
-  assert.notEqual(original.camera.track!.from.rotation[0], 99);
+  assert.notEqual(original.shots[0].track!.from.rotation[0], 99);
   assert.equal(original.objects.length, 3);
   const validated = validateDocument(original);
   validated.objects[0].transform.position[0] = 88;
@@ -105,7 +105,7 @@ test('serialization preserves all editable state and detaches imported data', ()
 test('validation rejects unsupported documents, fields, IDs, primitives and colors', () => {
   assert.throws(() => validateDocument(null));
   assert.throws(() => parseDocument('{broken'));
-  rejection(doc => { (doc as unknown as { version: number }).version = 2; }, /format or version/);
+  rejection(doc => { (doc as unknown as { version: number }).version = 3; }, /format or version/);
   rejection(doc => { (doc as unknown as Record<string, unknown>).extra = true; }, /fields/);
   rejection(doc => { doc.name = ''; }, /nonempty/);
   rejection(doc => { doc.objects[1].id = doc.objects[0].id; }, /duplicate/);
@@ -114,7 +114,7 @@ test('validation rejects unsupported documents, fields, IDs, primitives and colo
   rejection(doc => { doc.objects[0].id = 'x'.repeat(65); }, /64/);
   rejection(doc => { (doc.objects[0] as unknown as { kind: string }).kind = 'torus'; }, /primitive/);
   rejection(doc => { doc.objects[0].color = 'url(javascript:alert(1))'; }, /hex/);
-  rejection(doc => { (doc.camera as unknown as { id: string }).id = 'object-1'; }, /expected camera/);
+  rejection(doc => { (doc.shots[0] as unknown as { id: string }).id = 'object-1'; }, /duplicate/);
 });
 
 test('validation enforces finite bounded transforms, scene length and motion intervals', () => {
@@ -124,11 +124,11 @@ test('validation enforces finite bounded transforms, scene length and motion int
   rejection(doc => { doc.objects[0].transform.rotation[0] = 360001; });
   rejection(doc => { doc.objects[0].transform.scale[0] = 0; });
   rejection(doc => { doc.objects[0].track!.to.scale[2] = 101; });
-  rejection(doc => { doc.camera.fov = 121; });
+  rejection(doc => { doc.shots[0].fov = 121; });
   rejection(doc => { doc.objects[0].track!.start = -0.1; });
   rejection(doc => { doc.objects[0].track!.duration = 0.099; });
   rejection(doc => { doc.objects[0].track!.duration = 5; }, /finish/);
-  rejection(doc => { doc.camera.track!.to.position[2] = NaN; });
+  rejection(doc => { doc.shots[0].track!.to.position[2] = NaN; });
   const edge = createDocument();
   edge.objects[0].track!.start = 4.9;
   edge.objects[0].track!.duration = 0.1;
@@ -143,7 +143,7 @@ test('import limits object count and file size and rejects prototype pollution a
   Object.defineProperty(badArray.objects[0].transform.position, '__proto__', { value: {} });
   assert.throws(() => validateDocument(badArray), /array fields/);
   const json = serializeDocument(createDocument());
-  assert.throws(() => parseDocument(json.replace('"version": 1', '"version": 1, "__proto__": {"polluted": true}')), /fields/);
+  assert.throws(() => parseDocument(json.replace('"version": 2', '"version": 2, "__proto__": {"polluted": true}')), /fields/);
   const poisoned = createDocument();
   Object.setPrototypeOf(poisoned.objects[0].transform, { polluted: true });
   assert.throws(() => validateDocument(poisoned), /prototype/);

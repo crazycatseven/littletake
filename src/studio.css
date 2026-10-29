@@ -105,18 +105,6 @@ kbd { margin-left: auto; color: #a0a893; font-family: inherit; font-size: 10px; 
 .drawer-heading h2 { color: #738363; font-size: 13px; font-weight: 550; }
 .drawer-heading button { color: #9aa88b; }
 .inspector-panel { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 18px 24px; }
-.ai-edit-panel { flex: 0 0 auto; max-height: 44%; overflow: auto; border-top: 1px solid var(--line); padding: 14px 16px; background: #f3f6ed; }
-.ai-edit-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
-.ai-edit-heading label { color: #526b42; font-size: 12px; font-weight: 600; }
-.ai-edit-heading > span { color: #8a977d; font-size: 9px; }
-.ai-edit-panel textarea { display: block; width: 100%; min-height: 62px; resize: vertical; border: 1px solid #d3ddc7; border-radius: 6px; padding: 9px; background: var(--paper); font-size: 12px; line-height: 1.5; }
-.ai-edit-panel textarea:focus { outline: 2px solid #879b64; outline-offset: 1px; }
-.ai-edit-message { margin: 9px 0; color: #6c7b60; font-size: 11px; line-height: 1.55; overflow-wrap: anywhere; }
-.ai-edit-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
-.ai-edit-actions button { height: 30px; padding: 5px 7px; font-size: 10px; }
-.ai-edit-actions button[aria-pressed="true"] { border-color: #c9d6b6; background: #e7efd9; }
-.ai-view-evidence { display: flex; gap: 7px; margin-bottom: 9px; }
-.ai-view-evidence img { width: 58px; height: 50px; object-fit: contain; border: 1px solid #d4ddca; border-radius: 4px; background: var(--paper); }
 .ai-preview-badge { position: absolute; z-index: 6; bottom: 20px; left: 50%; transform: translateX(-50%); border: 1px solid #b8cba2; border-radius: 6px; padding: 8px 12px; background: #f8fceeef; color: #526b42; font-size: 12px; pointer-events: none; }
 .inspector-title { display: flex; align-items: center; justify-content: space-between; height: 29px; margin-bottom: 8px; }
 .inspector-title > div { display: flex; gap: 2px; }

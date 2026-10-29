@@ -6,4 +6,5 @@ dist/
 !.env.example
 *.local
 *.log
+.littletake/
 .DS_Store
