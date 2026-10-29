@@ -77,6 +77,27 @@ export class ShotRenderer {
     this.renderer.render(this.scene, this.camera);
     return this.canvas;
   }
+  /** Normalised [left, top, right, bottom] screen boxes of visible objects fully in front of the camera, for the pose of the last render. */
+  screenBoxes(): Map<string, [number, number, number, number]> {
+    const boxes = new Map<string, [number, number, number, number]>(), bounds = new THREE.Box3(), corner = new THREE.Vector3();
+    this.camera.updateMatrixWorld();
+    for (const [id, root] of this.roots) {
+      if (!root.visible) continue;
+      root.updateMatrixWorld(true); bounds.setFromObject(root);
+      if (bounds.isEmpty()) continue;
+      let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity, behind = false;
+      for (let index = 0; index < 8; index++) {
+        corner.set(index & 1 ? bounds.max.x : bounds.min.x, index & 2 ? bounds.max.y : bounds.min.y, index & 4 ? bounds.max.z : bounds.min.z).project(this.camera);
+        if (corner.z <= -1 || corner.z >= 1) { behind = true; break; }
+        const x = (corner.x + 1) / 2, y = (1 - corner.y) / 2;
+        left = Math.min(left, x); right = Math.max(right, x); top = Math.min(top, y); bottom = Math.max(bottom, y);
+      }
+      if (behind || right <= 0 || left >= 1 || bottom <= 0 || top >= 1) continue;
+      const clamp = (value: number) => Math.round(Math.min(1, Math.max(0, value)) * 1000) / 1000;
+      boxes.set(id, [clamp(left), clamp(top), clamp(right), clamp(bottom)]);
+    }
+    return boxes;
+  }
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;

@@ -23,6 +23,16 @@ test('look prompt locks composition and numbers references in send order', () =>
   assert.match(lookPrompt(parseLookInput(input({ style: url(png) }))), /Use @Image2 only/);
 });
 
+test('layout boxes become exact fractions in the prompt and bad boxes are rejected', () => {
+  const prompt = lookPrompt(parseLookInput(input({ subjects: [{ name: 'Zero', position: 'left', depth: 'foreground', box: [0.31, 0.4, 0.352, 0.62] }, { name: 'Desk', position: 'right', depth: 'midground' }] })));
+  assert.match(prompt, /Exact layout, as fractions of the frame/);
+  assert.match(prompt, /Zero: x 31%–35%, y 40%–62%/);
+  assert.doesNotMatch(prompt, /Desk: x/);
+  assert.doesNotMatch(lookPrompt(parseLookInput(input())), /Exact layout/);
+  assert.throws(() => parseLookInput(input({ subjects: [{ name: 'Zero', position: 'left', depth: 'foreground', box: [0.5, 0.4, 0.3, 0.6] }] })), { code: 'invalid_input' });
+  assert.throws(() => parseLookInput(input({ subjects: [{ name: 'Zero', position: 'left', depth: 'foreground', box: [0, 0, 1.2, 1] }] })), { code: 'invalid_input' });
+});
+
 test('look input rejects missing direction, extra fields and non-image data', () => {
   assert.throws(() => parseLookInput(input({ direction: '  ' })), { code: 'invalid_input' });
   assert.throws(() => parseLookInput(input({ secret: 1 })), { code: 'invalid_input' });
