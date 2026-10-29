@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { XRControls } from './xr/controls';
+import { setXRObjectCulling } from './xr/culling';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { evaluateComponents, evaluateFov, evaluateTransform } from './model';
@@ -105,7 +107,8 @@ export class Stage {
   private pointerStart: PointerStart | null = null;
   private flyPointer: number | null = null;
   private lastPointer = new THREE.Vector2();
-  private frame = 0;
+  private xrControls?: XRControls;
+  private xrPending = false;
   private lastFrame = 0;
   private disposed = false;
   private currentDoc: SceneDocument | null = null;
@@ -193,8 +196,67 @@ export class Stage {
     this.resizeObserver.observe(options.preview);
     this.resize();
     options.onStatus(NAV_HINT);
-    this.frame = requestAnimationFrame(this.render);
+    this.renderer.xr.enabled = true;
+    this.renderer.xr.setReferenceSpaceType('local-floor');
+    this.renderer.xr.addEventListener('sessionstart', this.onXRStart);
+    this.renderer.xr.addEventListener('sessionend', this.onXREnd);
+    this.renderer.setAnimationLoop(this.render);
   }
+
+  get presentingXR(): boolean { return this.renderer.xr.isPresenting; }
+
+  async enterXR(): Promise<void> {
+    if (this.xrPending || this.presentingXR) return;
+    if (!navigator.xr || !window.isSecureContext) throw new Error('VR requires a compatible headset browser and HTTPS.');
+    if (this.options.canEnterXR?.() === false) throw new Error('Finish the current edit, preview or recording before entering VR.');
+    this.xrPending = true;
+    let session: XRSession | undefined;
+    try {
+      session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'] });
+      if (this.disposed || this.options.canEnterXR?.() === false) throw new Error('The editor changed while entering VR. Try again.');
+      this.xrControls ??= new XRControls(this.renderer, {
+        targets: () => [...this.views.values()].filter(view => view.root.visible).map(view => view.root).concat(this.cameraIcon.visible ? [this.cameraIcon] : []),
+        selected: () => this.selectedIds.map(id => this.rootFor(id)).filter((root): root is THREE.Object3D => !!root && root.visible),
+        editable: () => !this.playing && !this.controlled && this.options.canEnterXR?.() !== false,
+        select: id => this.options.onSelect([id], 'replace'),
+        pose: id => { const root = this.rootFor(id); return root ? this.readPose(root) : undefined; },
+        transform: (id, transform, phase) => this.options.onTransform([{ id, transform }], phase, 'keyframe-pose'),
+        action: action => this.options.onXRAction?.(action),
+        followCamera: () => this.previewCameraId ? this.shotCamera : null,
+        timelineState: this.options.xrTimelineState,
+        addKeyframe: this.options.onXRAddKeyframe,
+        deleteKeyframe: this.options.onXRDeleteKeyframe,
+        timelineObject: id => this.views.get(id)?.root,
+        seek: time => this.options.onXRSeek?.(time),
+        timelineChanged: active => this.options.onXRTimelineChange?.(active),
+        menuState: () => this.options.xrMenuState?.() ?? { playing: this.playing, canUndo: false },
+      });
+      this.scene.add(this.xrControls.rig, this.xrControls.menuRoot, this.xrControls.timelineRoot, this.xrControls.keyframeGhosts.root, this.xrControls.nearSelection.root, this.xrControls.feedbackRoot);
+      await this.renderer.xr.setSession(session);
+      this.xrControls.start(session, this.orbit.target);
+    } catch (error) {
+      if (session) await session.end().catch(() => {});
+      throw error;
+    } finally { this.xrPending = false; }
+  }
+
+  private onXRStart = (): void => {
+    this.finishGizmo(true); this.clearNavigation(); this.viewTween = null;
+    for (const view of this.views.values()) setXRObjectCulling(view.root, true);
+    // Three.js reserves layers 1 and 2 for the two XR eyes. Keep editor helpers binocular.
+    this.scene.traverse(node => { if (node.layers.isEnabled(1)) { node.layers.disable(1); node.layers.enable(3); } });
+    this.orbit.enabled = false; this.gizmo.detach(); this.gizmo.enabled = false;
+    this.options.onXRChange?.(true);
+    this.options.onStatus('VR · Grip objects to move them · Grip empty space to navigate · Two grips: horizontal turn, spread/pinch to scale');
+  };
+
+  private onXREnd = (): void => {
+    this.xrControls?.stop(); this.lastFrame = 0;
+    for (const view of this.views.values()) setXRObjectCulling(view.root, false);
+    this.scene.traverse(node => { if (node !== this.xrControls?.camera && node.layers.isEnabled(3)) { node.layers.disable(3); node.layers.enable(1); } });
+    this.orbit.enabled = !this.controlled; this.syncSelection(); this.resize();
+    this.options.onXRChange?.(false); this.options.onStatus(NAV_HINT);
+  };
 
   update(doc: SceneDocument, time: number, selectedIds: string[], playing: boolean, shotId: string | null = doc.shots[0]?.id ?? null, assets: AssetDefinition[] = []): void {
     if (this.disposed) return;
@@ -223,6 +285,7 @@ export class Stage {
           view.accent.dispose();
         }
         view = this.createEntity(object);
+        if (this.presentingXR) setXRObjectCulling(view.root, true);
         this.views.set(object.id, view);
         this.scene.add(view.root);
       }
@@ -274,7 +337,7 @@ export class Stage {
 
   setControlled(value: {id:string;pose:Transform;world?:boolean}|null): void {
     if(!!value!==!!this.controlled)this.clearNavigation();
-    this.controlled=value;this.orbit.enabled=!value;this.forwardArrow.visible=!!value;
+    this.controlled=value;this.orbit.enabled=!value&&!this.presentingXR;this.forwardArrow.visible=!!value;
     if(value){this.forwardArrow.position.fromArray(value.pose.position).add(new THREE.Vector3(0,.07,0));const direction=new THREE.Vector3(0,0,1);if(!value.world)direction.applyEuler(new THREE.Euler(...value.pose.rotation.map(THREE.MathUtils.degToRad) as [number,number,number],'XYZ'));direction.y=0;this.forwardArrow.setDirection(direction.normalize());}
   }
   focusCanvas():void {this.renderer.domElement.focus({preventScroll:true});}
@@ -361,7 +424,11 @@ export class Stage {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    cancelAnimationFrame(this.frame);
+    this.renderer.setAnimationLoop(null);
+    this.renderer.xr.removeEventListener('sessionstart', this.onXRStart);
+    this.renderer.xr.removeEventListener('sessionend', this.onXREnd);
+    this.xrControls?.dispose();
+    void this.renderer.xr.getSession()?.end().catch(() => {});
     this.clearNavigation();
     this.resizeObserver.disconnect();
     this.removeListeners.forEach((remove) => remove());
@@ -629,6 +696,7 @@ export class Stage {
   }
 
   private syncSelection(): void {
+    if (this.presentingXR) { this.gizmo.detach(); this.gizmo.enabled = false; return; }
     if (this.selectedIds.length > 1 && !this.dragging) {
       this.groupPivot.position.fromArray(this.selectionCenter());
       this.groupPivot.quaternion.copy(this.precision.space === 'local' ? this.rootFor(this.selectedId!)!.quaternion : new THREE.Quaternion());
@@ -810,6 +878,7 @@ export class Stage {
   }
 
   private onPointerDown = (event: PointerEvent): void => {
+    if (this.presentingXR) return;
     if(this.controlled){event.preventDefault();event.stopImmediatePropagation();this.focusCanvas();return;}
     if (event.pointerType === 'touch' && !event.isPrimary) return;
     this.renderer.domElement.focus({ preventScroll: true });
@@ -920,6 +989,7 @@ export class Stage {
   }
 
   private onKeyDown = (event: KeyboardEvent): void => {
+    if (this.presentingXR) return;
     if(this.controlled)return;
     if (document.activeElement !== this.renderer.domElement || this.isTextInput(event.target)) return;
     const key = event.key.toLowerCase();
@@ -987,7 +1057,7 @@ export class Stage {
   }
 
   private resize = (): void => {
-    if (this.disposed) return;
+    if (this.disposed || this.presentingXR) return;
     const { viewport, preview } = this.options;
     const width = Math.max(1, viewport.clientWidth);
     const height = Math.max(1, viewport.clientHeight);
@@ -1008,8 +1078,18 @@ export class Stage {
     this.previewRenderer.domElement.style.height = `${previewHeight}px`;
   };
 
-  private render = (time: number): void => {
+  private render = (time: number, frame?: XRFrame): void => {
     if (this.disposed) return;
+    this.options.onFrame?.(time);
+    if (this.presentingXR && this.xrControls) {
+      this.xrControls.updateView(frame, time);
+      this.xrControls.rig.updateMatrixWorld(true);
+      this.renderer.xr.updateCamera(this.xrControls.camera);
+      this.xrControls.update(frame);
+      this.syncSelectionMarker();
+      this.renderer.render(this.scene, this.xrControls.camera);
+      return;
+    }
     const delta = Math.min(this.lastFrame ? (time - this.lastFrame) / 1000 : 0, 0.05);
     this.lastFrame = time;
     this.updateFly(delta);
@@ -1023,7 +1103,6 @@ export class Stage {
     this.navigation.update(this.editorCamera, this.editorCamera === this.orthographicCamera, !this.controlled && !this.dragging);
     this.renderer.render(this.scene, this.editorCamera);
     this.previewRenderer.render(this.scene, this.shotCamera);
-    this.frame = requestAnimationFrame(this.render);
   };
 
   private listen(target: EventTarget, type: string, listener: EventListener, options?: boolean | AddEventListenerOptions): void {

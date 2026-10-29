@@ -96,7 +96,7 @@ test('Meta credits errors and unfinished output are explicit; no fake scene fall
 
 test('API exposes connection state without a key, and checks input before calling a provider', async () => {
   let calls = 0;
-  const handler = createReferenceHandler({ MODEL_API_KEY: 'never-return-this-key' }, () => ({ name: 'Test', model: 'test', async generateObject() { calls++; return proposal(); } }));
+  const handler = createReferenceHandler({ MODEL_API_KEY: 'never-return-this-key' }, () => ({ name: 'Test', model: 'test', async generateObject() { calls++; return proposal(); } }), () => null);
   const connection = await handler(new Request('https://littletake.vercel.app/api/reference'));
   assert.deepEqual(await connection.json(), { available: true, provider: 'Meta', model: 'muse-spark-1.3' });
   assert.equal((await handler(request({}))).status, 400);

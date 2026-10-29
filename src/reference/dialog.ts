@@ -2,6 +2,7 @@ import type { SceneDocument } from '../types';
 import { shotCamera } from '../model';
 import { referenceConnection, requestReferenceDraft } from './client';
 import { readReferenceVideo } from './video';
+import { attachTrackOverlay } from './tracks';
 import type { ReferenceConnection, ReferenceDraft, ReferenceInput } from './types';
 
 const escapeHTML = (text: string) => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
@@ -22,6 +23,7 @@ export class ReferenceDialog {
   private operation = 0;
   private busy = false;
   private loadingDemo = false;
+  private disposeTracks: (() => void) | null = null;
 
   constructor(private readonly applyScene: (scene: SceneDocument) => void) {
     this.root.id = 'referenceDialog'; this.root.setAttribute('aria-labelledby', 'referenceTitle');
@@ -119,7 +121,7 @@ export class ReferenceDialog {
     }
   }
   private async choose(file: File) {
-    this.cancelOperation(); this.clearError(); this.video = null; this.draft = null;
+    this.cancelOperation(); this.clearError(); this.video = null; this.draft = null; this.showTracks();
     const operation = this.operation;
     this.controller = new AbortController();
     if (this.objectURL) URL.revokeObjectURL(this.objectURL);
@@ -144,9 +146,13 @@ export class ReferenceDialog {
     }
     this.updateButtons();
   }
+  /** SAM 3.1 boxes stay on the reference player while its draft is under review. */
+  private showTracks(draft?: ReferenceDraft) {
+    this.disposeTracks?.(); this.disposeTracks = draft?.tracks?.length ? attachTrackOverlay(this.player, draft.tracks) : null;
+  }
   private async analyze() {
     if (!this.video || !this.connection?.available || this.busy) return;
-    this.cancelOperation(); this.clearError(); this.draft = null; this.busy = true; this.player.pause();
+    this.cancelOperation(); this.clearError(); this.draft = null; this.busy = true; this.player.pause(); this.showTracks();
     const operation = this.operation; this.controller = new AbortController();
     this.find('#referenceState').textContent = 'ANALYZING REFERENCE';
     this.find('#referenceReport').innerHTML = '<div class="reference-empty reference-analyzing"><span class="reference-orbit" aria-hidden="true"></span><h3>Reading the shot</h3><p>Finding the staging, action and camera.<br>This can take a minute.</p></div>';
@@ -155,6 +161,7 @@ export class ReferenceDialog {
       const draft = await requestReferenceDraft({ video: this.video, direction: this.direction.value.trim() }, this.controller.signal);
       if (operation !== this.operation) return;
       this.draft = draft;
+      this.showTracks(draft);
       const animated = draft.scene.objects.filter(item => item.track).length;
       this.find('#referenceState').textContent = 'DRAFT READY';
       this.find('#referenceReport').innerHTML = `<div class="reference-draft-summary"><h3>${escapeHTML(draft.scene.name)}</h3><p>${escapeHTML(draft.summary)}</p><div class="reference-output-tags"><span>${draft.scene.objects.length} objects</span><span>${animated} moving</span><span>${shotCamera(draft.scene,draft.scene.shots[0]?.id??null)?.track ? 'Moving camera' : 'Fixed camera'}</span></div></div><ul class="reference-object-list">${draft.scene.objects.map(item => `<li><span class="reference-kind">${escapeHTML(item.kind)}</span><span>${escapeHTML(item.name)}</span></li>`).join('')}</ul>${draft.assumptions.length ? `<div class="reference-assumptions"><h4>Estimated / simplified</h4><ul>${draft.assumptions.map(item => `<li>${escapeHTML(item)}</li>`).join('')}</ul></div>` : ''}`;
