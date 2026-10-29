@@ -3,9 +3,9 @@ import type { ShotRenderer } from '../shot-export/renderer';
 import type { Shot } from '../types';
 import { exportVideo, videoExportIssue } from '../shot-export/export';
 import { briefInput, videoPackage, type BriefFrame, type VideoBrief } from './brief';
-import { lookSubjects } from './subjects';
+import { framedObjects } from './subjects';
 
-interface Frame { time: number; label: string; previs: string; result?: string; message: string; state: 'waiting' | 'running' | 'done' | 'failed' }
+interface Frame { time: number; label: string; previs: string; boxes: Map<string, [number, number, number, number]>; result?: string; message: string; state: 'waiting' | 'running' | 'done' | 'failed' }
 const DIRECTION_KEY = 'littletake.look.direction';
 /** The first approved frame of a scene anchors the look of every later frame and shot while the page is open. */
 const anchors = new Map<string, string>();
@@ -47,7 +47,7 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number)
 
   const capture = () => {
     renderer.resize(1280, 720);
-    frames = frameTimes(shot, time, mode, doc.fps ?? 24).map(item => ({ ...item, previs: toJPEG(renderer.render(item.time), 1280, 720, 1280), message: '', state: 'waiting' }));
+    frames = frameTimes(shot, time, mode, doc.fps ?? 24).map(item => { const previs = toJPEG(renderer.render(item.time), 1280, 720, 1280); return { ...item, previs, boxes: renderer.screenBoxes(), message: '', state: 'waiting' }; });
   };
   const draw = () => {
     const columns = document.createElement('div'); columns.className = 'look-columns'; columns.innerHTML = '<span>PREVIS</span><span>MUSE IMAGE LOOK</span>';
@@ -139,20 +139,24 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number)
     busy = true; controller = new AbortController(); update();
     const consistent = find<HTMLInputElement>('[data-anchor]').checked;
     frames.forEach(frame => { frame.state = 'waiting'; frame.result = undefined; frame.message = ''; });
-    let done = 0;
+    let done = 0, previous: string | undefined;
     try {
       for (const frame of frames) {
         frame.state = 'running'; draw(); message(`Rendering ${frame.label.toLowerCase()} · ${done + 1} of ${frames.length}`);
-        const body = { frame: frame.previs, direction: look, subjects: lookSubjects(doc, shot.cameraId, frame.time), ...(consistent && anchors.has(doc.id) ? { anchor: anchors.get(doc.id) } : {}), ...(style ? { style } : {}) };
+        // Within one render, each frame follows the previous finished frame, so neighbouring frames change only by the blocking between them.
+        const reference = consistent ? previous ?? anchors.get(doc.id) : undefined;
+        const subjects = framedObjects(doc, shot.cameraId, frame.time).map(({ object, position, depth }) => ({ name: object.name.trim().slice(0, 80), position, depth, ...(frame.boxes.has(object.id) ? { box: frame.boxes.get(object.id) } : {}) }));
+        const body = { frame: frame.previs, direction: look, subjects, ...(reference ? { anchor: reference } : {}), ...(style ? { style } : {}) };
         try {
           const response = await fetch('/api/look', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
           const data = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(data.error?.message ?? 'The look frame could not be rendered.');
           frame.result = data.image; frame.state = 'done'; done++;
           // A small anchor carries the look without pulling later frames towards its composition.
-          if (consistent && !anchors.has(doc.id)) anchors.set(doc.id, await new Promise<string>(resolve => {
+          previous = await new Promise<string>(resolve => {
             const image = new Image(); image.onload = () => resolve(toJPEG(image, image.naturalWidth, image.naturalHeight, 512)); image.onerror = () => resolve(data.image); image.src = data.image;
-          }));
+          });
+          if (consistent && !anchors.has(doc.id)) anchors.set(doc.id, previous);
         } catch (error) {
           frame.state = 'failed'; frame.message = controller.signal.aborted ? 'Cancelled' : (error as Error).message;
           if (controller.signal.aborted) break;

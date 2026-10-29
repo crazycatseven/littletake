@@ -13,14 +13,24 @@ const ok = (bytes = webp) => Response.json({ data: [{ b64_json: bytes.toString('
 
 test('look prompt locks composition and numbers references in send order', () => {
   const plain = lookPrompt(parseLookInput(input()));
-  assert.match(plain, /Lock the composition to @Image1/);
+  assert.match(plain, /Edit @Image1 in place/); assert.match(plain, /Do not zoom in, crop, reframe/);
   assert.match(plain, /Zero \(left, foreground\)/);
   assert.doesNotMatch(plain, /@Image2/);
   const both = lookPrompt(parseLookInput(input({ anchor: url(webp, 'webp'), style: url(png) })));
   assert.match(both, /@Image2 is an approved still from the same film at a different moment/);
-  assert.match(both, /framing must come from @Image1/);
+  assert.match(both, /positions, sizes and framing come only from @Image1/);
   assert.match(both, /Use @Image3 only as a reference for visual style/);
   assert.match(lookPrompt(parseLookInput(input({ style: url(png) }))), /Use @Image2 only/);
+});
+
+test('layout boxes become exact fractions in the prompt and bad boxes are rejected', () => {
+  const prompt = lookPrompt(parseLookInput(input({ subjects: [{ name: 'Zero', position: 'left', depth: 'foreground', box: [0.31, 0.4, 0.352, 0.62] }, { name: 'Desk', position: 'right', depth: 'midground' }] })));
+  assert.match(prompt, /Exact layout, as fractions of the frame/);
+  assert.match(prompt, /Zero: x 31%–35%, y 40%–62%/);
+  assert.doesNotMatch(prompt, /Desk: x/);
+  assert.doesNotMatch(lookPrompt(parseLookInput(input())), /Exact layout/);
+  assert.throws(() => parseLookInput(input({ subjects: [{ name: 'Zero', position: 'left', depth: 'foreground', box: [0.5, 0.4, 0.3, 0.6] }] })), { code: 'invalid_input' });
+  assert.throws(() => parseLookInput(input({ subjects: [{ name: 'Zero', position: 'left', depth: 'foreground', box: [0, 0, 1.2, 1] }] })), { code: 'invalid_input' });
 });
 
 test('look input rejects missing direction, extra fields and non-image data', () => {
