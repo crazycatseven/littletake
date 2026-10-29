@@ -92,6 +92,17 @@ test('tracked feet place the person on the floor with frame-accurate timing', ()
   assert.match(result.assumptions.at(-1)!, /SAM 3\.1 tracked 1 person and matched 1/);
 });
 
+test('detected cuts limit tracking to the first shot instead of disabling it', () => {
+  const withCuts = { ...draft(), assumptions: ['Clip contains multiple cuts; only the FIRST shot is reconstructed.'] };
+  const cutInput = { ...input(), video: { ...input().video, cuts: [2.5] } };
+  const result = groundReferenceDraft(withCuts, cutInput, walkTracks());
+  const bellboy = result.scene.objects.find(item => item.name === 'Bellboy')!;
+  assert.ok(bellboy.track && Math.abs(bellboy.track.start - 1) <= .15, JSON.stringify(bellboy.track));
+  assert.ok(bellboy.track.start + bellboy.track.duration <= 2.45 + 1e-9, `end ${bellboy.track.start + bellboy.track.duration}`);
+  assert.match(result.assumptions.at(-1)!, /first shot only \(0–2\.50 s/);
+  assert.doesNotMatch(result.assumptions.at(-1)!, /review only/);
+});
+
 test('clips with cuts keep Muse placement and show tracks for review only', () => {
   const withCuts = { ...draft(), assumptions: ['Clip contains multiple cuts; only the FIRST shot is reconstructed.'] };
   const result = groundReferenceDraft(withCuts, input(), walkTracks());

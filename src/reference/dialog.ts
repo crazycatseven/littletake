@@ -3,6 +3,7 @@ import { shotCamera } from '../model';
 import { referenceConnection, requestReferenceDraft } from './client';
 import { readReferenceVideo } from './video';
 import { attachTrackOverlay } from './tracks';
+import { detectCuts } from './cuts';
 import type { ReferenceConnection, ReferenceDraft, ReferenceInput } from './types';
 
 const escapeHTML = (text: string) => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
@@ -24,6 +25,8 @@ export class ReferenceDialog {
   private busy = false;
   private loadingDemo = false;
   private disposeTracks: (() => void) | null = null;
+  private cuts: Promise<number[]> | null = null;
+  private cutsController: AbortController | null = null;
 
   constructor(private readonly applyScene: (scene: SceneDocument) => void) {
     this.root.id = 'referenceDialog'; this.root.setAttribute('aria-labelledby', 'referenceTitle');
@@ -122,6 +125,7 @@ export class ReferenceDialog {
   }
   private async choose(file: File) {
     this.cancelOperation(); this.clearError(); this.video = null; this.draft = null; this.showTracks();
+    this.cutsController?.abort(); this.cutsController = new AbortController(); this.cuts = null;
     const operation = this.operation;
     this.controller = new AbortController();
     if (this.objectURL) URL.revokeObjectURL(this.objectURL);
@@ -137,7 +141,12 @@ export class ReferenceDialog {
       this.video = video;
       this.objectURL = URL.createObjectURL(file); this.player.src = this.objectURL; this.player.hidden = false;
       this.find('.reference-placeholder').hidden = true;
-      this.find('#referenceMetadata').textContent = `${video.duration.toFixed(1)}s · ${video.width} × ${video.height} · ${(file.size / 1_000_000).toFixed(2)} MB`;
+      const metadata = `${video.duration.toFixed(1)}s · ${video.width} × ${video.height} · ${(file.size / 1_000_000).toFixed(2)} MB`;
+      this.find('#referenceMetadata').textContent = metadata;
+      // Cut detection runs in the background on the local file; analysis waits for it only briefly.
+      // Its own controller: starting an analysis must not cancel detection of the same clip.
+      this.cuts = detectCuts(this.objectURL, video.duration, this.cutsController!.signal);
+      void this.cuts.then(cuts => { if (operation === this.operation && cuts.length) this.find('#referenceMetadata').textContent = `${metadata} · ${cuts.length} cut${cuts.length === 1 ? '' : 's'} at ${cuts.map(at => at.toFixed(1) + 's').join(', ')}`; });
       this.emptyReport('Ready to analyze', 'Muse will estimate the visible objects, their motion and the camera.');
     } catch (error) {
       if (operation !== this.operation) return;
@@ -158,7 +167,9 @@ export class ReferenceDialog {
     this.find('#referenceReport').innerHTML = '<div class="reference-empty reference-analyzing"><span class="reference-orbit" aria-hidden="true"></span><h3>Reading the shot</h3><p>Finding the staging, action and camera.<br>This can take a minute.</p></div>';
     this.updateButtons();
     try {
-      const draft = await requestReferenceDraft({ video: this.video, direction: this.direction.value.trim() }, this.controller.signal);
+      const cuts = await Promise.race([this.cuts ?? Promise.resolve([]), new Promise<number[]>(resolve => setTimeout(() => resolve([]), 8000))]);
+      if (operation !== this.operation) return;
+      const draft = await requestReferenceDraft({ video: { ...this.video, ...(cuts.length ? { cuts } : {}) }, direction: this.direction.value.trim() }, this.controller.signal);
       if (operation !== this.operation) return;
       this.draft = draft;
       this.showTracks(draft);

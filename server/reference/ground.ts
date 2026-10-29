@@ -88,11 +88,13 @@ export function groundReferenceDraft(draft: ReferenceDraft, input: ReferenceInpu
   const lastFrame = Math.max(...[...result.values()].flatMap(boxes => boxes.map(box => box.frame)));
   const frames = mp4VideoFrameCount(Buffer.from(base64, 'base64')) ?? lastFrame + 1, fps = frames / duration;
 
-  const tracks = [...result.entries()].map(([id, boxes]) => ({ id, samples: boxes.map((box): Sample => {
+  // With detected cuts the draft is the first shot only, so tracking evidence is limited to that window.
+  const shotEnd = input.video.cuts?.length ? Math.max(.1, input.video.cuts[0] - .05) : duration;
+  const tracks = [...result.entries()].map(([id, boxes]) => ({ id, samples: boxes.filter(box => box.frame / fps <= shotEnd).map((box): Sample => {
     const t = Math.min(duration, box.frame / fps), u = (box.left + box.right) / 2 / width, foot = box.bottom / height;
     const feetVisible = box.bottom < height - 2 && box.bottom - box.top > height * .05;
     return { t, cx: u, cy: (box.top + box.bottom) / 2 / height, height: (box.bottom - box.top) / height, ground: feetVisible ? floorPoint(cameraAt(camera, t, aspect), u, foot) : null };
-  }) })).filter(track => track.samples.length >= 3 && track.samples[track.samples.length - 1].t - track.samples[0].t >= Math.min(1, duration * .15))
+  }) })).filter(track => track.samples.length >= 3 && track.samples[track.samples.length - 1].t - track.samples[0].t >= Math.min(1, shotEnd * .15))
     .sort((a, b) => b.samples.length - a.samples.length).slice(0, LIMITS.tracks);
 
   // Pair each track with the draft person nearest to it on screen when the track first appears.
@@ -106,14 +108,14 @@ export function groundReferenceDraft(draft: ReferenceDraft, input: ReferenceInpu
 
   // Tracks continue across hard cuts while the draft only rebuilds the first shot, so a clip with cuts keeps Muse's
   // placement and timing and shows the tracks for review only.
-  const hasCuts = draft.assumptions.some(note => /\bcuts?\b|multiple shots|several shots/i.test(note));
+  const hasCuts = !input.video.cuts?.length && draft.assumptions.some(note => /\bcuts?\b|multiple shots|several shots/i.test(note));
   const placedNames: string[] = [], timedNames: string[] = [], unplaced: string[] = [];
   for (const { track, person } of hasCuts ? [] : pairs) {
     const samples = track.samples, grounded = samples.filter(sample => sample.ground).length / samples.length >= .7;
     const mode: Mode | null = grounded ? 'ground' : moving(camera) ? null : 'image';
     const motion = mode ? movement(samples, mode) : null;
     if (motion && motion.offset - motion.onset >= .3) {
-      const start = round(Math.max(0, motion.onset)), end = round(Math.min(duration, motion.offset));
+      const start = round(Math.max(0, motion.onset)), end = round(Math.min(shotEnd, motion.offset));
       const from = grounded ? floorAt(samples, start) : null, to = grounded ? floorAt(samples, end) : null;
       if (from && to) {
         const base = person.track ?? { from: person.transform, to: person.transform };
@@ -131,6 +133,7 @@ export function groundReferenceDraft(draft: ReferenceDraft, input: ReferenceInpu
   }
 
   const notes = [`SAM 3.1 tracked ${tracks.length} ${tracks.length === 1 ? 'person' : 'people'} and matched ${pairs.length} to the draft.`];
+  if (input.video.cuts?.length) notes.push(`Tracking used the first shot only (0–${input.video.cuts[0].toFixed(2)} s, before the first detected cut).`);
   if (hasCuts) notes.push('The clip has cuts, so tracks are shown for review only; placement and timing stay Muse estimates.');
   if (placedNames.length) notes.push(`Placed ${placedNames.join(', ')} on the floor at their tracked foot points.`);
   if (timedNames.length) notes.push(`Movement timing from tracking: ${timedNames.join('; ')}.`);

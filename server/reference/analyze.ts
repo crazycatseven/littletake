@@ -7,6 +7,7 @@ const inputSchema = z.strictObject({
   video: z.strictObject({
     dataUrl: z.string().max(4_000_100), duration: z.number().min(REFERENCE_LIMITS.minSeconds).max(REFERENCE_LIMITS.maxSeconds),
     width: z.number().int().min(1).max(8192), height: z.number().int().min(1).max(8192),
+    cuts: z.array(z.number().min(0).max(REFERENCE_LIMITS.maxSeconds)).max(30).optional(),
   }),
   direction: z.string().trim().max(1200),
 });
@@ -23,7 +24,8 @@ export function parseReferenceInput(value: unknown): ReferenceInput {
   const isMP4 = match![1] === 'video/mp4' && bytes.subarray(4, 8).toString('ascii') === 'ftyp';
   const isWebM = match![1] === 'video/webm' && bytes.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
   if (!isMP4 && !isWebM) throw new AIError('invalid_video', 'Choose a valid MP4 or WebM video file.', 400);
-  return parsed.data;
+  const { cuts, ...video } = parsed.data.video, kept = [...new Set(cuts ?? [])].filter(at => at > .1 && at < video.duration - .1).sort((a, b) => a - b);
+  return { ...parsed.data, video: { ...video, ...(kept.length ? { cuts: kept } : {}) } };
 }
 
 const INSTRUCTIONS = `Create an EDITABLE 3D whitebox filming scene from a reference video. Return structured scene data, never code.
@@ -39,7 +41,7 @@ export async function analyzeReference(input: ReferenceInput, provider: AIProvid
   const result = await provider.generateObject({
     instructions: INSTRUCTIONS, schemaName: 'littletake_reference_scene', schema: proposalJSONSchema,
     content: [
-      { type: 'text', text: `Clip duration: ${input.video.duration.toFixed(3)} seconds. Frame size: ${input.video.width} × ${input.video.height}.\nCreator direction: ${input.direction || 'Match the visible staging and camera.'}` },
+      { type: 'text', text: `Clip duration: ${input.video.duration.toFixed(3)} seconds. Frame size: ${input.video.width} × ${input.video.height}.${input.video.cuts?.length ? `\nHard cuts detected at ${input.video.cuts.map(at => at.toFixed(2)).join(', ')} s. The first shot runs from 0 to ${input.video.cuts[0].toFixed(2)} s; build that shot and keep all motion inside it.` : ''}\nCreator direction: ${input.direction || 'Match the visible staging and camera.'}` },
       { type: 'video', dataUrl: input.video.dataUrl },
     ], signal,
   });
