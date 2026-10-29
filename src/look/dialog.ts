@@ -100,7 +100,10 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number)
           const data = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(data.error?.message ?? 'The look frame could not be rendered.');
           frame.result = data.image; frame.state = 'done'; done++;
-          if (consistent && !anchors.has(doc.id)) anchors.set(doc.id, data.image);
+          // A small anchor carries the look without pulling later frames towards its composition.
+          if (consistent && !anchors.has(doc.id)) anchors.set(doc.id, await new Promise<string>(resolve => {
+            const image = new Image(); image.onload = () => resolve(toJPEG(image, image.naturalWidth, image.naturalHeight, 512)); image.onerror = () => resolve(data.image); image.src = data.image;
+          }));
         } catch (error) {
           frame.state = 'failed'; frame.message = controller.signal.aborted ? 'Cancelled' : (error as Error).message;
           if (controller.signal.aborted) break;

@@ -36,7 +36,7 @@ export function lookPrompt(input: LookInput): string {
     'Render the same moment as one finished cinematic film still.',
     'Lock the composition to @Image1: same camera position, lens and framing, same horizon line, and every subject at the same screen position, scale, silhouette, pose and facing direction. Do not add, remove or move subjects.',
     cast ? `Replace each proxy with the real thing it stands for. Proxies in frame, with screen position and depth: ${cast}.` : 'Replace each proxy shape with the real thing it most plausibly stands for.',
-    anchor ? `${anchor} is an approved frame from the same film. Match its characters, wardrobe, set design, lighting and color grade, but take composition only from @Image1.` : '',
+    anchor ? `${anchor} is an approved still from the same film at a different moment. Match only how things look in it: the people's identity and wardrobe, materials, set dressing, lighting and color grade. Its positions, poses and framing are out of date; every position, pose, scale and the camera framing must come from @Image1.` : '',
     style ? `Use ${style} only as a reference for visual style and palette, never for composition or content.` : '',
     `Look and mood: ${input.direction}`,
     'No text, captions, watermarks, interface elements or split panels. One 16:9 frame.',

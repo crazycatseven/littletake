@@ -17,7 +17,8 @@ test('look prompt locks composition and numbers references in send order', () =>
   assert.match(plain, /Zero \(left, foreground\)/);
   assert.doesNotMatch(plain, /@Image2/);
   const both = lookPrompt(parseLookInput(input({ anchor: url(webp, 'webp'), style: url(png) })));
-  assert.match(both, /@Image2 is an approved frame/);
+  assert.match(both, /@Image2 is an approved still from the same film at a different moment/);
+  assert.match(both, /framing must come from @Image1/);
   assert.match(both, /Use @Image3 only as a reference for visual style/);
   assert.match(lookPrompt(parseLookInput(input({ style: url(png) }))), /Use @Image2 only/);
 });
