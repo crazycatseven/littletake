@@ -37,10 +37,21 @@ test('Muse Image edit request is multipart with every reference image', async ()
   const form = seen!.init.body as FormData;
   assert.equal(form.get('model'), 'muse-image-1.0');
   assert.equal(form.get('size'), '1600x900');
-  const images = form.getAll('image[]') as File[];
+  const images = form.getAll('image') as File[];
   assert.deepEqual(images.map(file => file.type), ['image/png', 'image/webp']);
+  assert.equal(form.getAll('image[]').length, 0);
   assert.equal(form.get('prompt'), result.prompt);
   assert.match(result.image, /^data:image\/webp;base64,/);
+});
+
+test('several references fall back to image[] once after a 400', async () => {
+  const fields: string[][] = [];
+  const transport = async (_: unknown, init?: RequestInit) => { const form = init!.body as FormData; fields.push([...new Set([...form.keys()].filter(key => key.startsWith('image')))]); return fields.length === 1 ? new Response('{}', { status: 400 }) : ok(); };
+  await generateLookFrame(parseLookInput(input({ anchor: url(webp, 'webp') })), { apiKey: 'k', model: 'm' }, transport as typeof fetch);
+  assert.deepEqual(fields, [['image'], ['image[]']]);
+  let calls = 0;
+  await assert.rejects(generateLookFrame(parseLookInput(input()), { apiKey: 'k', model: 'm' }, async () => { calls++; return new Response('{}', { status: 400 }); }), { code: 'provider_rejected' });
+  assert.equal(calls, 1, 'a single image is not retried');
 });
 
 test('a single image uses the plain image field and provider failures stay generic', async () => {
