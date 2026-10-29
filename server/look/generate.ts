@@ -38,12 +38,12 @@ export function lookPrompt(input: LookInput): string {
   const percent = (value: number) => `${Math.round(value * 100)}%`;
   const layout = input.subjects.filter(item => item.box).map(({ name, box: [left, top, right, bottom] = [0, 0, 0, 0] }) => `${name}: x ${percent(left)}–${percent(right)}, y ${percent(top)}–${percent(bottom)}`).join('; ');
   return [
-    '@Image1 is a previs frame from a 3D blocking tool: flat-shaded, untextured low-poly proxy shapes that stand in for real people, props and sets.',
-    'Render the same moment as one finished cinematic film still.',
-    'Lock the composition to @Image1: same camera position, lens and framing, same horizon line, and every subject at the same screen position, scale, silhouette, pose and facing direction. Do not add, remove or move subjects.',
+    'Edit @Image1 in place. It is a previs frame from a 3D blocking tool: flat-shaded, untextured low-poly proxy shapes that stand in for real people, props and sets.',
+    'Repaint it as a finished photographic film frame WITHOUT changing the composition. The output must line up with @Image1 when overlaid: same framing, camera height, lens and horizon; every subject exactly where it is and exactly as large as it is, with the same empty space around it.',
+    'Do not zoom in, crop, reframe, recentre or enlarge anything. Small or distant subjects stay small and distant. Do not add, remove or move subjects; keep each pose and facing direction.',
     cast ? `Replace each proxy with the real thing it stands for. Proxies in frame, with screen position and depth: ${cast}.` : 'Replace each proxy shape with the real thing it most plausibly stands for.',
     layout ? `Exact layout, as fractions of the frame measured from the top-left corner. Each subject must fill its box at the same size; do not enlarge, shrink or recentre anyone: ${layout}.` : '',
-    anchor ? `${anchor} is an approved still from the same film at a different moment, usually the previous moment of this shot. Match only how things look in it: the people's identity and wardrobe, materials, set dressing, lighting and color grade. Its positions, poses and framing are out of date; every position, pose, scale and the camera framing must come from @Image1.` : '',
+    anchor ? `${anchor} is an approved still from the same film at a different moment, usually the previous moment of this shot. Match only how things look in it: the people's identity and wardrobe, materials, set dressing, lighting and color grade. Never copy its framing or where and how large anyone is in it; positions, sizes and framing come only from @Image1.` : '',
     style ? `Use ${style} only as a reference for visual style and palette, never for composition or content.` : '',
     `Look and mood: ${input.direction}`,
     'No text, captions, watermarks, interface elements or split panels. One 16:9 frame.',
