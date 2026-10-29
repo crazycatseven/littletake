@@ -4,6 +4,7 @@ import { EditorSelection, type SelectionMode } from './placement/selection';
 import { transformSelection, type PoseUpdate, type TransformPhase } from './placement/transforms';
 import { PlacementPanel } from './placement/panel';
 import { openShotExport } from './shot-export/dialog';
+import { openLookFrames } from './look/dialog';
 import { AssetPanel } from './assets/panel';
 import { AssetEditor } from './assets/editor';
 import { updateAssetInstances } from './assets/edit';
@@ -637,7 +638,7 @@ function editSelection(updates:PoseUpdate[],phase:TransformPhase,wholeMotion:boo
 try {
   $('.viewport-heading .transform-tools').insertAdjacentHTML('afterend','<div id="placementTools"></div>');
   $('.stage-panel').insertAdjacentHTML('beforeend','<div id="hiddenCount" class="hidden-count" hidden></div>');
-  $('.shot-heading h2').insertAdjacentHTML('afterend','<button class="shot-export-button" data-action="export-shot" title="Export the current shot as an image or video">'+icon('download')+'Export</button>');
+  $('.shot-heading h2').insertAdjacentHTML('afterend','<button class="shot-export-button" data-action="export-shot" title="Export the current shot as an image or video">'+icon('download')+'Export</button><button class="shot-export-button" data-action="look-frames" title="Render finished film stills of this shot with Muse Image">'+icon('camera')+'Look</button>');
   stage=new Stage({viewport:$('#viewport'),preview:$('#preview'),onSelect:selectIds,onStatus:message=>$('#viewHint').textContent=message,onTransform:editSelection});
   stage.setTool(tool);
   placementPanel=new PlacementPanel($('#placementTools'),settings=>stage.setPrecision(settings),(axis,edge)=>stage.alignSelection(axis,edge));
@@ -695,6 +696,7 @@ app.addEventListener('click',event=>{
     case 'show-selection':setHidden(selection.ids,false);break;
     case 'show-all':setHidden(doc.objects.map(item=>item.id),false);break;
     case 'export-shot':{const shot=activeShot();if(shot){pause();flushFieldEdit();try{openShotExport(stage.createShotRenderer(shot.cameraId),shot,time);}catch(error){status((error as Error).message);}}break;}
+    case 'look-frames':{const shot=activeShot();if(shot){pause();flushFieldEdit();try{openLookFrames(stage.createShotRenderer(shot.cameraId),shot,time);}catch(error){status((error as Error).message);}}break;}
     case 'edit-asset':{const item=entity();if(item&&'asset' in item&&item.asset){const asset=project.assets?.find(a=>a.id===item.asset!.id);if(asset)openAssetEditor(asset);}break;}
     case 'save-asset':saveSelectionAsset();break;
     case 'record-performance':beginPerformance();startPerformanceRecord();break;
