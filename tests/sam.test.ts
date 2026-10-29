@@ -92,6 +92,14 @@ test('tracked feet place the person on the floor with frame-accurate timing', ()
   assert.match(result.assumptions.at(-1)!, /SAM 3\.1 tracked 1 person and matched 1/);
 });
 
+test('clips with cuts keep Muse placement and show tracks for review only', () => {
+  const withCuts = { ...draft(), assumptions: ['Clip contains multiple cuts; only the FIRST shot is reconstructed.'] };
+  const result = groundReferenceDraft(withCuts, input(), walkTracks());
+  assert.deepEqual(result.scene, withCuts.scene);
+  assert.equal(result.tracks?.[0].label, 'Bellboy');
+  assert.match(result.assumptions.at(-1)!, /review only/);
+});
+
 test('tracks far from every draft person stay unmatched and failures leave the draft unchanged', () => {
   const result = groundReferenceDraft(draft([4, 0, 0]), input(), walkTracks(draft([4, 0, 0]).scene));
   assert.equal(result.scene.objects[0].track, null);

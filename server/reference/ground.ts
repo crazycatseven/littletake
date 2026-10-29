@@ -104,8 +104,11 @@ export function groundReferenceDraft(draft: ReferenceDraft, input: ReferenceInpu
   }).filter(option => option.distance <= LIMITS.matchDistance).sort((a, b) => a.distance - b.distance);
   for (const option of options) if (!pairs.some(pair => pair.track === option.track || pair.person === option.person)) pairs.push(option);
 
+  // Tracks continue across hard cuts while the draft only rebuilds the first shot, so a clip with cuts keeps Muse's
+  // placement and timing and shows the tracks for review only.
+  const hasCuts = draft.assumptions.some(note => /\bcuts?\b|multiple shots|several shots/i.test(note));
   const placedNames: string[] = [], timedNames: string[] = [], unplaced: string[] = [];
-  for (const { track, person } of pairs) {
+  for (const { track, person } of hasCuts ? [] : pairs) {
     const samples = track.samples, grounded = samples.filter(sample => sample.ground).length / samples.length >= .7;
     const mode: Mode | null = grounded ? 'ground' : moving(camera) ? null : 'image';
     const motion = mode ? movement(samples, mode) : null;
@@ -128,6 +131,7 @@ export function groundReferenceDraft(draft: ReferenceDraft, input: ReferenceInpu
   }
 
   const notes = [`SAM 3.1 tracked ${tracks.length} ${tracks.length === 1 ? 'person' : 'people'} and matched ${pairs.length} to the draft.`];
+  if (hasCuts) notes.push('The clip has cuts, so tracks are shown for review only; placement and timing stay Muse estimates.');
   if (placedNames.length) notes.push(`Placed ${placedNames.join(', ')} on the floor at their tracked foot points.`);
   if (timedNames.length) notes.push(`Movement timing from tracking: ${timedNames.join('; ')}.`);
   if (unplaced.length) notes.push(`${unplaced.join(', ')} moved in the footage, but their feet were not visible enough to place the move.`);
