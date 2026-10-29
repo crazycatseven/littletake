@@ -58,16 +58,21 @@ function sniff(bytes: Buffer): string | null {
 
 export async function generateLookFrame(input: LookInput, config: { apiKey: string; model: string }, transport: typeof fetch = fetch, signal?: AbortSignal): Promise<LookResult> {
   const prompt = lookPrompt(input), images = [input.frame, input.anchor, input.style].filter((url): url is string => Boolean(url));
-  // Muse Image mirrors the OpenAI Images API: multipart edits, `image[]` when several references are sent.
-  const form = new FormData();
-  form.set('model', config.model); form.set('prompt', prompt); form.set('n', '1'); form.set('size', LOOK_SIZE);
-  images.forEach((url, index) => { const { type, bytes } = decode(url); form.append(images.length > 1 ? 'image[]' : 'image', new Blob([new Uint8Array(bytes)], { type: `image/${type}` }), `image-${index + 1}.${type === 'jpeg' ? 'jpg' : type}`); });
-  let response: Response;
-  try {
-    response = await transport('https://api.meta.ai/v1/images/edits', {
+  // Muse Image mirrors the OpenAI Images API (multipart edits). Several references are sent as repeated `image`
+  // fields; live testing rejected `image[]`, so that spelling is only a one-time fallback after a 400.
+  const send = (field: string) => {
+    const form = new FormData();
+    form.set('model', config.model); form.set('prompt', prompt); form.set('n', '1'); form.set('size', LOOK_SIZE);
+    images.forEach((url, index) => { const { type, bytes } = decode(url); form.append(field, new Blob([new Uint8Array(bytes)], { type: `image/${type}` }), `image-${index + 1}.${type === 'jpeg' ? 'jpg' : type}`); });
+    return transport('https://api.meta.ai/v1/images/edits', {
       method: 'POST', headers: { Authorization: `Bearer ${config.apiKey}` }, body: form,
       signal: AbortSignal.any([AbortSignal.timeout(170_000), ...(signal ? [signal] : [])]),
     });
+  };
+  let response: Response;
+  try {
+    response = await send('image');
+    if (response.status === 400 && images.length > 1) response = await send('image[]');
   } catch {
     if (signal?.aborted) throw new AIError('cancelled', 'Request cancelled.', 499);
     throw new AIError('provider_unavailable', 'Muse Image could not finish the frame. Please try again.', 504);
