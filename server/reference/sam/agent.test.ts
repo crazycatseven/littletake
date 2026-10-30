@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { brotliDecompressSync } from 'node:zlib';
 import { PNG } from 'pngjs';
 import { ReferenceTools } from './tools.ts';
 import { segmentImage, SAM_SOURCE } from './service.ts';
@@ -156,4 +157,33 @@ test('Agent requests an exact missing frame, reads and segments it, reuses resul
     assert.equal(error.diagnostic.referenceCalls[0].receipt.rawOutput, wire);
     assert.equal(JSON.stringify(error).includes('test-only-never-public'), false);
   } finally { globalThis.fetch = originalFetch; }
+});
+
+test('large reference tool diagnostics cross the production response limit without losing source pixels or raw turns', async () => {
+  const png = new PNG({ width: 440, height: 330 }); let seed = 1;
+  for (let at = 0; at < png.data.length; at += 4) {
+    for (let channel = 0; channel < 3; channel++) { seed = (seed * 1664525 + 1013904223) >>> 0; png.data[at + channel] = seed >>> 24; }
+    png.data[at + 3] = 255;
+  }
+  const dataUrl = 'data:image/png;base64,' + PNG.sync.write(png).toString('base64');
+  const frames = [0, 1, 2].map(index => ({ id: 'frame-' + index, time: index + .2, requestedTime: index + .2, shot: 0, role: 'coverage', quality: 1, width: 440, height: 330, dataUrl }));
+  let modelCalls = 0;
+  const provider = new MetaProvider({ apiKey: 'test-only-never-public', model: 'test' }, (async (_url, init) => {
+    modelCalls++; const body = JSON.parse(String(init?.body));
+    if (!body.input.some((part: any) => part.type === 'function_call_output')) return Response.json({ status: 'completed', output: frames.map(frame => ({ type: 'function_call', call_id: frame.id, name: 'read_reference_frame', arguments: JSON.stringify({ frameId: frame.id }) })) });
+    assert.equal(body.input.at(-1).content.filter((part: any) => part.type === 'input_image').length, 3);
+    return Response.json({ status: 'completed', output_text: JSON.stringify({ summary: 'Read the three original frames.', requestedViews: [], operations: [], objectCounts: [] }) });
+  }) as typeof fetch);
+  const scene = createEmptyScene('set');
+  const handler = createSceneEditHandler({ MODEL_API_KEY: 'test-only-never-public', LITTLETAKE_ASSET_DIR: await mkdtemp(join(tmpdir(), 'littletake-reference-wire-')) }, () => provider);
+  const input = { project: { name: 'Large reference test', scenes: [scene] }, sceneId: scene.id, shotId: null, selectedId: null, time: 0, prompt: 'Inspect the three saved frames.', history: [], snapshots: [],
+    reference: { source: { id: 'wire-source', name: 'Reference clip', kind: 'video', duration: 3, originalWidth: 440, originalHeight: 330, cuts: [], omittedShots: 0, frames }, observations: [], callsUsed: 0, framesRequested: false } };
+  const response = await handler(new Request('https://example.com/api/scene-edit', { method: 'POST', headers: { 'content-type': 'application/json', 'accept-encoding': 'gzip, br;q=1' }, body: JSON.stringify(input) }));
+  assert.equal(response.status, 200); assert.equal(response.headers.get('content-encoding'), 'br'); assert.equal(response.headers.get('vary'), 'Accept-Encoding');
+  const wire = Buffer.from(await response.arrayBuffer()), decoded = brotliDecompressSync(wire);
+  assert.ok(decoded.length > 4_500_000); assert.ok(wire.length < 4_000_000);
+  const result = JSON.parse(decoded.toString());
+  assert.equal(result.status, 'ready'); assert.equal(result.diagnostic.toolTurns.length, 2); assert.equal(result.diagnostic.toolCalls.length, 3);
+  assert.deepEqual(result.diagnostic.input.reference.source.frames, frames); assert.equal(modelCalls, 2);
+  assert.equal(decoded.includes(Buffer.from('test-only-never-public')), false);
 });
