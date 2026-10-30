@@ -14,7 +14,10 @@ import type { AlignmentEdge, PrecisionSettings } from './placement/panel';
 import { ShotRenderer } from './shot-export/renderer';
 import type { PoseUpdate } from './placement/transforms';
 import type { SceneSnapshot, SceneView } from './scene-edit/operations';
-import type { Axis, PrimitiveKind, SceneDocument, SceneObject, StageOptions, ToolMode, Transform } from './types';
+import type { Axis, PrimitiveKind, SceneDocument, SceneObject, StageOptions, ToolMode, Transform, Vec3 } from './types';
+import { SKETCH_STEP } from './spatial/sketch';
+
+const STROKE_LIMIT = 4096;
 
 interface EntityView {
   root: THREE.Group;
@@ -107,6 +110,7 @@ export class Stage {
   private axis: Axis | null = null;
   private pointerStart: PointerStart | null = null;
   private flyPointer: number | null = null;
+  private sketch: { pointerId: number | null; points: THREE.Vector3[]; line: THREE.Line; done: (points: Vec3[]) => void; cancel: () => void; keydown: (event: KeyboardEvent) => void } | null = null;
   private lastPointer = new THREE.Vector2();
   private xrControls?: XRControls;
   private xrPending = false;
@@ -322,6 +326,65 @@ export class Stage {
     this.syncSelection();
   }
 
+  /** Floor stroke mode: one drag on the ground plane returns its points; Escape cancels. */
+  drawPath(done: (points: Vec3[]) => void, cancel: () => void): void {
+    this.cancelPath();
+    // Preallocated: BufferGeometry.setFromPoints cannot grow an existing attribute.
+    const geometry = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(3 * STROKE_LIMIT), 3)); geometry.setDrawRange(0, 0);
+    const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: '#e0703a', depthTest: false }));
+    line.renderOrder = 20; line.frustumCulled = false; this.scene.add(line);
+    const keydown = (event: KeyboardEvent): void => { if (event.key !== 'Escape') return; event.preventDefault(); event.stopImmediatePropagation(); const active = this.sketch; this.endPath(); active?.cancel(); };
+    window.addEventListener('keydown', keydown, true);
+    this.sketch = { pointerId: null, points: [], line, done, cancel, keydown };
+    this.orbit.enabled = false; this.gizmo.enabled = false; this.renderer.domElement.style.cursor = 'crosshair';
+    this.options.onStatus('Draw path · Drag across the floor · Esc cancels');
+  }
+
+  /** Leaves stroke mode without returning points. */
+  cancelPath(): void { const active = this.sketch; if (!active) return; this.endPath(); active.cancel(); }
+
+  get drawingPath(): boolean { return this.sketch !== null; }
+
+  private endPath(): void {
+    const active = this.sketch; if (!active) return;
+    this.sketch = null; window.removeEventListener('keydown', active.keydown, true);
+    if (active.pointerId !== null && this.renderer.domElement.hasPointerCapture(active.pointerId)) this.renderer.domElement.releasePointerCapture(active.pointerId);
+    this.scene.remove(active.line); active.line.geometry.dispose(); (active.line.material as THREE.Material).dispose();
+    this.renderer.domElement.style.cursor = ''; this.orbit.enabled = !this.dragging; this.gizmo.enabled = !!this.selectedId && !this.playing;
+    this.options.onStatus(NAV_HINT);
+  }
+
+  private floorPoint(event: PointerEvent): THREE.Vector3 | null {
+    const bounds = this.renderer.domElement.getBoundingClientRect();
+    this.pointer.set(((event.clientX - bounds.left) / bounds.width) * 2 - 1, -((event.clientY - bounds.top) / bounds.height) * 2 + 1);
+    this.editorCamera.updateMatrixWorld(true); this.raycaster.setFromCamera(this.pointer, this.editorCamera);
+    const point = this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
+    return point && point.toArray().every(value => Math.abs(value) < 990) ? point : null;
+  }
+
+  private sketchPointer(event: PointerEvent, phase: 'down' | 'move' | 'up'): boolean {
+    const active = this.sketch;
+    if (!active || (phase !== 'down' && active.pointerId !== event.pointerId)) return false;
+    event.preventDefault(); event.stopImmediatePropagation();
+    if (phase === 'down') {
+      if (event.button !== 0) return true;
+      const point = this.floorPoint(event); if (!point) { this.options.onStatus('Start the path on the floor'); return true; }
+      active.pointerId = event.pointerId; active.points = [point]; this.renderer.domElement.setPointerCapture(event.pointerId);
+    } else if (phase === 'move') {
+      const point = this.floorPoint(event);
+      if (point && point.distanceTo(active.points.at(-1)!) >= SKETCH_STEP && active.points.length < STROKE_LIMIT) active.points.push(point);
+    } else {
+      const point = this.floorPoint(event); if (point && point.distanceTo(active.points.at(-1)!) > 1e-3) active.points.push(point);
+      const points = active.points.map(p => p.toArray() as Vec3);
+      this.endPath(); active.done(points); return true;
+    }
+    // Drawn just above the floor so it stays visible over the grid.
+    const position = active.line.geometry.getAttribute('position') as THREE.BufferAttribute;
+    active.points.forEach((p, index) => position.setXYZ(index, p.x, .02, p.z));
+    position.needsUpdate = true; active.line.geometry.setDrawRange(0, active.points.length);
+    return true;
+  }
+
   setTool(mode: ToolMode): void {
     this.tool = mode;
     this.gizmo.setMode(mode);
@@ -423,6 +486,7 @@ export class Stage {
   }
 
   dispose(): void {
+    this.cancelPath();
     if (this.disposed) return;
     this.disposed = true;
     this.renderer.setAnimationLoop(null);
@@ -839,6 +903,7 @@ export class Stage {
 
   private onPointerDown = (event: PointerEvent): void => {
     if (this.presentingXR) return;
+    if (this.sketchPointer(event, 'down')) return;
     if(this.controlled){event.preventDefault();event.stopImmediatePropagation();this.focusCanvas();return;}
     if (event.pointerType === 'touch' && !event.isPrimary) return;
     this.renderer.domElement.focus({ preventScroll: true });
@@ -870,6 +935,7 @@ export class Stage {
   };
 
   private onPointerMove = (event: PointerEvent): void => {
+    if (this.sketchPointer(event, 'move')) return;
     const start = this.pointerStart;
     if (start?.box && start.id === event.pointerId) {
       event.preventDefault(); event.stopImmediatePropagation();
@@ -893,6 +959,7 @@ export class Stage {
   };
 
   private onPointerUp = (event: PointerEvent): void => {
+    if (this.sketchPointer(event, 'up')) return;
     if (this.flyPointer === event.pointerId) {
       this.clearNavigation();
       return;
@@ -929,6 +996,7 @@ export class Stage {
   }
 
   private onPointerCancel = (): void => {
+    if (this.sketch) { this.cancelPath(); return; }
     this.pointerStart = null;
     this.selectionBox.hidden = true;
     this.clearNavigation();
