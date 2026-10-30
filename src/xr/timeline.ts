@@ -68,9 +68,9 @@ export function xrTimelineSvg(state: XRTimelineState, hovered?: number, ui: { ti
   }).join('');
   const label = state.selection ? `${state.selection.name.slice(0, 40)}${state.selection.name.length > 40 ? '…' : ''} · ${frames.length} keyframes` : 'Select an object to see its keyframes';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="400" viewBox="0 0 1440 400">
-    <rect x="4" y="4" width="1432" height="392" rx="28" fill="#182b26" stroke="#789084" stroke-width="2"/>
+    <rect x="4" y="4" width="1432" height="392" rx="28" fill="#182b26" stroke="${ui.dragging ? '#ffbd66' : ui.titleHover ? '#c9f86b' : '#789084'}" stroke-width="${ui.dragging || ui.titleHover ? 6 : 2}"/>
     <g font-family="Segoe UI, Arial, sans-serif">${ui.titleHover || ui.dragging ? `<rect x="24" y="16" width="1392" height="80" rx="12" fill="${ui.dragging ? '#ffbd66' : '#c9f86b'}"/>` : ''}<text x="64" y="72" fill="${ui.titleHover || ui.dragging ? '#10231e' : '#d7e9b2'}" font-size="36" font-weight="600">Timeline</text>
-    <text x="300" y="72" fill="${ui.titleHover || ui.dragging ? '#10231e' : '#c7d6ce'}" font-size="27">${ui.dragging ? 'Release to place' : 'Grip to move'}</text>
+    <text x="300" y="72" fill="${ui.titleHover || ui.dragging ? '#10231e' : '#c7d6ce'}" font-size="27">${ui.dragging ? 'Release to place' : ui.titleHover ? 'Hold grip to move' : 'Grip to move'}</text>
     <text x="1376" y="72" text-anchor="end" fill="${ui.titleHover || ui.dragging ? '#10231e' : '#f6f3e9'}" font-size="36">${state.time.toFixed(2)} / ${state.duration.toFixed(2)} s</text>
     <text x="64" y="116" fill="#c7d6ce" font-size="27">${escapeXml(label)}</text>
     <rect x="64" y="164" width="1312" height="20" rx="10" fill="#587167"/><rect x="64" y="164" width="${1312 * progress}" height="20" rx="10" fill="#c9f86b"/>

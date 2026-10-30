@@ -101,6 +101,7 @@ export class XRControls {
   private following = false;
   private headAnchor: THREE.Matrix4 | null = null;
   private freeRig = new THREE.Matrix4();
+  private menuFollowAnchor: THREE.Matrix4 | null = null;
 
   constructor(private renderer: THREE.WebGLRenderer, private options: Options) {
     this.camera.layers.enable(3);
@@ -202,6 +203,19 @@ export class XRControls {
         this.viewerLocal.fromArray(viewer.transform.matrix);
       }
       const head = this.menuHead();
+      if (this.following) {
+        // Carry the panel with camera travel and heading, without binding it
+        // to live head turns or tilting its upright surface with camera roll.
+        const yaw = new THREE.Euler().setFromQuaternion(this.rig.quaternion, 'YXZ').y;
+        const anchor = new THREE.Matrix4().compose(this.rig.position,
+          new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), this.rig.scale);
+        if (this.menuFollowAnchor && this.menu.expanded && this.menuDrag === null) {
+          const delta = anchor.clone().multiply(this.menuFollowAnchor.clone().invert());
+          this.menuRoot.position.applyMatrix4(delta);
+          this.menuRoot.quaternion.premultiply(new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().extractRotation(delta)));
+        }
+        this.menuFollowAnchor = anchor;
+      }
       if (!this.menu.expanded || this.menuNeedsPlacement && viewer) {
         if (this.menuNeedsPlacement && viewer && this.timeline) this.placeTimeline();
         this.menuSpace.place(head, this.rig.scale.x);
@@ -272,11 +286,16 @@ export class XRControls {
     if (!this.options.followCamera?.()) return;
     this.finish(true); this.rig.updateMatrix(); this.freeRig.copy(this.rig.matrix);
     this.following = true; this.headAnchor = null;
+    this.menuFollowAnchor = null; this.menuNeedsPlacement = true;
     this.camera.layers.disable(3);
   }
 
   private leaveCamera(): void {
-    if (this.following) this.freeRig.decompose(this.rig.position, this.rig.quaternion, this.rig.scale);
+    if (this.following) {
+      this.freeRig.decompose(this.rig.position, this.rig.quaternion, this.rig.scale);
+      this.menuSpace.place(this.menuHead(), this.rig.scale.x);
+    }
+    this.menuFollowAnchor = null;
     this.following = false; this.headAnchor = null; this.camera.layers.enable(3);
   }
   private syncMenu(): void {
@@ -477,6 +496,20 @@ export class XRControls {
       this.nearTracked.set(index, !!(source?.gripSpace && this.reference && frame?.getPose(source.gripSpace, this.reference)));
       const near = this.updateNear(index);
       this.hoverOutlines[index].root.visible = false;
+      // Use the same grip-space radius and title target as begin(), even when
+      // an object's near sphere would otherwise suppress ray hover feedback.
+      const canInteract = !this.grab && !this.locomotion && this.menuDrag === null;
+      if (canInteract && this.session?.visibilityState === 'visible' && this.controllers[index].visible &&
+          this.grips[index].visible && this.nearTracked.get(index)) {
+        const grip = this.grips[index].getWorldPosition(new THREE.Vector3());
+        const titleAction = this.menu.nearTitle(grip, .04 * this.rig.scale.x, true) ? XR_TIMELINE_DRAG :
+          this.menu.nearTitle(grip, .04 * this.rig.scale.x) ? XR_MENU_DRAG : undefined;
+        if (titleAction !== undefined) {
+          hovered.push(titleAction);
+          this.pointers[index].root.visible = false;
+          return;
+        }
+      }
       if (near.active) {
         this.pointers[index].root.visible = false;
         if (near.target) highlighted.add(near.target);
@@ -487,7 +520,6 @@ export class XRControls {
       if (!tracked) { this.pointers[index].root.visible = false; return; }
       const hit = this.hit(index);
       const action = hit?.object.userData.xrAction;
-      const canInteract = !this.grab && !this.locomotion && this.menuDrag === null;
       const keyTime = hit && this.timeline && canInteract ? this.menu.keyframeTime(hit) ?? this.keyframeGhosts.timeAt(hit) : undefined;
       if (keyTime !== undefined) hoveredKey = keyTime;
       if (canInteract && typeof action === 'number' && this.menu.enabled(action)) hovered.push(action);

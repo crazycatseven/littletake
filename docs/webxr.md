@@ -4,7 +4,7 @@ Open the app in a WebXR headset browser with tracked controllers and choose **En
 
 Tracked controllers appear alongside their pointing rays. Device models load from the WebXR input profiles CDN; a local simplified model appears while loading or when offline.
 
-Opening the menu places it about 0.9 m in front of your current head position, upright and facing you. The open menu and timeline stay in world space. Their size adjusts with viewing distance and grab-move scale to keep a consistent visual size. Point at the title bar (or bring a grip within 4 cm), hold grip to move the panel, then release to leave it in place. The panel stays upright. While collapsed, the small **Menu** button follows your view so you can reopen the panel in front of you after moving away.
+Opening the menu places it about 0.9 m in front of your current head position, upright and facing you. In Free view, the open menu and timeline stay in world space. In Follow camera, the menu travels and turns with the camera while staying upright; turning your head does not move the expanded menu. Returning to Free view places the menu in front of you again. Their size adjusts with viewing distance and grab-move scale to keep a consistent visual size. Point at the small drag bar above the menu icons (or bring a grip within 4 cm), hold grip to move the menu, then release to leave it in place. The panel stays upright. The menu expands into three compact circular icons to the right of **Menu**: camera view, timeline and exit VR. Hover an icon to see its action; active modes have a check marker. While collapsed, the small **Menu** button follows your view so you can reopen the panel in front of you after moving away.
 
 ## Controls
 
@@ -18,11 +18,11 @@ Opening the menu places it about 0.9 m in front of your current head position, u
 | Follow a shot | **Follow camera**, then left **Y** to play; **Free view** restores your previous view |
 | Scrub timeline | **Timeline**, then move either thumbstick left/right; **Done** exits and keeps the current time |
 | Jump to an object's keyframe | Select the object in timeline mode; point at a diamond marker or translucent pose and press trigger |
-| Collapse / expand menu | Left **Menu** key, or **Hide menu** / **Menu** on the panel; if the device reserves Menu, press the left thumbstick instead |
+| Collapse / expand menu | Left **Menu** key, or the **Menu** button; if the device reserves Menu, press the left thumbstick instead |
 | Add a keyframe | Select an object, scrub to the desired time, then trigger **+ Keyframe** on the timeline; **Update keyframe** updates the current pose |
 | Delete a keyframe | Jump to a selected object key, then trigger **Delete keyframe**; removes all its property keys at that time. Left **X** undoes deletion |
 | Move the timeline | Hold grip on its **Grip to move** title bar; release to place |
-| Move the menu | Hold grip on the **Grip to move** title bar; release to place |
+| Move the menu | Hold grip on the small bar above its icons; release to place |
 | Playback | Left **Y** toggles play / pause; its button icon shows the next action; unavailable while editing the timeline |
 | Undo | Left **X**, marked with an undo arrow; press once per undo |
 | Exit | **Exit VR** in the menu |

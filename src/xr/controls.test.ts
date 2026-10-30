@@ -21,7 +21,11 @@ test('sphere grab rotates around the grip with no initial snap and preserves sca
 
 test('timeline header drags independently and add-key is gated by selection, lock and active gesture', () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
-  Object.defineProperty(globalThis, 'document', { configurable: true, value: { createElement: () => ({ getContext: () => ({}) }) } });
+  let timelineSvg = '';
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { createElement: () => ({ getContext: () => ({}), set src(value: string) {
+    const svg = decodeURIComponent(value.slice(value.indexOf(',') + 1));
+    if (svg.includes('>Timeline</text>')) timelineSvg = svg;
+  } }) } });
   const controllers = [new THREE.Group(), new THREE.Group()], grips = [new THREE.Group(), new THREE.Group()];
   const reference = new EventTarget(), session = Object.assign(new EventTarget(), { visibilityState: 'visible' });
   const renderer = { xr: { getController: (i: number) => controllers[i], getControllerGrip: (i: number) => grips[i], getReferenceSpace: () => reference } } as unknown as THREE.WebGLRenderer;
@@ -44,6 +48,20 @@ test('timeline header drags independently and add-key is gated by selection, loc
     controllers[0].dispatchEvent({ type: 'connected', data: { gripSpace: {} } } as never);
     aimMenu(controls, controllers[0], 5); fire('selectstart');
     aimMenu(controls, controllers[0], XR_MENU_TOGGLE); fire('selectstart');
+    // Nearby grip highlights the title without a pointing ray; leaving or
+    // losing tracking clears it. The threshold follows navigation scale.
+    const title = controls.timelineRoot.children.find(child => child.userData.xrAction === XR_TIMELINE_DRAG)!;
+    controllers[0].quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+    for (const scale of [1, 2]) {
+      controls.rig.scale.setScalar(scale); controls.rig.updateMatrixWorld(true);
+      const point = title.getWorldPosition(new THREE.Vector3());
+      grips[0].position.copy(controls.rig.worldToLocal(point.clone().add(new THREE.Vector3(0, 0, .03 * scale))));
+      controls.update(frame); assert.match(timelineSvg, /Hold grip to move/);
+      controls.update({ getPose: () => null } as unknown as XRFrame); assert.doesNotMatch(timelineSvg, /Hold grip to move/);
+      grips[0].position.copy(controls.rig.worldToLocal(point.clone().add(new THREE.Vector3(0, 0, .06 * scale))));
+      controls.update(frame); assert.doesNotMatch(timelineSvg, /Hold grip to move/);
+    }
+    controls.rig.scale.setScalar(1); grips[0].position.set(0, 0, 0); controls.rig.updateMatrixWorld(true);
     const menuPosition = controls.menuRoot.position.clone(), before = controls.timelineRoot.position.clone();
     aim(XR_TIMELINE_DRAG); fire('squeezestart');
     grips[0].position.x += .4; controls.updateView(frame);
@@ -113,7 +131,7 @@ test('XR menu collapses without invisible targets and exposes current action ava
     assert.ok(controls.menuRoot.children.filter(child => child.visible).length > 1); // session starts expanded
     assert.deepEqual(actions, []);
     assert.doesNotMatch(xrMenuSvg({ playing: true, canUndo: false, following: true, hasCamera: true, scale: 1 }), /Undo|Play|Pause/);
-    assert.match(xrMenuHandleSvg(false), />Menu</);
+    assert.match(xrMenuHandleSvg(false), /<title>Open menu<\/title>/);
   } finally {
     menu.dispose(); controls.dispose();
     if (previous) Object.defineProperty(globalThis, 'document', previous); else Reflect.deleteProperty(globalThis, 'document');
@@ -441,13 +459,22 @@ test('XR controller gestures select, commit once, cancel on tracking loss, and r
     clickFollow(); controls.updateView(viewerFrame); controls.rig.updateMatrixWorld(true);
     const assertMatrix = (actual: THREE.Matrix4, expected: THREE.Matrix4) => actual.elements.forEach((value, index) => assert.ok(Math.abs(value - expected.elements[index]) < 1e-6));
     assertMatrix(controls.rig.matrixWorld.clone().multiply(head), followCamera.matrixWorld);
+    const menuBeforeTravel = controls.menuRoot.position.clone();
+    const menuFrame = () => new THREE.Matrix4().compose(controls.rig.position,
+      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), new THREE.Euler().setFromQuaternion(controls.rig.quaternion, 'YXZ').y), controls.rig.scale);
+    const localMenu = menuBeforeTravel.clone().applyMatrix4(menuFrame().invert());
     followCamera.position.x += 2; followCamera.rotation.y += .4;
     controls.updateView(viewerFrame); controls.rig.updateMatrixWorld(true);
     assertMatrix(controls.rig.matrixWorld.clone().multiply(head), followCamera.matrixWorld);
+    assert.ok(controls.menuRoot.position.distanceTo(menuBeforeTravel) > 1);
+    assert.ok(controls.menuRoot.position.distanceTo(localMenu.applyMatrix4(menuFrame())) < 1e-6);
+    assert.ok(new THREE.Vector3(0, 1, 0).applyQuaternion(controls.menuRoot.quaternion).distanceTo(new THREE.Vector3(0, 1, 0)) < 1e-6);
+    const menuBeforeHeadTurn = controls.menuRoot.position.clone();
     const anchoredRig = controls.rig.matrix.clone();
     const turnedHead = head.clone().multiply(new THREE.Matrix4().makeRotationY(.5));
     controls.updateView({ getViewerPose: () => ({ transform: { matrix: turnedHead.elements } }) } as unknown as XRFrame);
     controls.rig.updateMatrix(); assertMatrix(controls.rig.matrix, anchoredRig);
+    assert.ok(controls.menuRoot.position.distanceTo(menuBeforeHeadTurn) < 1e-6);
     assert.equal(controls.camera.layers.isEnabled(3), false);
     clickFollow(); assert.deepEqual(controls.rig.position.toArray(), freePosition.toArray());
     assert.equal(controls.camera.layers.isEnabled(3), true);
