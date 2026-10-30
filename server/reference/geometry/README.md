@@ -2,7 +2,17 @@
 
 当前流程：原始帧 → SAM 3.1（默认 Meta API，可选本地）→ 本地 VGGT 深度与相机 → 地面对齐与粗代理 → 同机位渲染检查。
 
-`SAM_PROVIDER=cloud|local` 选择提供方，未设置时为 `cloud`。HTTP 请求的 `provider` 和 Python 命令的 `--sam-provider` 可单次覆盖；Python 命令读取进程环境变量，Node 后端也读取 `.env.local`。云端网页后端与 Python 验证入口共用 `server/reference/sam/service.ts`，官方 `@meta-sam/parser` 解码输出；本地共用 `sam_local.py`。两者保持相同的来源帧与 mask 格式，提供方失败直接报错。VGGT 继续本地运行。正式 Agent 尚未自动消费这条链路，粗代理仍存在造型和遮挡问题。
+`SAM_PROVIDER=cloud|local` 选择提供方，未设置时为 `cloud`。HTTP 请求的 `provider` 和 Python 命令的 `--sam-provider` 可单次覆盖；Python 命令读取进程环境变量，Node 后端也读取 `.env.local`。云端网页后端与 Python 验证入口共用 `server/reference/sam/service.ts`，官方 `@meta-sam/parser` 解码输出；本地共用 `sam_local.py`。两者保持相同的来源帧与 mask 格式，提供方失败直接报错。VGGT 继续本地运行。主 Agent 已有 SAM 原始帧工具；VGGT 与粗代理反算尚未自动接入 Agent，造型和遮挡仍需优化。
+
+## Agent 选帧与分割
+
+对话中的 **+ Reference** 接受图片或片段；Reference video 中选片也会关联当前对话。`src/reference/frames.ts` 复用切镜检测，并在每个选定镜头内比较少量避开边界的候选；先保留清晰度较高的一帧，再补时间上分开的候选，总计最多六帧。切镜超过六个镜头时保留第一个和较长镜头，省略数量明确提供给 Agent。清晰度只是一条启发式，不保证场景覆盖完整；最终语义选帧由 Agent 完成。
+
+`server/reference/sam/tools.ts` 提供 `read_reference_frame`、`request_reference_frame` 和 `segment_reference`。原始联系表附带 frameId、镜头序号、实际解码时间、请求时间和缩放尺寸。布局优先完整、少遮挡的视角；动作比较同一镜头的不同时刻。候选不足时，Agent 说明原因并申请最多两个额外时间点，浏览器从原视频解码后恢复同一回合。Mediabunny 的实际 timestamp 随帧保存，不能把请求的 4.900s 冒充为实际帧时间。
+
+同一回合最多一次补帧和一次场景视图补充，总计最多三次后端请求；每次最多十二次 Muse 调用，回合共用最多四次新增 SAM 尝试，失败也计入。缓存按 frameId、概念、阈值和实际提供方匹配，同请求重复失败不会再次付费。原始 SAM 输出、mask、报错和原图引用保存在请求诊断中，模型只接收结构化测量与叠加图。
+
+原视频、候选和额外帧保存在当前浏览器的 IndexedDB，按现有对话 UUID 关联，不改变项目 schema。换对话不会混用来源；刷新后仍可补指定时间帧。解除关联或换参考不会删除旧来源。项目 JSON 不包含参考媒体，跨设备需重新附加；诊断导出包含该次调用实际使用的帧。输出的 overlayColor 只表示 mask 的伪彩，不能作为物体材质色。归一化框仍在完整原图坐标中，没有把 SAM 结果当成真实深度或绝对尺寸。
 
 ## SAM 服务接口
 

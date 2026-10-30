@@ -4,6 +4,7 @@ import { requestSceneEdit } from './client.ts';
 import { applyProjectOperations, type SceneSnapshot, type SceneView } from './operations.ts';
 import { conversationHistory, newConversation, type AssistantMessage, type ConversationBook, type UserMessage } from './conversations.ts';
 import type { SceneEditInput, SceneEditResponse } from './types.ts';
+import type { ReferenceContext, ReferenceProgress } from '../reference/observations.ts';
 
 export interface EditorContext { project: ProjectContent; sceneId: string | null; shotId: string | null; revision: number; time: number; selectedId: string | null }
 export interface SessionOptions {
@@ -14,6 +15,9 @@ export interface SessionOptions {
   preview(project: ProjectContent | null, focus?: { sceneId: string | null; shotId: string | null }): void;
   apply(project: ProjectContent, base: string, focus: { sceneId: string | null; shotId: string | null }): boolean;
   changed(): void;
+  reference?(threadId: string): Promise<ReferenceContext | undefined>;
+  saveReferenceObservations?(progress: ReferenceProgress): Promise<void>;
+  requestReferenceFrames?(threadId: string, sourceId: string, times: number[], signal: AbortSignal): Promise<ReferenceContext>;
   request?(input: SceneEditInput, signal: AbortSignal): Promise<SceneEditResponse>;
 }
 interface Run { id: string; threadId: string; message: UserMessage; controller: AbortController; base: string; revision: number }
@@ -135,16 +139,34 @@ export class ConversationSession {
     try {
       const input: SceneEditInput = { project, sceneId: context.sceneId, shotId: context.shotId, time: context.time, selectedId: context.selectedId, prompt: message.text,
         history: conversationHistory(thread.messages.slice(0, -1)), snapshots: [] };
+      const reference = this.options.reference ? await this.options.reference(thread.id) : undefined;
+      if (!current()) return;
+      if (reference) input.reference = reference;
       const request = this.options.request ?? ((input: SceneEditInput, signal: AbortSignal) => requestSceneEdit(input, signal,
         { turnId: run.id, conversationId: thread.id, messageId: message.id }));
       let response = await request(input, run.controller.signal);
-      if (!current()) return;
-      if (response.status === 'needs_views') {
-        this.activity = `Checking ${response.requestedViews.map(view => view === 'top_down' ? 'the top view' : 'the shot view').join(' and ')}…`;
-        input.snapshots = response.requestedViews.map(view => this.options.capture(project, context.sceneId, context.shotId, context.time, view));
-        this.evidence = input.snapshots; this.emit();
-        response = await request(input, run.controller.signal);
+      let frameFollowup = false, viewFollowup = false;
+      for (let step = 0; step < 3; step++) {
         if (!current()) return;
+        if (response.reference) await this.options.saveReferenceObservations?.(response.reference);
+        if (!current()) return;
+        if (input.reference && response.reference) input.reference = { source: input.reference.source, observations: response.reference.observations, callsUsed: response.reference.callsUsed, framesRequested: response.reference.framesRequested };
+        if (response.status === 'ready') break;
+        if (response.status === 'needs_reference_frames') {
+          if (frameFollowup || !input.reference || !this.options.requestReferenceFrames) throw new Error('Additional reference frames are unavailable for this turn. Use the current candidates or attach the reference again.');
+          frameFollowup = true; this.activity = `Reading original reference at ${response.requestedTimes.map(time => time.toFixed(2) + 's').join(' and ')}…`; this.emit();
+          const previous = input.reference;
+          const updated = await this.options.requestReferenceFrames(thread.id, previous.source.id, response.requestedTimes, run.controller.signal);
+          if (!current()) return;
+          if (updated.source.id !== previous.source.id) throw new Error('Reference changed while extracting the requested frame.');
+          input.reference = { ...updated, callsUsed: previous.callsUsed, framesRequested: true };
+        } else if (response.status === 'needs_views') {
+          if (viewFollowup) throw new Error('Muse requested more rendered views than this turn supports.');
+          viewFollowup = true; this.activity = `Checking ${response.requestedViews.map(view => view === 'top_down' ? 'the top view' : 'the shot view').join(' and ')}…`;
+          input.snapshots = response.requestedViews.map(view => this.options.capture(project, context.sceneId, context.shotId, context.time, view));
+          this.evidence = input.snapshots; this.emit();
+        }
+        response = await request(input, run.controller.signal);
       }
       if (response.status !== 'ready' || response.plan.requestedViews.length)
         throw new Error('Muse requested more views than this turn supports. Try a more specific message.');
@@ -158,6 +180,12 @@ export class ConversationSession {
       if (reply.edit) this.review(reply.id); else this.emit();
     } catch (error) {
       if (!current()) return;
+      const progress = error instanceof Error && error.cause && typeof error.cause === 'object' && 'referenceProgress' in error.cause ? error.cause.referenceProgress as ReferenceProgress : undefined;
+      if (progress) {
+        try { await this.options.saveReferenceObservations?.(progress); }
+        catch { /* The original request diagnostic still retains the partial observations. */ }
+        if (!current()) return;
+      }
       message.status = 'failed'; message.detail = error instanceof Error ? error.message.slice(0, 500) : 'Muse could not respond. Try again.';
       this.run = null; this.activity = ''; this.emit();
     }

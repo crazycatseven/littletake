@@ -5,7 +5,7 @@ import type { Conversation } from './conversations.ts';
 export interface DiagnosticIdentity { turnId: string; conversationId: string; messageId: string }
 export interface RequestDiagnostic extends DiagnosticIdentity {
   id: string; startedAt: string; finishedAt?: string; input: SceneEditInput;
-  status: 'pending' | 'ready' | 'needs_views' | 'failed' | 'cancelled';
+  status: 'pending' | 'ready' | 'needs_views' | 'needs_reference_frames' | 'failed' | 'cancelled';
   server?: SceneEditDiagnostic; error?: string; unreadableResponse?: string;
 }
 

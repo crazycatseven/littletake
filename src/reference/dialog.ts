@@ -28,7 +28,7 @@ export class ReferenceDialog {
   private cuts: Promise<number[]> | null = null;
   private cutsController: AbortController | null = null;
 
-  constructor(private readonly applyScene: (scene: SceneDocument) => void) {
+  constructor(private readonly applyScene: (scene: SceneDocument) => void, private readonly shareReference?: (file: File, video: ReferenceInput['video'], cuts: Promise<number[]>) => Promise<void>) {
     this.root.id = 'referenceDialog'; this.root.setAttribute('aria-labelledby', 'referenceTitle');
     this.root.innerHTML = `
       <div class="reference-heading"><div><span class="reference-eyebrow">REFERENCE CLIP</span><h2 id="referenceTitle">Video to scene</h2></div><button class="icon-button" data-reference="close" aria-label="Close reference video">✕</button></div>
@@ -146,6 +146,7 @@ export class ReferenceDialog {
       // Cut detection runs in the background on the local file; analysis waits for it only briefly.
       // Its own controller: starting an analysis must not cancel detection of the same clip.
       this.cuts = detectCuts(this.objectURL, video.duration, this.cutsController!.signal);
+      void this.shareReference?.(file, video, this.cuts).catch(error => { if (operation === this.operation) this.showError(`Reference frames were not saved: ${error.message}`); });
       void this.cuts.then(cuts => { if (operation === this.operation && cuts.length) this.find('#referenceMetadata').textContent = `${metadata} · ${cuts.length} cut${cuts.length === 1 ? '' : 's'} at ${cuts.map(at => at.toFixed(1) + 's').join(', ')}`; });
       this.emptyReport('Ready to analyze', 'Muse will estimate the visible objects, their motion and the camera.');
     } catch (error) {
