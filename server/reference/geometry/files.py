@@ -14,7 +14,7 @@ VENDOR = DATA / "vendor"
 
 
 @contextmanager
-def measurement_lock(path: Path):
+def measurement_lock(path: Path, busy: str = "SAM segmentation is already running. No additional model was started."):
     """OS-released lock: prevent duplicate inference and concurrent checkpoints."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as lock:
@@ -30,7 +30,7 @@ def measurement_lock(path: Path):
                 import fcntl
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            raise RuntimeError("SAM segmentation is already running. No additional model was started.") from None
+            raise RuntimeError(busy) from None
         try:
             yield
         finally:
@@ -78,7 +78,7 @@ def model_manifest() -> dict:
 def source_path(name: str, manifest: dict) -> Path:
     path = VENDOR / name
     # VGGT is a namespace package and intentionally has no top-level __init__.py.
-    entry = "sam3/__init__.py" if name == "sam3" else "vggt/models/vggt.py"
+    entry = {"sam3": "sam3/__init__.py", "vggt": "vggt/models/vggt.py", "sam3dbody": "sam_3d_body/__init__.py"}[name]
     if not (path / entry).is_file():
         raise RuntimeError(f"Missing {name} source. Run prepare first.")
     import subprocess
@@ -95,3 +95,13 @@ def local_checkpoint(name: str, manifest: dict) -> str:
     model = manifest[name]
     # Inference never downloads weights or silently changes the checkpoint.
     return hf_hub_download(model["repo"], model["filename"], revision=model["revision"], local_files_only=True)
+
+
+def local_files(name: str, manifest: dict) -> dict[str, str]:
+    """Every prepared file of a multi-file checkpoint, from the offline cache only."""
+    from huggingface_hub import hf_hub_download
+    if name not in manifest:
+        raise RuntimeError(f"{name} is not prepared. Run the explicit prepare command first.")
+    model = manifest[name]
+    return {filename: hf_hub_download(model["repo"], filename, revision=model["revision"], local_files_only=True)
+            for filename in [model["filename"], *model.get("extraFiles", [])]}

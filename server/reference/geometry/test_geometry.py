@@ -270,5 +270,218 @@ class GeometryContract(unittest.TestCase):
                 reconstruct(run, ["floor"])
 
 
+
+def synthetic_skeleton(position, yaw_degrees: float, pelvis: float = .95) -> np.ndarray:
+    """MHR70-ordered joints in metres for a person facing +Z (left side at +X) before rotation."""
+    from body import JOINTS
+    sit = pelvis < .7
+    local = {"nose": (0, pelvis + .75, .08), "neck": (0, pelvis + .6, 0), "left-shoulder": (.2, pelvis + .5, 0), "right-shoulder": (-.2, pelvis + .5, 0),
+             "left-elbow": (.25, pelvis + .25, 0), "right-elbow": (-.25, pelvis + .25, 0), "left-wrist": (.27, pelvis, .05), "right-wrist": (-.27, pelvis, .05),
+             "left-hip": (.1, pelvis, 0), "right-hip": (-.1, pelvis, 0),
+             "left-knee": (.1, .5, .45 if sit else .02), "right-knee": (-.1, .5, .45 if sit else .02),
+             "left-ankle": (.1, .08, .45 if sit else 0), "right-ankle": (-.1, .08, .45 if sit else 0),
+             "left-heel": (.1, .02, .4 if sit else -.05), "right-heel": (-.1, .02, .4 if sit else -.05),
+             "left-big-toe-tip": (.1, .02, .6 if sit else .15), "right-big-toe-tip": (-.1, .02, .6 if sit else .15)}
+    angle = math.radians(yaw_degrees)
+    rotation = np.array([[math.cos(angle), 0, math.sin(angle)], [0, 1, 0], [-math.sin(angle), 0, math.cos(angle)]])
+    joints = np.tile(np.array(local["left-hip"]) * 0, (70, 1)) + np.array([0, pelvis, 0])
+    for name, index in JOINTS.items():
+        joints[index] = local[name]
+    return joints @ rotation.T + np.asarray(position, dtype=float)
+
+
+class BodyContract(unittest.TestCase):
+    """SAM 3D Body outputs to the shared ground frame; no model, network or CUDA."""
+
+    def camera(self):
+        position = np.array([0., 1.5, 4.])
+        forward = np.array([0., -.5, -4.]); forward /= np.linalg.norm(forward)
+        right = np.cross(forward, [0., 1., 0.]); right /= np.linalg.norm(right)
+        rotation = np.stack((right, np.cross(forward, right), forward))
+        # VGGT's principal point is deliberately off the image centre the body model projects about.
+        return np.column_stack((rotation, -rotation @ position)), np.array([[260., 0, 171.], [0, 260., 112.], [0, 0, 1.]])
+
+    def person(self, world: np.ndarray, extrinsics, intrinsics, offset=(0., 0., 0.)) -> dict:
+        camera = world @ extrinsics[:, :3].T + extrinsics[:, 3]
+        projected = camera @ intrinsics.T
+        return {"id": "person-1", "mask": "masks/person-1.png", "cameraJoints": (camera + np.asarray(offset)).tolist(),
+                "imageJoints": (projected[:, :2] / projected[:, 2:3]).tolist(), "feetInsideFrame": True}
+
+    def test_grounding_recovers_position_facing_and_scale(self):
+        from body import HIPS, TORSO, ground_body, metric_hint
+        e, k = self.camera()
+        relative = .4  # VGGT units per true metre
+        relative_e = e.copy(); relative_e[:, 3] *= relative
+        for yaw in (0., 35., -120., 180.):
+            world = synthetic_skeleton((.6, 0., -.8), yaw)
+            # The model's joints are metric but translated by its own principal-point assumption.
+            person = self.person(world, e, k, offset=(.05, -.03, 0.))
+            torso_depth = np.median((world @ e[:, :3].T + e[:, 3])[TORSO, 2])
+            body = ground_body(person, torso_depth * relative, k, relative_e, np.zeros(3), np.eye(3), 1.)
+            np.testing.assert_allclose(body["joints"], world * relative, atol=1e-6)
+            self.assertAlmostEqual((body["facingYaw"] - yaw + 180) % 360 - 180, 0, places=6)
+            self.assertAlmostEqual(body["unitsPerMetre"], relative, places=9)
+            np.testing.assert_allclose(body["groundPoint"], [.6 * relative, .02 * relative, -.8 * relative], atol=1e-6)
+            np.testing.assert_allclose(body["root"], world[HIPS].mean(axis=0) * relative, atol=1e-6)
+            self.assertEqual(body["posture"], "standing")
+            self.assertGreater(body["facingAgreementWithFeet"], .99)
+        hint = metric_hint([body, {**body, "unitsPerMetre": .5}], "relative")
+        self.assertAlmostEqual(hint["layoutUnitsPerMetre"], .45)
+        self.assertIsNone(metric_hint([body], "metres"))
+        seated = ground_body({**self.person(synthetic_skeleton((0, 0, 0), 90., pelvis=.5), e, k), "feetInsideFrame": False}, 3., k, e, np.zeros(3), np.eye(3), 1.)
+        self.assertEqual(seated["posture"], "seated or crouching")
+        self.assertTrue(any("outside the frame" in note for note in seated["assumptions"]))
+        with self.assertRaisesRegex(ValueError, "positive"):
+            ground_body(person, 0., k, e, np.zeros(3), np.eye(3), 1.)
+
+    def test_model_outputs_are_validated_before_saving(self):
+        from body import JOINTS, record_people
+        e, k = self.camera()
+        world = synthetic_skeleton((0., 0., 0.), 0.)
+        person = self.person(world, e, k)
+        people = [{"item": {"id": "p00-o1", "concept": "person", "mask": "masks/p00-o1.png", "box": [10, 10, 90, 200], "score": .9}}]
+        joints = np.asarray(person["cameraJoints"])
+        output = {"pred_keypoints_3d": joints - joints[0], "pred_cam_t": joints[0], "pred_keypoints_2d": np.asarray(person["imageJoints"]), "focal_length": np.float32(260.)}
+        saved = record_people(people, [output], k, (342, 224))[0]
+        self.assertLess(saved["reprojectionMedianPixels"], 1e-6)
+        self.assertEqual(len(saved["cameraJoints"]), 70)
+        self.assertEqual(saved["feetInsideFrame"], all(0 <= x < 342 and 0 <= y < 224 for x, y in np.asarray(saved["imageJoints"])[[JOINTS["left-ankle"], JOINTS["right-heel"]]]))
+        with self.assertRaisesRegex(RuntimeError, "different number"):
+            record_people(people, [], k, (342, 224))
+        with self.assertRaisesRegex(RuntimeError, "invalid joints"):
+            record_people(people, [{**output, "pred_cam_t": np.array([0., 0., -100.])}], k, (342, 224))
+
+    def test_estimate_prompts_with_masks_and_the_vggt_camera(self):
+        """The local inference wrapper, with a stand-in for the prepared SAM 3D Body package."""
+        from types import SimpleNamespace
+        import body
+        e, k = self.camera()
+        with tempfile.TemporaryDirectory() as folder:
+            run, vendor = Path(folder) / "run", Path(folder) / "vendor"
+            (run / "masks").mkdir(parents=True)
+            (vendor / "sam_3d_body" / "metadata").mkdir(parents=True)
+            names = [f"joint-{index}" for index in range(70)]
+            for name, index in body.JOINTS.items():
+                names[index] = name
+            (vendor / "sam_3d_body" / "metadata" / "__init__.py").write_text("")
+            (vendor / "sam_3d_body" / "metadata" / "mhr70.py").write_text(f"mhr_names = {names!r}\n")
+            world = synthetic_skeleton((0., 0., 0.), 0.)
+            camera = world @ e[:, :3].T + e[:, 3]
+            pixels = camera @ k.T
+            (vendor / "sam_3d_body" / "__init__.py").write_text(
+                "import numpy as np\n"
+                f"CAMERA = np.array({camera.tolist()!r})\nPIXELS = np.array({(pixels[:, :2] / pixels[:, 2:3]).tolist()!r})\nCALLS = []\n"
+                "def load_sam_3d_body(checkpoint, device, mhr_path):\n    CALLS.append((checkpoint, device, mhr_path)); return 'model', 'config'\n"
+                "class SAM3DBodyEstimator:\n"
+                "    def __init__(self, sam_3d_body_model, model_cfg): assert (sam_3d_body_model, model_cfg) == ('model', 'config')\n"
+                "    def process_one_image(self, image, bboxes, masks, cam_int):\n"
+                "        CALLS.append((image.shape, bboxes.tolist(), masks.shape, cam_int))\n"
+                "        return [{'pred_keypoints_3d': CAMERA - CAMERA[9], 'pred_cam_t': CAMERA[9], 'pred_keypoints_2d': PIXELS, 'focal_length': 260.} for _ in bboxes]\n")
+            width, height = 342, 224
+            write_json(run / "frame.json", {"format": "LittleTake.reference-frame", "version": 1, "id": "estimate-source", "originalSize": [width, height],
+                                            "width": width, "height": height, "crop": [0, 0, width, height], "frameBounds": [0, 0, 1, 1], "source": {"kind": "synthetic-test"}})
+            Image.new("RGB", (width, height)).save(run / "frame.png")
+            instances = []
+            for index, (concept, box) in enumerate((("person", (20, 30, 80, 200)), ("man", (20, 30, 80, 200)), ("chair", (100, 100, 160, 200)), ("Person", (200, 20, 260, 210)))):
+                mask = np.zeros((height, width), dtype=np.uint8); mask[box[1]:box[3], box[0]:box[2]] = 255
+                Image.fromarray(mask).save(run / f"masks/m{index}.png")
+                instances.append({"id": f"m{index}", "concept": concept, "mask": f"masks/m{index}.png", "box": list(box), "score": .9})
+            write_json(run / "segmentation.json", {"frameId": "estimate-source", "status": "complete", "instances": instances})
+            fake_torch = SimpleNamespace(__version__="fake", version=SimpleNamespace(cuda="none"), manual_seed=lambda seed: None,
+                                         tensor=lambda value, dtype=None: np.asarray(value), float32="float32",
+                                         cuda=SimpleNamespace(reset_peak_memory_stats=lambda: None, get_device_name=lambda index: "stand-in",
+                                                              max_memory_allocated=lambda: 0))
+            files = {"model.ckpt": "/prepared/model.ckpt", "assets/mhr_model.pt": "/prepared/assets/mhr_model.pt"}
+            with patch("body.model_manifest", return_value={"sam3dbody": {"repo": "facebook/sam-3d-body-dinov3"}}), patch("body.local_files", return_value=files), \
+                    patch("body.source_path", return_value=vendor), patch("models.cuda_guard", return_value=fake_torch), patch("body.DATA", Path(folder) / "models"):
+                with self.assertRaisesRegex(ValueError, "Run depth first"):
+                    body.estimate(run, ["person", "man"], 16)
+                np.savez_compressed(run / "geometry.npz", depth=np.ones((height, width)), confidence=np.ones((height, width)), intrinsics=k, extrinsics=e, image_to_depth=np.eye(3))
+                write_json(run / "geometry.json", {"frameId": "estimate-source", "depthFile": "geometry.npz"})
+                try:
+                    body.estimate(run, ["person", "man"], 16)
+                    import sam_3d_body
+                    calls = sam_3d_body.CALLS
+                finally:
+                    sys.modules.pop("sam_3d_body", None); sys.modules.pop("sam_3d_body.metadata", None); sys.modules.pop("sam_3d_body.metadata.mhr70", None)
+                    if str(vendor) in sys.path:
+                        sys.path.remove(str(vendor))
+                with self.assertRaisesRegex(RuntimeError, "already exist"):
+                    body.estimate(run, ["person"], 16)
+            self.assertEqual(calls[0], ("/prepared/model.ckpt", "cuda", "/prepared/assets/mhr_model.pt"))
+            image_shape, boxes, mask_shape, intrinsics = calls[1]
+            # "man" duplicates the first person's mask; "chair" is not a person concept; matching ignores case.
+            self.assertEqual((image_shape, boxes, mask_shape), ((height, width, 3), [[20, 30, 80, 200], [200, 20, 260, 210]], (2, height, width)))
+            np.testing.assert_allclose(intrinsics, k[None])
+            saved = read_json(run / "bodies.json")
+            self.assertEqual([person["id"] for person in saved["people"]], ["m0", "m3"])
+            self.assertEqual(saved["bones"], body.BONE_INDICES)
+            self.assertLess(saved["people"][0]["reprojectionMedianPixels"], 1e-6)
+
+    def test_layout_places_a_human_mannequin_and_draws_its_skeleton(self):
+        from body import BONE_INDICES, FORMAT, TORSO
+        with tempfile.TemporaryDirectory() as folder:
+            run = Path(folder)
+            width, height = 342, 224
+            e, k = self.camera()
+            write_json(run / "frame.json", {"format": "LittleTake.reference-frame", "version": 1, "id": "body-source", "originalSize": [width, height],
+                                            "width": width, "height": height, "crop": [0, 0, width, height], "frameBounds": [0, 0, 1, 1], "source": {"kind": "synthetic-test"}})
+            camera_position = -e[:, :3].T @ e[:, 3]
+            y, x = np.mgrid[:height, :width]
+            rays = np.stack((x, y, np.ones_like(x)), axis=-1) @ np.linalg.inv(k).T @ e[:, :3]
+            floor = -camera_position[1] / np.where(np.abs(rays[..., 1]) > 1e-8, rays[..., 1], 1e-8)
+            depth = np.where(floor > 0, floor, 30.) * (rays @ e[:, :3].T)[..., 2]
+            owner = (floor > 0).astype(np.uint8)
+            # A thin standing slab where the person is, so the mask has real depth.
+            low, high = np.array([.35, 0., -.9]), np.array([.85, 1.7, -.7])
+            safe = np.where(np.abs(rays) > 1e-8, rays, 1e-8)
+            a, b = (low - camera_position) / safe, (high - camera_position) / safe
+            enter, leave = np.minimum(a, b).max(axis=-1), np.maximum(a, b).min(axis=-1)
+            hit = (enter > 0) & (leave >= enter)
+            depth[hit] = (enter[hit][:, None] * rays[hit] @ e[:, :3].T)[:, 2]; owner[hit] = 2
+            Image.fromarray(np.array([[60, 60, 60], [120, 120, 100], [170, 70, 60]], dtype=np.uint8)[owner]).save(run / "frame.png")
+            Image.open(run / "frame.png").save(run / "original.png")
+            (run / "masks").mkdir()
+            instances = []
+            for number, concept in ((1, "floor"), (2, "person")):
+                mask = owner == number
+                ys, xs = np.where(mask)
+                Image.fromarray(mask.astype(np.uint8) * 255).save(run / f"masks/object-{number}.png")
+                instances.append({"id": f"object-{number}", "samId": number, "concept": concept, "mask": f"masks/object-{number}.png",
+                                  "box": [int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1], "pixels": len(xs), "score": .9})
+            write_json(run / "segmentation.json", {"format": "LittleTake.reference-masks", "version": 1, "frameId": "body-source", "status": "complete",
+                                                   "width": width, "height": height, "instances": instances, "model": {"repo": "synthetic"}, "calls": [], "request": {}})
+            np.savez_compressed(run / "geometry.npz", depth=depth, confidence=np.ones_like(depth), intrinsics=k, extrinsics=e, image_to_depth=np.eye(3))
+            write_json(run / "geometry.json", {"format": "LittleTake.reference-geometry", "version": 1, "frameId": "body-source", "model": {"repo": "synthetic"},
+                       "imageSize": [width, height], "imageToDepth": np.eye(3).tolist(), "depthFile": "geometry.npz", "scale": "relative",
+                       "cameraConvention": "opencv-world-to-camera", "depthConvention": "camera-z", "intrinsicsUnits": "pixels"})
+            world = synthetic_skeleton((.6, 0., -.8), 30.)
+            person = {**self.person(world, e, k), "id": "object-2", "mask": "masks/object-2.png"}
+            write_json(run / "bodies.json", {"format": FORMAT, "version": 1, "frameId": "body-source", "status": "complete",
+                                             "camera": {"intrinsics": k.tolist()}, "bones": BONE_INDICES, "people": [person]})
+            reconstruct(run, ["floor"])
+            layout, scene = read_json(run / "layout.json"), read_json(run / "scene.json")
+            self.assertEqual(len(layout["bodies"]), 1)
+            self.assertEqual(layout["bodyBones"], BONE_INDICES)
+            body = layout["bodies"][0]
+            basis = np.array(layout["ground"]["worldToGroundRotation"])
+            forward = basis @ np.array([math.sin(math.radians(30.)), 0., math.cos(math.radians(30.))])
+            self.assertAlmostEqual((body["facingYaw"] - math.degrees(math.atan2(forward[0], forward[2])) + 180) % 360 - 180, 0, delta=.5)
+            self.assertLess(abs(body["groundPoint"][1]), .05)
+            surface = np.median(depth[owner == 2])
+            # Layout samples an eroded mask, so the surface median differs slightly from the full mask.
+            self.assertAlmostEqual(body["unitsPerMetre"], surface / np.median((world @ e[:, :3].T + e[:, 3])[TORSO, 2]), delta=.01)
+            self.assertIsNotNone(layout["bodyMetricHint"])
+            human = next(obj for obj in scene["objects"] if obj["id"] == "object-2")
+            self.assertEqual(human["kind"], "human")
+            self.assertEqual(human["transform"]["position"], body["groundPoint"])
+            self.assertEqual(human["transform"]["rotation"], [0., body["facingYaw"], 0.])
+            self.assertEqual(next(obj for obj in layout["objects"] if obj["id"] == "object-2")["kind"], "cube")
+            stale = read_json(run / "bodies.json"); stale["camera"]["intrinsics"][0][0] += 5; write_json(run / "bodies.json", stale)
+            with self.assertRaisesRegex(ValueError, "different camera"):
+                reconstruct(run, ["floor"])
+            self.assertNotIn("torch", sys.modules)
+
+
 if __name__ == "__main__":
     unittest.main()
