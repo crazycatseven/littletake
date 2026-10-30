@@ -11,14 +11,18 @@ import { AssetLibrary } from '../../../server/assets/library.ts';
 import { renderAssetPreview } from '../../../server/assets/preview.ts';
 import { createEmptyScene, createObject } from '../../model.ts';
 import { createProject, serializeProject, parseProject } from '../../project/storage.ts';
+import { projectContent } from '../../project/model.ts';
 import { expression } from './expression.ts';
+import { instantiateAsset, saveObjectAsset } from '../library.ts';
+import { movement } from '../../components/model.ts';
+import { applyProjectOperations } from '../../scene-edit/operations.ts';
 
 const near=(a:number,b:number)=>assert.ok(Math.abs(a-b)<1e-6,`${a} != ${b}`);
 const boundsFor=(recipe:AssetRecipe,sourceId:string)=>{
   const root=createAssetGroup(recipe), boxes:Box3[]=[];
   root.traverse(n=>{if(n.userData.sourceId===sourceId)boxes.push(new Box3().setFromObject(n,true));});disposeAssetGroup(root);return boxes;
 };
-test('real cart construction survives successive dimension edits, detached copies, immutable save, library reuse and project reload',async()=>{
+test('real cart construction survives successive dimension edits, detached copies, asset save, library reuse and project reload',async()=>{
   const draft=trolleyDraft(),initial=JSON.stringify(draft),base=createAsset(draft,'parametric-cart');
   near(base.bounds.size[0],1.12);near(base.bounds.size[1],2);near(base.bounds.size[2],.65);
   assert.equal(measureAsset(base).partCount,16);assert.equal(base.parts.length,7);
@@ -40,11 +44,20 @@ test('real cart construction survives successive dimension edits, detached copie
   before.bounds.size.forEach((v,i)=>near(v,measureAsset(unique).bounds.size[i]));assert.ok(!evaluateAsset(unique).parts.some(p=>p.id===copy.id));
   const expanded=editAsset(unique,[{type:'bake_construction'}]);assert.equal(expanded.construction,undefined);assert.equal(measureAsset(expanded).partCount,16);
   before.bounds.size.forEach((v,i)=>near(v,measureAsset(expanded).bounds.size[i]));
-  const library=new AssetLibrary(await mkdtemp(tmpdir()+'/littletake-toolkit-'));await library.register(base);const next=await library.revise(base,edited);assert.equal(next.version,2);assert.deepEqual(validateAsset(JSON.parse(JSON.stringify(next))),next);
+  const library=new AssetLibrary(await mkdtemp(tmpdir()+'/littletake-toolkit-'));await library.register(base);const next=await library.revise(base,edited);assert.equal(next.id,base.id);assert.deepEqual(validateAsset(JSON.parse(JSON.stringify(next))),next);
   assert.ok((await library.search('hotel')).candidates.some(a=>a.id===base.id));
-  const scene=createEmptyScene(),a={...createObject('cube',1),kind:'asset' as const,asset:{id:base.id,version:1}},b=structuredClone(a);b.id='other';b.transform.position=[4,0,0];scene.objects=[a,b];
-  const project=createProject(scene);project.assets=[base];const updated=updateAssetInstances(project,base,next,'selected',{sceneId:scene.id,objectId:a.id});
-  const reloaded=parseProject(serializeProject({...project,...updated.project}));assert.deepEqual(reloaded.scenes[0].objects[1],b);assert.deepEqual(reloaded.assets?.[1].construction,edited.construction);
+  const scene=createEmptyScene(),a={...createObject('cube',1),kind:'asset' as const,asset:{id:base.id}},b=structuredClone(a);b.id='other';b.transform.position=[4,0,0];scene.objects=[a,b];
+  const project=createProject(scene);project.assets=[base];const updated=updateAssetInstances(project,[next]);
+  const reloaded=parseProject(serializeProject({...project,...updated.project}));assert.deepEqual(reloaded.scenes[0].objects[1],b);assert.deepEqual(reloaded.assets?.[0].construction,edited.construction);
+  // The core editor's save/placement path must keep toolkit geometry and recorded component templates.
+  const instance=instantiateAsset(next,'recorded-cart',[3,0,2],scene.duration);instance.components=[movement('drive',2)];
+  instance.track={start:0,duration:2,from:structuredClone(instance.transform),to:{...structuredClone(instance.transform),position:[5,0,2]},samples:[{at:.5,transform:{...structuredClone(instance.transform),position:[4,0,2]}}]};
+  const reusable=saveObjectAsset(instance,[next],'saved-parametric-cart');
+  assert.deepEqual(reusable.construction,next.construction);assert.deepEqual(reusable.bounds,next.bounds);assert.deepEqual(reusable.parts,next.parts);
+  const placed=applyProjectOperations(projectContent({...project,...updated.project}),[{type:'instantiate_asset',sceneId:scene.id,id:'reused-cart',name:'Reused cart',asset:reusable,transform:{...structuredClone(instance.transform),position:[7,0,-1]},track:null}],0);
+  const restored=parseProject(serializeProject({...project,...placed})),copyInstance=restored.scenes[0].objects.find(o=>o.id==='reused-cart')!;
+  assert.deepEqual(copyInstance.components,instance.components);assert.deepEqual(copyInstance.track!.from.position,[7,0,-1]);assert.deepEqual(copyInstance.track!.samples![0].transform.position,[8,0,-1]);assert.deepEqual(copyInstance.track!.to.position,[9,0,-1]);
+  assert.deepEqual(restored.assets!.find(a=>a.id===reusable.id)!.construction,next.construction);assert.deepEqual(restored.scenes[0].cameras,scene.cameras);assert.deepEqual(restored.scenes[0].shots,scene.shots);
   const memory=new Map<string,string>(),storage={getItem:(k:string)=>memory.get(k)??null,setItem:(k:string,v:string)=>{memory.set(k,v);},removeItem:(k:string)=>{memory.delete(k);}};
   const store=new AssetDraftStore(storage,base);store.save({base,draft:edited,messages:[{role:'user',text:'宽度和轮径调整后继续编辑'}]});assert.deepEqual(new AssetDraftStore(storage,base).read()!.draft,edited);
   assert.ok(renderAssetPreview(next).length>1000);

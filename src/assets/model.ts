@@ -3,20 +3,21 @@ import { Box3, Group, Mesh, MeshStandardMaterial, BoxGeometry, SphereGeometry, C
 import type { Vec3 } from '../types.ts';
 import { componentsSchema } from '../components/model.ts';
 import { motionSchema, transformSchema } from '../performance/motion.ts';
+import { animationSchema, validateAnimation } from '../animation/model.ts';
 
 import { vector, identifier, partSchema, constructionSchema } from './toolkit/schema.ts';
 import { evaluateAsset } from './toolkit/evaluate.ts';
 export { evaluateAsset } from './toolkit/evaluate.ts';
 
-export const assetReferenceSchema = z.strictObject({ id: identifier, version: z.number().int().positive() });
+export const assetReferenceSchema = z.strictObject({ id: identifier });
 export const assetRecipeSchema = z.strictObject({
   name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(1200), tags: z.array(z.string().trim().min(1).max(64)).min(1).max(20),
   parts: z.array(partSchema).min(1).max(2048), construction: constructionSchema.optional(),
 });
 export const assetSchema = assetRecipeSchema.extend({
-  id: identifier, version: z.number().int().positive(), source: z.enum(['builtin', 'generated', 'edited']), createdAt: z.string(),
+  id: identifier, source: z.enum(['builtin', 'generated', 'edited']), createdAt: z.string(),
   bounds: z.strictObject({ min: vector(-1000, 1000), max: vector(-1000, 1000), size: vector(0.001, 1000) }),
-  template: z.strictObject({ components: componentsSchema, track: motionSchema.nullable(), transform: transformSchema.optional() }).optional(),
+  template: z.strictObject({ components: componentsSchema, track: motionSchema.nullable(), transform: transformSchema.optional(), animation: animationSchema.optional() }).optional(),
 });
 export type AssetRecipe = z.infer<typeof assetRecipeSchema>;
 export type AssetDefinition = z.infer<typeof assetSchema>;
@@ -90,15 +91,39 @@ export function measureAsset(recipe: AssetRecipe, angles: Record<string, number>
     return { bounds: { min: box.min.toArray(), max: box.max.toArray(), size: box.getSize(new Vector3()).toArray() }, partCount: evaluated.parts.filter(p => p.kind !== 'group').length, sourcePartCount: recipe.parts.filter(p => p.kind !== 'group').length, nodeCount: evaluated.parts.length, parameters: evaluated.parameters, anchors: evaluated.anchors, parts: evaluated.parts.map(p=>({id:p.id,sourceId:p.sourceId,generatedBy:p.generatedBy})), joints };
   } finally { disposeAssetGroup(root); }
 }
-export function createAsset(value: unknown, id: string, version = 1, source: AssetDefinition['source'] = 'generated'): AssetDefinition {
+export function createAsset(value: unknown, id: string, source: AssetDefinition['source'] = 'generated'): AssetDefinition {
   const recipe = validateRecipe(value), box = recipeBounds(recipe);
   const offset: Vec3 = [-(box.min[0] + box.max[0]) / 2, -box.min[1], -(box.min[2] + box.max[2]) / 2];
   if (recipe.construction) recipe.construction.offset = recipe.construction.offset.map((v,i)=>v+offset[i]) as Vec3;
   else for (const part of recipe.parts) if (part.parentId === null) part.position = part.position.map((v, i) => v + offset[i]) as Vec3;
-  return validateAsset({ ...recipe, id, version, source, createdAt: new Date().toISOString(), bounds: recipeBounds(recipe) });
+  return validateAsset({ ...recipe, id, source, createdAt: new Date().toISOString(), bounds: recipeBounds(recipe) });
+}
+/** Read compatibility only: current assets and references never serialize a prefab version. */
+export function migrateAssetValue(value: unknown): unknown {
+  if (value && typeof value === 'object' && 'version' in value) {
+    const { version, ...current } = value;
+    z.number().int().positive().parse(version); return current;
+  }
+  return value;
+}
+export function migrateAssetDefinitions(values: unknown[]): AssetDefinition[] {
+  const latest = new Map<string, { asset: AssetDefinition; order: number }>();
+  for (const value of values) {
+    const asset = validateAsset(value), order = value && typeof value === 'object' && 'version' in value ? Number(value.version) : Infinity;
+    const previous = latest.get(asset.id);
+    if (previous?.order === order) throw new Error('Asset IDs must be unique.');
+    if (!previous || order > previous.order) latest.set(asset.id, { asset, order });
+  }
+  return [...latest.values()].map(entry => entry.asset);
 }
 export function validateAsset(value: unknown): AssetDefinition {
-  const asset = assetSchema.parse(value); validateRecipe(assetRecipeSchema.strip().parse(asset));
+  const asset = assetSchema.parse(migrateAssetValue(value)); validateRecipe(assetRecipeSchema.strip().parse(asset));
+  if(asset.template?.animation){
+    if(asset.template.track)throw new Error('A prefab cannot have both legacy motion and property animation.');
+    asset.template.animation=validateAnimation(asset.template.animation,60);
+    if(asset.template.animation.curves.fov?.length)throw new Error('Only cameras can animate field of view.');
+    if(Object.keys(asset.template.animation.curves).some(key=>key.startsWith('pivot.'))&&!asset.template.components.some(component=>component.type==='pivot'))throw new Error('Pivot animation requires a pivot component.');
+  }
   const actual = recipeBounds(asset);
   if (actual.min.some((v, i) => Math.abs(v - asset.bounds.min[i]) > 1e-5) || actual.max.some((v, i) => Math.abs(v - asset.bounds.max[i]) > 1e-5)
     || actual.size.some((v, i) => Math.abs(v - asset.bounds.size[i]) > 1e-5))
@@ -107,6 +132,6 @@ export function validateAsset(value: unknown): AssetDefinition {
 }
 export function assetSummary(asset: AssetDefinition) {
   const evaluated = evaluateAsset(asset);
-  return { id: asset.id, version: asset.version, name: asset.name, description: asset.description, tags: asset.tags, dimensions: asset.bounds.size,
+  return { id: asset.id, name: asset.name, description: asset.description, tags: asset.tags, dimensions: asset.bounds.size,
     bounds: asset.bounds, partCount: evaluated.parts.filter(p=>p.kind!=='group').length, sourcePartCount: asset.parts.filter(p=>p.kind!=='group').length, parameters: evaluated.parameters, movableParts: evaluated.parts.filter(p => p.joint).map(p => ({ id: p.id, name: p.name, joint: p.joint })) };
 }

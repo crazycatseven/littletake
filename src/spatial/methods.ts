@@ -1,8 +1,10 @@
 import { Box3, Euler, MathUtils, Matrix3, Matrix4, Quaternion, Vector3 } from 'three';
 import { evaluateTransform } from '../model.ts';
-import { motionSchema, recordedTrack, repositionTrack, transformSchema } from '../performance/motion.ts';
-import type { MotionTrack, ProjectContent, Transform, Vec3 } from '../types.ts';
-import { bottomPoints, boxData, matrixOf, poseOf, SpatialScene, upwardSurface } from './geometry.ts';
+import { motionSchema, recordedTrack, trackPoses, transformSchema } from '../performance/motion.ts';
+import { animationSchema } from '../animation/model.ts';
+import { transformSelection } from '../placement/transforms.ts';
+import type { ProjectContent, SceneObject, Transform, Vec3 } from '../types.ts';
+import { bottomPoints, boxData, poseOf, SpatialScene, upwardSurface } from './geometry.ts';
 import { spatialOperationSchema, spatialQuerySchema, type SpatialOperation, type SpatialQuery } from './schema.ts';
 
 const axisIndex = { x: 0, y: 1, z: 2 } as const;
@@ -32,10 +34,21 @@ export function inspectSpatial(project: ProjectContent, value: SpatialQuery) {
   } finally { snapshot.dispose(); }
 }
 
-export interface SpatialUpdate { id: string; transform: Transform; track: MotionTrack | null }
+export type SpatialUpdate = Pick<SceneObject, 'id' | 'transform' | 'track' | 'animation'>;
 export interface SpatialResult { updates: SpatialUpdate[]; observations: Record<string, unknown> }
 function checked(result: SpatialResult): SpatialResult {
-  for (const update of result.updates) { transformSchema.parse(update.transform); motionSchema.nullable().parse(update.track); }
+  const zero = (value: number) => value === 0 ? 0 : value;
+  for (const update of result.updates) {
+    for (const pose of [update.transform, ...(update.track ? trackPoses(update.track) : [])]) {
+      for (const group of ['position', 'rotation', 'scale'] as const) pose[group] = pose[group].map(zero) as Vec3;
+    }
+    for (const keys of Object.values(update.animation?.curves ?? {})) for (const key of keys ?? []) {
+      key.value = zero(key.value);
+      if (key.orientation) key.orientation = key.orientation.map(zero) as Vec3;
+    }
+    transformSchema.parse(update.transform); motionSchema.nullable().parse(update.track);
+    if (update.animation) animationSchema.parse(update.animation);
+  }
   return result;
 }
 
@@ -127,7 +140,7 @@ export function solveSpatial(project: ProjectContent, value: SpatialOperation): 
       }
       case 'follow_path': {
         const object = snapshot.object(op.id);
-        if (object.track && !op.replaceMotion) throw new Error('This object already has motion. Set replaceMotion=true only to replace it explicitly.');
+        if ((object.track || object.animation) && !op.replaceMotion) throw new Error('This object already has motion. Set replaceMotion=true only to replace it explicitly.');
         if (op.start + op.duration > snapshot.scene.duration + 1e-9) throw new Error('Path motion must finish within the scene.');
         const points = op.points.map(p => new Vector3(...p)), distances = [0];
         for (let i = 1; i < points.length; i++) {
@@ -160,11 +173,10 @@ export function solveSpatial(project: ProjectContent, value: SpatialOperation): 
       }
     }
     const updates = [...poses].map(([id, pose]) => {
-      const object = snapshot.object(id), original = evaluateTransform(object, op.time);
-      if ('scope' in op && op.scope === 'static' && object.track) throw new Error(`${id} is animated. Use scope=whole_motion to preserve and reposition its entire path.`);
-      const track = structuredClone(object.track), delta = matrixOf(pose).multiply(matrixOf(original).invert());
-      if (track) repositionTrack(track, original, pose);
-      return { id, transform: poseOf(delta.clone().multiply(matrixOf(object.transform))), track };
+      const object = snapshot.object(id);
+      if ('scope' in op && op.scope === 'static' && (object.track || object.animation)) throw new Error(`${id} is animated. Use scope=whole_motion to preserve and reposition its entire path.`);
+      const updated = transformSelection([object], [{ id, transform: pose }], op.time, true)[0];
+      return { id, transform: updated.transform, track: updated.track, ...(updated.animation ? { animation: updated.animation } : {}) };
     });
     return checked({ updates, observations });
   } finally { snapshot.dispose(); }

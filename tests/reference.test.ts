@@ -23,8 +23,8 @@ const request = (body: unknown, headers: Record<string, string> = {}) => new Req
 test('reference proposal becomes ordinary independently editable objects and an aimed camera', () => {
   const { scene } = sceneFromProposal(proposal(), 6);
   assert.deepEqual(scene.objects.map(item => [item.id, item.kind, item.color]), [['object-1', 'human', '#deded7'], ['object-2', 'cube', '#deded7']]);
-  const forward = new Vector3(0, 0, -1).applyEuler(new Euler(...scene.shots[0].transform.rotation.map(MathUtils.degToRad) as [number, number, number]));
-  const target = new Vector3(0, 0.9, 0).sub(new Vector3(...scene.shots[0].transform.position)).normalize();
+  const forward = new Vector3(0, 0, -1).applyEuler(new Euler(...scene.cameras[0].transform.rotation.map(MathUtils.degToRad) as [number, number, number]));
+  const target = new Vector3(0, 0.9, 0).sub(new Vector3(...scene.cameras[0].transform.position)).normalize();
   assert.ok(forward.distanceTo(target) < 1e-8);
   scene.objects[0].transform.position[0] = 99;
   assert.equal(scene.objects[1].transform.position[0], 2);
@@ -96,7 +96,7 @@ test('Meta credits errors and unfinished output are explicit; no fake scene fall
 
 test('API exposes connection state without a key, and checks input before calling a provider', async () => {
   let calls = 0;
-  const handler = createReferenceHandler({ MODEL_API_KEY: 'never-return-this-key' }, () => ({ name: 'Test', model: 'test', async generateObject() { calls++; return proposal(); } }));
+  const handler = createReferenceHandler({ MODEL_API_KEY: 'never-return-this-key' }, () => ({ name: 'Test', model: 'test', async generateObject() { calls++; return proposal(); } }), () => null);
   const connection = await handler(new Request('https://littletake.vercel.app/api/reference'));
   assert.deepEqual(await connection.json(), { available: true, provider: 'Meta', model: 'muse-spark-1.3' });
   assert.equal((await handler(request({}))).status, 400);

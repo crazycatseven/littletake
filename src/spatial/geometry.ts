@@ -20,7 +20,7 @@ export function createObjectGroup(object: SceneObject, assets: AssetDefinition[]
   accent: MeshStandardMaterial, geometry = primitiveGeometry): Group {
   const root = new Group(); root.userData.entityId = object.id;
   if (object.kind === 'asset') {
-    const asset = assets.find(a => a.id === object.asset?.id && a.version === object.asset.version);
+    const asset = assets.find(a => a.id === object.asset?.id);
     if (!asset) throw new Error(`Missing asset for ${object.id}.`);
     const group = createAssetGroup(asset); root.add(group);
     root.userData.anchors = group.userData.evaluated.anchors;

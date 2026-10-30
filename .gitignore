@@ -7,4 +7,6 @@ dist/
 *.local
 *.log
 .littletake/
+output/
+.playwright-mcp/
 .DS_Store

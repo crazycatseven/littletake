@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { operationSchema } from './operations.ts';
+import { operationSchema, legacyShotOperationSchema } from './operations.ts';
 
 export const MAX_HISTORY_MESSAGES = 200;
 export const MAX_HISTORY_CHARACTERS = 120_000;
@@ -17,7 +17,7 @@ const userMessageSchema = z.strictObject({
 const assistantMessageSchema = z.strictObject({
   id: identifier, role: z.literal('assistant'), text: z.string().min(1).max(4000), model: z.string().max(160),
   edit: z.strictObject({
-    operations: z.array(operationSchema).min(1).max(64), time: z.number().min(0).max(60),
+    operations: z.array(z.union([operationSchema, legacyShotOperationSchema])).min(1).max(64), time: z.number().min(0).max(60),
     sceneId: identifier.nullable(), shotId: identifier.nullable(),
     revision: z.number().int().nonnegative(), status: z.enum(['pending', 'applied', 'discarded', 'stale']),
   }).optional(),
@@ -51,7 +51,7 @@ export function conversationHistory(messages: ChatMessage[]): ConversationHistor
     role: message.role,
     text: message.role === 'assistant' && message.edit
       ? JSON.stringify({ summary: message.text, operations: message.edit.operations.map(operation => operation.type === 'instantiate_asset'
-          ? { ...operation, asset: { id: operation.asset.id, version: operation.asset.version, name: operation.asset.name } } : operation), applicationStatus: message.edit.status })
+          ? { ...operation, asset: { id: operation.asset.id, name: operation.asset.name } } : operation), applicationStatus: message.edit.status })
       : message.role === 'user' && (message.status === 'failed' || message.status === 'stopped')
         ? `${message.text}\n[This earlier request was ${message.status}; no changes were applied by it.]`
         : message.role === 'user' && message.context ? JSON.stringify({ message: message.text, context: message.context }) : message.text,

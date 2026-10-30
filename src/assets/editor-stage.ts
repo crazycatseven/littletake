@@ -4,7 +4,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { drivenProperties } from './toolkit/edits';
 import { evaluateAsset, createAssetGroup, disposeAssetGroup, recipeBounds, poseAssetJoints } from './model';
 import type { AssetDraft, AssetEdit } from './edit';
-import { componentScripts } from '../components/model';
+import { inputController, updateComponents } from '../components/model';
 import type { Transform, Vec3, ToolMode } from '../types';
 
 /** Independent asset coordinates: never constructs a Project Scene or edits the stage camera. */
@@ -38,7 +38,7 @@ export class AssetEditorStage {
   constructor(private host: HTMLElement, private onSelect: (id: string | null) => void, private onEdit: (edits: AssetEdit[]) => void) {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); this.renderer.setClearColor(0xf2f3ed);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace; this.renderer.domElement.tabIndex = 0;
-    this.renderer.domElement.setAttribute('aria-label', '资产沙箱视图'); host.append(this.renderer.domElement);
+    this.renderer.domElement.setAttribute('aria-label', 'Prefab viewport'); host.append(this.renderer.domElement);
     this.orbit = new OrbitControls(this.camera, this.renderer.domElement); this.orbit.enableDamping = true;
     this.gizmo = new TransformControls(this.camera, this.renderer.domElement); this.gizmo.setSize(.8); this.gizmo.setSpace('local');
     // Three shares the TransformControls raycaster with the main stage, which
@@ -124,8 +124,8 @@ export class AssetEditorStage {
   }
   private tick = (now: number) => {
     const dt = Math.min((now - this.lastTime) / 1000, .05); this.lastTime = now;
-    const component = this.draft?.template?.components[0];
-    if (this.testing && component) { componentScripts[component.type].update(component, this.pose, this.keys, dt, this.runtime); this.group.position.fromArray(this.pose.position); this.group.rotation.set(...this.pose.rotation.map(THREE.MathUtils.degToRad) as Vec3); this.updateBoxes(); }
+    const components = this.draft?.template?.components;
+    if (this.testing && inputController(components)) { updateComponents(components, this.pose, this.keys, dt, this.runtime); this.group.position.fromArray(this.pose.position); this.group.rotation.set(...this.pose.rotation.map(THREE.MathUtils.degToRad) as Vec3); this.updateBoxes(); }
     this.orbit.update(); this.renderer.render(this.scene, this.camera); this.frame = requestAnimationFrame(this.tick);
   };
   dispose() {

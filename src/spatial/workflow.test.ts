@@ -17,6 +17,7 @@ import { AssetLibrary } from '../../server/assets/library.ts';
 import { MetaProvider } from '../../server/ai/meta.ts';
 import { proposeSceneEdit } from '../../server/scene-edit.ts';
 import { inspectSpatial, solveSpatial } from './methods.ts';
+import { migrateMotionTrack } from '../animation/model.ts';
 import type { SpatialOperation } from './schema.ts';
 
 const near = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-5, `${a} != ${b}`);
@@ -31,7 +32,7 @@ function fixture(): ProjectContent {
     parts: [part('top', [0, 1, 0], [4, .2, 2]), part('tall_edge_post', [1.7, 1.75, .7], [.15, 1.5, .15]),
       ...[-1, 1].flatMap(x => [-1, 1].map(z => part(`leg_${x < 0 ? 'l' : 'r'}_${z < 0 ? 'b' : 'f'}`, [x * 1.7, .45, z * .7], [.15, .9, .15])))] }, 'table_asset');
   const scene = createEmptyScene('lobby', 'Lobby'); scene.duration = 8;
-  const table: SceneObject = { id: 'table', name: 'Table', kind: 'asset', color: '#ffffff', asset: { id: asset.id, version: asset.version }, track: null, transform: pose([3, 0, 2], [0, 45, 0], [1.2, 1, .8]) };
+  const table: SceneObject = { id: 'table', name: 'Table', kind: 'asset', color: '#ffffff', asset: { id: asset.id }, track: null, transform: pose([3, 0, 2], [0, 45, 0], [1.2, 1, .8]) };
   const object = (id: string, position: Vec3, scale: Vec3 = [1, 1, 1]) => ({ ...createObject('cube', 1), id, name: id, transform: pose(position, [0, 0, 0], scale) });
   scene.objects = [table, object('vase', [0, 4, 0], [.25, .5, .25]), object('chair', [0, .5, -2]),
     object('a', [-4, .5, -5]), object('b', [0, 1, -5], [2, 2, 1]), object('c', [5, .25, -5], [.5, .5, 1]),
@@ -96,6 +97,28 @@ test('spatial API edits a rotated prefab set, preserves sampled motion, reloads 
   const saved = { ...createProject(current.scenes[0]), ...current }, restored = parseProject(serializeProject(saved));
   assert.deepEqual(restored.scenes, current.scenes); assert.deepEqual(restored.assets, current.assets);
   vectorNear(evaluateTransform(objectIn(restored, 'actor'), 4).position, evaluateTransform(moved, 4).position);
+  // Main's property curves retain their timing, take IDs and interpolation
+  // when a spatial operation repositions the entire performance.
+  const keyedProject = structuredClone(current), keyed = objectIn(keyedProject, 'actor');
+  keyed.animation = migrateMotionTrack(keyed.track!); keyed.track = null;
+  keyed.animation.curves['position.x']![0].interpolation = 'smooth';
+  const keyedBefore = structuredClone(keyed);
+  const keyMetadata = (item: SceneObject) => Object.entries(item.animation!.curves).map(([path, keys]) => [path, keys!.map(({ time, interpolation, take }) => ({ time, interpolation, take }))]);
+  const native = applyProjectOperations(keyedProject, [{ ...common, type: 'place_relative', time: 2, scope: 'whole_motion',
+    id: 'actor', referenceId: 'table', frame: world, side: 'right', gap: .7 }], 2);
+  const keyedMoved = objectIn(native, 'actor');
+  assert.equal(keyedMoved.track, null);
+  assert.deepEqual(keyMetadata(keyedMoved), keyMetadata(keyedBefore));
+  assert.deepEqual(keyedMoved.animation!.takes, keyedBefore.animation!.takes);
+  const delta = new Vector3(...evaluateTransform(keyedMoved, 2).position).sub(new Vector3(...evaluateTransform(keyedBefore, 2).position));
+  for (const time of [0, 1, 2, 3, 4, 5, 7]) {
+    vectorNear(evaluateTransform(keyedMoved, time).position, new Vector3(...evaluateTransform(keyedBefore, time).position).add(delta).toArray());
+    vectorNear(evaluateTransform(keyedMoved, time).rotation, evaluateTransform(keyedBefore, time).rotation);
+  }
+  const nativeReloaded = parseProject(serializeProject({ ...createProject(native.scenes[0]), ...native }));
+  assert.deepEqual(objectIn(nativeReloaded, 'actor').animation, keyedMoved.animation);
+  assert.throws(() => applyProjectOperations(keyedProject, [{ ...common, type: 'place_on', id: 'actor', supportId: null, horizontal: 'keep', clearance: 0 }], 2), /animated/);
+  assert.throws(() => applyProjectOperations(keyedProject, [pathOperation], 2), /replaceMotion/);
   const history = new History(source); history.commit(current); assert.deepEqual(history.undo(), source); assert.deepEqual(history.redo(), current);
   const before = JSON.stringify(current);
   assert.throws(() => applyProjectOperations(current, [{ ...common, type: 'place_relative', id: 'vase', referenceId: 'table', side: 'left', frame: world, gap: 1 },
@@ -117,8 +140,8 @@ test('native Muse tools inspect and solve a new scene with a library asset, then
     assert.ok(body.tools.some((tool: any) => tool.name === 'inspect_spatial')); assert.ok(body.tools.some((tool: any) => tool.name === 'preview_spatial'));
     const call = (name: string, arguments_: unknown) => Response.json({ status: 'completed', output: [{ type: 'function_call', call_id: 'spatial_' + round, name, arguments: JSON.stringify(arguments_), status: 'completed' }] });
     round++;
-    if (round === 1) return call('read_asset', { assetId: 'builtin-chair', version: 1 });
-    if (round === 2) return call('instantiate_asset', { assetId: 'builtin-chair', version: 1, sceneId: 'new_set', name: 'Chair', transform: pose([2, 8, 0]) });
+    if (round === 1) return call('read_asset', { assetId: 'builtin-chair' });
+    if (round === 2) return call('instantiate_asset', { assetId: 'builtin-chair', sceneId: 'new_set', name: 'Chair', transform: pose([2, 8, 0]) });
     if (round === 3) {
       prefix = [{ type: 'add_scene', sceneId: 'new_set', name: 'New set', duration: 5 }, outputs[1].operation];
       return call('inspect_spatial', { sceneId: 'new_set', time: 0, objectIds: [outputs[1].objectId], frame: world, precedingOperations: prefix });

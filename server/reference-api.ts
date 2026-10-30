@@ -1,7 +1,21 @@
-import { MAX_REFERENCE_BODY_BYTES } from '../src/reference/types.ts';
+import { MAX_REFERENCE_BODY_BYTES, type ReferenceDraft, type ReferenceInput } from '../src/reference/types.ts';
 import { aiConnection, createAIProvider, type AIEnvironment } from './ai/index.ts';
 import { AIError, type AIProvider } from './ai/provider.ts';
 import { analyzeReference, parseReferenceInput } from './reference/analyze.ts';
+import { groundReferenceDraft } from './reference/ground.ts';
+import { trackConcept, type SamTracks } from './reference/sam.ts';
+
+export type PeopleTracker = (input: ReferenceInput, signal: AbortSignal) => Promise<SamTracks>;
+/** SAM 3.1 person tracking runs alongside Muse analysis on the same key; SAM_TRACKING=off disables it. */
+export function samTracker(env: AIEnvironment, transport: typeof fetch = fetch): PeopleTracker | null {
+  const key = env.MODEL_API_KEY?.trim();
+  return key && (env.AI_PROVIDER || 'meta') === 'meta' && env.SAM_TRACKING !== 'off' ? (input, signal) => trackConcept('person', input.video.dataUrl, key, transport, signal) : null;
+}
+
+function grounded(draft: ReferenceDraft, input: ReferenceInput, result: SamTracks | Error): ReferenceDraft {
+  try { return groundReferenceDraft(draft, input, result); }
+  catch { return { ...draft, assumptions: [...draft.assumptions, 'SAM 3.1 tracking could not be applied, so placement and timing are Muse estimates.'] }; }
+}
 
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
 
@@ -25,7 +39,7 @@ async function readJSON(request: Request): Promise<unknown> {
   } finally { reader.releaseLock(); }
 }
 
-export function createReferenceHandler(env: AIEnvironment = process.env, providerFactory = (): AIProvider => createAIProvider(env)) {
+export function createReferenceHandler(env: AIEnvironment = process.env, providerFactory = (): AIProvider => createAIProvider(env), trackerFactory = (): PeopleTracker | null => samTracker(env)) {
   return async (request: Request): Promise<Response> => {
     if (request.method === 'GET') return json(aiConnection(env));
     if (request.method !== 'POST') return new Response(null, { status: 405, headers: { Allow: 'GET, POST' } });
@@ -33,8 +47,14 @@ export function createReferenceHandler(env: AIEnvironment = process.env, provide
       const origin = request.headers.get('origin');
       if (origin && origin !== new URL(request.url).origin) throw new AIError('wrong_origin', 'Open LittleTake directly to analyze a clip.', 403);
       const input = parseReferenceInput(await readJSON(request));
-      const draft = await analyzeReference(input, providerFactory(), request.signal);
-      return json(draft);
+      const provider = providerFactory(), tracker = trackerFactory(), controller = new AbortController();
+      const stop = () => controller.abort();
+      request.signal.addEventListener('abort', stop);
+      const tracking = tracker?.(input, controller.signal).catch((error: unknown) => error instanceof Error ? error : new Error('SAM 3.1 tracking failed.'));
+      try {
+        const draft = await analyzeReference(input, provider, request.signal);
+        return json(tracking ? grounded(draft, input, await tracking) : draft);
+      } finally { stop(); request.signal.removeEventListener('abort', stop); }
     } catch (error) {
       if (error instanceof AIError) return json({ error: { code: error.code, message: error.message } }, error.status);
       return json({ error: { code: 'analysis_failed', message: 'The clip could not be analyzed. Your current scene is unchanged.' } }, 500);

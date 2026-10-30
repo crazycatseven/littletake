@@ -17,7 +17,7 @@ export function repositionTrack(track: MotionTrack, from: Transform, to: Transfo
     const position = new Vector3(), rotation = new Quaternion(), scale = new Vector3();
     delta.clone().multiply(matrix(pose)).decompose(position, rotation, scale);
     const euler = new Euler().setFromQuaternion(rotation, 'XYZ');
-    pose.position = position.toArray() as Vec3; pose.rotation = [euler.x, euler.y, euler.z].map(v => v === 0 ? 0 : MathUtils.radToDeg(v)) as Vec3; pose.scale = scale.toArray() as Vec3;
+    pose.position = position.toArray() as Vec3; pose.rotation = [euler.x, euler.y, euler.z].map(MathUtils.radToDeg) as Vec3; pose.scale = scale.toArray() as Vec3;
   }
 }
 

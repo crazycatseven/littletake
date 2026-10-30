@@ -1,0 +1,21 @@
+.component-add-button { width: 100%; margin-top: 10px; }
+.component-section .control-component + .control-component { margin-top: 10px; }
+.component-vector { display: flex; gap: 7px; margin: 8px 0; padding: 0; border: 0; min-width: 0; }
+.component-vector legend { margin-bottom: 8px; color: var(--muted); font-size: 11px; }
+.component-vector label { flex: 1; min-width: 0; color: var(--muted); font-size: 10px; }
+.component-vector input { display: block; box-sizing: border-box; width: 100%; min-width: 0; margin-top: 4px; padding: 6px; border: 1px solid var(--line); border-radius: 4px; font: inherit; color: var(--ink); background: var(--paper); }
+.component-picker { position: fixed; inset: auto; margin: 0; width: min(320px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); color: var(--ink); box-shadow: 0 12px 40px #28321a26; font: inherit; }
+.component-picker::backdrop { background: transparent; }
+.component-picker header { display: flex; align-items: center; justify-content: space-between; padding: 4px 4px 10px; font-size: 12px; }
+.component-picker header button { padding: 2px 7px; font-size: 16px; }
+.component-picker input[type="search"] { box-sizing: border-box; width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--white, #fff); color: var(--ink); font: inherit; font-size: 12px; }
+.component-options { display: grid; gap: 4px; margin-top: 8px; }
+.component-option { display: block; width: 100%; padding: 10px; text-align: left; white-space: normal; border: 1px solid transparent; border-radius: 6px; background: transparent; }
+.component-option > span { display: flex; align-items: center; gap: 8px; }
+.component-option strong { font-size: 12px; font-weight: 550; }
+.component-option > small { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.component-option:hover:not(:disabled), .component-option:focus-visible { background: var(--sage); border-color: var(--line); outline: none; }
+.component-option:disabled { opacity: .65; cursor: default; }
+.component-added { margin-left: auto; color: var(--accent); font-size: 10px; }
+.component-empty, .component-picker-note { margin: 8px 4px 4px; padding: 6px 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.component-picker [hidden] { display: none; }

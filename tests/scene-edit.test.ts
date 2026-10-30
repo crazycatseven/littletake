@@ -50,10 +50,10 @@ test('retiming and removing motion preserve explicit motion semantics', () => {
 
 test('camera aim uses world look-at orientation and preserves its other endpoint', () => {
   const before = createDocument(), position: [number, number, number] = [4, 3, 7], target: [number, number, number] = [0, 1, 0];
-  const next = applySceneOperations(before, [{ sceneId: 'scene-1', type: 'aim_camera', id: 'shot-1', pose: 'end', position, target, fov: 50 }], 0);
-  const forward = new Vector3(0, 0, -1).applyEuler(new Euler(...next.shots[0].track!.to.rotation.map(MathUtils.degToRad) as [number, number, number]));
+  const next = applySceneOperations(before, [{ sceneId: 'scene-1', type: 'aim_camera', id: 'camera', pose: 'end', position, target, fov: 50 }], 0);
+  const forward = new Vector3(0, 0, -1).applyEuler(new Euler(...next.cameras[0].track!.to.rotation.map(MathUtils.degToRad) as [number, number, number]));
   assert.ok(forward.distanceTo(new Vector3(...target).sub(new Vector3(...position)).normalize()) < 1e-8);
-  assert.deepEqual(next.shots[0].track!.from, before.shots[0].track!.from); assert.equal(next.shots[0].fov, 50);
+  assert.deepEqual(next.cameras[0].track!.from, before.cameras[0].track!.from); assert.equal(next.cameras[0].fov, 50);
 });
 
 test('top-down framing fits all transformed bounds with X right and negative Z up', () => {
