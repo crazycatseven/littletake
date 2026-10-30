@@ -16,7 +16,7 @@ AI video models are powerful, but describing actions, camera movement, and relat
 
 ![LittleTake creator flow](docs/assets/creator-flow.png)
 
-Reference clips are analyzed into editable proxy scenes; scenes can also be created manually. Proxy animation provides visual guidance for AI video generation.
+Reference clips, storyboard panels and sketches are analyzed into editable proxy scenes; drawn arrows become movement. Scenes can also be created manually. Proxy animation provides visual guidance for AI video generation.
 
 Demo input: **The Grand Budapest Hotel — Interview with Zero**, source 0:33–0:45. The [original selected clip](public/demo/grand-budapest-zero/input.mp4), [web copy](public/demo/grand-budapest-zero/input-web.mp4) and [source metadata](public/demo/grand-budapest-zero/source.json) are included in the repository. Load the web copy with **Reference video → Load demo clip**.
 

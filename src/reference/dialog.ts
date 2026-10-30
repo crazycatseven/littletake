@@ -2,9 +2,10 @@ import type { SceneDocument } from '../types';
 import { shotCamera } from '../model';
 import { referenceConnection, requestReferenceDraft } from './client';
 import { readReferenceVideo } from './video';
+import { isReferenceImage, readReferenceImage } from './image';
 import { attachTrackOverlay } from './tracks';
 import { detectCuts } from './cuts';
-import type { ReferenceConnection, ReferenceDraft, ReferenceInput } from './types';
+import type { ReferenceConnection, ReferenceDraft, ReferenceImage, ReferenceVideo } from './types';
 
 const escapeHTML = (text: string) => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
 
@@ -17,7 +18,9 @@ export class ReferenceDialog {
   private readonly applyButton: HTMLButtonElement;
   private readonly direction: HTMLTextAreaElement;
   private connection: ReferenceConnection | null = null;
-  private video: ReferenceInput['video'] | null = null;
+  private video: ReferenceVideo | null = null;
+  private image: ReferenceImage | null = null;
+  private readonly still: HTMLImageElement;
   private draft: ReferenceDraft | null = null;
   private objectURL: string | null = null;
   private controller: AbortController | null = null;
@@ -31,26 +34,26 @@ export class ReferenceDialog {
   constructor(private readonly applyScene: (scene: SceneDocument) => void) {
     this.root.id = 'referenceDialog'; this.root.setAttribute('aria-labelledby', 'referenceTitle');
     this.root.innerHTML = `
-      <div class="reference-heading"><div><span class="reference-eyebrow">REFERENCE CLIP</span><h2 id="referenceTitle">Video to scene</h2></div><button class="icon-button" data-reference="close" aria-label="Close reference video">✕</button></div>
-      <p class="reference-intro">Turn a short shot into an editable whitebox draft.</p>
+      <div class="reference-heading"><div><span class="reference-eyebrow">REFERENCE</span><h2 id="referenceTitle">Video or sketch to scene</h2></div><button class="icon-button" data-reference="close" aria-label="Close reference video">✕</button></div>
+      <p class="reference-intro">Turn a short shot, a storyboard panel or a sketch into an editable whitebox draft.</p>
       <div class="reference-layout">
         <section class="reference-source">
-          <div class="reference-video-frame"><video id="referencePlayer" controls playsinline muted hidden></video><div class="reference-placeholder"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><rect x="5" y="7" width="30" height="26" rx="3"/><path d="m17 14 10 6-10 6Z"/></svg><span>A continuous shot works best</span></div></div>
-          <div class="reference-file-row"><button data-reference="choose">Choose video</button><button data-reference="demo">Load demo clip</button><span id="referenceFileName">MP4 or WebM · up to 3 MB</span></div>
-          <input id="referenceFile" type="file" accept=".mp4,.webm,video/mp4,video/webm" hidden/>
-          <p id="referenceMetadata" class="reference-metadata">1–60 seconds · objects, movement and camera</p>
+          <div class="reference-video-frame"><video id="referencePlayer" controls playsinline muted hidden></video><img id="referenceStill" alt="Reference image" hidden/><div class="reference-placeholder"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><rect x="5" y="7" width="30" height="26" rx="3"/><path d="m17 14 10 6-10 6Z"/></svg><span>A continuous shot or one storyboard panel</span></div></div>
+          <div class="reference-file-row"><button data-reference="choose">Choose video or image</button><button data-reference="demo">Load demo clip</button><span id="referenceFileName">MP4, WebM, PNG, JPEG or WebP</span></div>
+          <input id="referenceFile" type="file" accept=".mp4,.webm,video/mp4,video/webm,.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" hidden/>
+          <p id="referenceMetadata" class="reference-metadata">A 1–60 s clip, or a sketch with arrows for movement</p>
           <label class="reference-direction-label" for="referenceDirection">Creative direction <span>optional</span></label>
           <textarea id="referenceDirection" aria-label="Creative direction" maxlength="1200" rows="3" placeholder="Focus on the two people and the camera push…"></textarea>
         </section>
         <section class="reference-result" aria-label="Reference analysis">
           <div class="reference-result-heading"><span id="referenceState">YOUR SCENE DRAFT</span><span id="referenceConnection" class="reference-model">Connecting…</span></div>
-          <div id="referenceReport"><div class="reference-empty"><span class="reference-draft-icon">◇</span><h3>Choose a reference clip</h3><p>Review the AI draft here before bringing it into your scene.</p><div class="reference-output-tags"><span>Objects</span><span>Motion</span><span>Camera</span></div></div></div>
+          <div id="referenceReport"><div class="reference-empty"><span class="reference-draft-icon">◇</span><h3>Choose a clip or a sketch</h3><p>Review the AI draft here before bringing it into your scene.</p><div class="reference-output-tags"><span>Objects</span><span>Motion</span><span>Camera</span></div></div></div>
         </section>
       </div>
       <p id="referenceError" class="reference-error" role="alert" hidden></p>
       <div class="reference-footer"><span id="referenceFooterNote">Estimated geometry and camera remain editable.</span><div><button data-reference="cancel" hidden>Cancel analysis</button><button class="primary-button" data-reference="analyze" disabled>Analyze clip</button><button class="primary-button" data-reference="apply" hidden>Use scene</button></div></div>`;
     document.body.appendChild(this.root);
-    this.fileInput = this.find('#referenceFile'); this.player = this.find('#referencePlayer');
+    this.fileInput = this.find('#referenceFile'); this.player = this.find('#referencePlayer'); this.still = this.find('#referenceStill');
     this.analyzeButton = this.find('[data-reference="analyze"]'); this.applyButton = this.find('[data-reference="apply"]');
     this.direction = this.find('#referenceDirection');
     this.root.addEventListener('click', event => {
@@ -65,7 +68,7 @@ export class ReferenceDialog {
     this.root.addEventListener('close', () => { this.cancelOperation(); this.player.pause(); });
     this.fileInput.addEventListener('change', () => { const file = this.fileInput.files?.[0]; if (file) void this.choose(file); this.fileInput.value = ''; });
     this.direction.addEventListener('input', () => {
-      if (this.draft) { this.draft = null; this.emptyReport('Direction updated', 'Analyze the clip again to include your changes.'); this.updateButtons(); }
+      if (this.draft) { this.draft = null; this.emptyReport('Direction updated', `Analyze the ${this.image ? 'image' : 'clip'} again to include your changes.`); this.updateButtons(); }
     });
   }
 
@@ -84,8 +87,8 @@ export class ReferenceDialog {
     this.updateButtons();
   }
   private updateButtons() {
-    this.analyzeButton.disabled = this.busy || this.loadingDemo || !this.video || !this.connection?.available;
-    this.analyzeButton.textContent = this.loadingDemo ? 'Loading demo…' : this.busy ? 'Analyzing…' : this.draft ? 'Analyze again' : 'Analyze clip';
+    this.analyzeButton.disabled = this.busy || this.loadingDemo || (!this.video && !this.image) || !this.connection?.available;
+    this.analyzeButton.textContent = this.loadingDemo ? 'Loading demo…' : this.busy ? 'Analyzing…' : this.draft ? 'Analyze again' : this.image ? 'Analyze image' : 'Analyze clip';
     this.analyzeButton.classList.toggle('reference-working', this.busy);
     this.applyButton.hidden = !this.draft || this.busy || this.loadingDemo;
     this.find<HTMLButtonElement>('[data-reference="choose"]').disabled = this.busy || this.loadingDemo;
@@ -106,7 +109,7 @@ export class ReferenceDialog {
   }
   private async loadDemo() {
     if (this.busy || this.loadingDemo) return;
-    this.cancelOperation(); this.clearError(); this.video = null; this.draft = null; this.loadingDemo = true;
+    this.cancelOperation(); this.clearError(); this.video = null; this.image = null; this.draft = null; this.loadingDemo = true;
     const operation = this.operation; this.controller = new AbortController();
     this.emptyReport('Loading the demo clip', 'The Grand Budapest Hotel · Interview with Zero · 0:33–0:45');
     this.updateButtons();
@@ -124,7 +127,8 @@ export class ReferenceDialog {
     }
   }
   private async choose(file: File) {
-    this.cancelOperation(); this.clearError(); this.video = null; this.draft = null; this.showTracks();
+    if (isReferenceImage(file)) return this.chooseImage(file);
+    this.cancelOperation(); this.clearError(); this.video = null; this.image = null; this.draft = null; this.showTracks(); this.still.hidden = true;
     this.cutsController?.abort(); this.cutsController = new AbortController(); this.cuts = null;
     const operation = this.operation;
     this.controller = new AbortController();
@@ -155,21 +159,53 @@ export class ReferenceDialog {
     }
     this.updateButtons();
   }
+  private async chooseImage(file: File) {
+    this.cancelOperation(); this.clearError(); this.video = null; this.image = null; this.draft = null; this.showTracks();
+    this.cutsController?.abort(); this.cuts = null;
+    const operation = this.operation;
+    this.controller = new AbortController();
+    if (this.objectURL) URL.revokeObjectURL(this.objectURL);
+    this.player.pause(); this.player.removeAttribute('src'); this.player.hidden = true; this.still.hidden = true;
+    this.find('.reference-placeholder').hidden = false;
+    this.find('#referenceFileName').textContent = file.name;
+    this.find('#referenceMetadata').textContent = 'Reading image…';
+    this.emptyReport('Reading your image', 'Large photos are reduced in your browser before sending.');
+    this.updateButtons();
+    try {
+      const image = await readReferenceImage(file, this.controller.signal);
+      if (operation !== this.operation) return;
+      this.image = image;
+      this.objectURL = URL.createObjectURL(file); this.still.src = this.objectURL; this.still.hidden = false;
+      this.find('.reference-placeholder').hidden = true;
+      this.find('#referenceMetadata').textContent = `${image.width} × ${image.height} · image · becomes a ${image.duration} s shot`;
+      this.emptyReport('Ready to analyze', 'Muse reads it as one shot: people, props, drawn movement arrows and the camera.');
+    } catch (error) {
+      if (operation !== this.operation) return;
+      this.find('#referenceMetadata').textContent = 'Choose another image'; this.showError((error as Error).message);
+      this.emptyReport('Image could not be opened', 'Choose a PNG, JPEG or WebP image.');
+    }
+    this.updateButtons();
+  }
   /** SAM 3.1 boxes stay on the reference player while its draft is under review. */
   private showTracks(draft?: ReferenceDraft) {
     this.disposeTracks?.(); this.disposeTracks = draft?.tracks?.length ? attachTrackOverlay(this.player, draft.tracks) : null;
   }
   private async analyze() {
-    if (!this.video || !this.connection?.available || this.busy) return;
+    if ((!this.video && !this.image) || !this.connection?.available || this.busy) return;
     this.cancelOperation(); this.clearError(); this.draft = null; this.busy = true; this.player.pause(); this.showTracks();
     const operation = this.operation; this.controller = new AbortController();
     this.find('#referenceState').textContent = 'ANALYZING REFERENCE';
-    this.find('#referenceReport').innerHTML = '<div class="reference-empty reference-analyzing"><span class="reference-orbit" aria-hidden="true"></span><h3>Reading the shot</h3><p>Finding the staging, action and camera.<br>This can take a minute.</p></div>';
+    this.find('#referenceReport').innerHTML = `<div class="reference-empty reference-analyzing"><span class="reference-orbit" aria-hidden="true"></span><h3>Reading the ${this.image ? 'drawing' : 'shot'}</h3><p>Finding the staging, action and camera.<br>This can take a minute.</p></div>`;
     this.updateButtons();
     try {
-      const cuts = await Promise.race([this.cuts ?? Promise.resolve([]), new Promise<number[]>(resolve => setTimeout(() => resolve([]), 8000))]);
-      if (operation !== this.operation) return;
-      const draft = await requestReferenceDraft({ video: { ...this.video, ...(cuts.length ? { cuts } : {}) }, direction: this.direction.value.trim() }, this.controller.signal);
+      const direction = this.direction.value.trim();
+      let draft: ReferenceDraft;
+      if (this.image) draft = await requestReferenceDraft({ image: this.image, direction }, this.controller.signal);
+      else {
+        const cuts = await Promise.race([this.cuts ?? Promise.resolve([]), new Promise<number[]>(resolve => setTimeout(() => resolve([]), 8000))]);
+        if (operation !== this.operation || !this.video) return;
+        draft = await requestReferenceDraft({ video: { ...this.video, ...(cuts.length ? { cuts } : {}) }, direction }, this.controller.signal);
+      }
       if (operation !== this.operation) return;
       this.draft = draft;
       this.showTracks(draft);

@@ -1,6 +1,6 @@
 import { MathUtils, PerspectiveCamera, Vector3 } from 'three';
 import { evaluateFov, evaluateTransform } from '../../src/model.ts';
-import type { ReferenceDraft, ReferenceInput, ReferenceTrack } from '../../src/reference/types.ts';
+import type { ReferenceDraft, ReferenceTrack, VideoReferenceInput } from '../../src/reference/types.ts';
 import type { SceneCamera, SceneObject, Transform } from '../../src/types.ts';
 import { mp4VideoFrameCount } from './frames.ts';
 import type { SamTracks } from './sam.ts';
@@ -78,7 +78,7 @@ function floorAt(samples: Sample[], time: number): Vector3 | null {
 
 const placed = (transform: Transform, point: Vector3): Transform => ({ ...structuredClone(transform), position: [round(point.x), transform.position[1], round(point.z)] });
 
-export function groundReferenceDraft(draft: ReferenceDraft, input: ReferenceInput, result: SamTracks | Error): ReferenceDraft {
+export function groundReferenceDraft(draft: ReferenceDraft, input: VideoReferenceInput, result: SamTracks | Error): ReferenceDraft {
   if (result instanceof Error) return { ...draft, assumptions: [...draft.assumptions, 'SAM 3.1 tracking did not finish, so placement and timing are Muse estimates.'] };
   const scene = structuredClone(draft.scene), duration = scene.duration;
   const { width, height } = input.video, aspect = width / height;

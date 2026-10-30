@@ -1,7 +1,7 @@
-import { REFERENCE_LIMITS, type ReferenceInput } from './types';
+import { REFERENCE_LIMITS, type ReferenceVideo } from './types';
 
 /** Read the original clip, not a montage of screenshots. Nothing is uploaded here. */
-export async function readReferenceVideo(file: File, signal: AbortSignal): Promise<ReferenceInput['video']> {
+export async function readReferenceVideo(file: File, signal: AbortSignal): Promise<ReferenceVideo> {
   const mime = file.type || (/\.mp4$/i.test(file.name) ? 'video/mp4' : /\.webm$/i.test(file.name) ? 'video/webm' : '');
   if (!['video/mp4', 'video/webm'].includes(mime)) throw new Error('Choose an MP4 or WebM video.');
   if (!file.size || file.size > REFERENCE_LIMITS.maxVideoBytes) throw new Error('Choose a clip up to 3 MB for this first version.');
