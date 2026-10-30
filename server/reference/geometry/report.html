@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LittleTake · 单帧几何验证</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#283529;background:#f7f7f1}*{box-sizing:border-box}body{margin:0}header{padding:20px 28px;border-bottom:1px solid #dce1d2;display:flex;align-items:center;gap:20px}h1{font-size:20px;margin:0}main{max-width:1500px;padding:24px;margin:auto}p{line-height:1.6}button,a.action{border:1px solid #cad3bd;background:#edf1e5;color:inherit;border-radius:7px;padding:9px 13px;font:inherit;cursor:pointer;text-decoration:none}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0}figure{margin:0;background:white;border:1px solid #dce1d2;border-radius:9px;overflow:hidden}figcaption{padding:10px 14px;font-size:14px;font-weight:600}figure img{width:100%;display:block;background:#151815}#viewer{width:100%;aspect-ratio:16/9;display:block;background:#e4e7df;border-radius:8px;touch-action:none}.muted{font-size:13px;color:#65715c}table{border-collapse:collapse;width:100%;font-size:13px;margin-top:16px}td,th{text-align:left;padding:10px;border-bottom:1px solid #dce1d2}pre{white-space:pre-wrap;font-size:12px}#error{color:#973d32}details{margin-top:20px}a{color:#435f35}@media(max-width:800px){.grid{grid-template-columns:1fr}main{padding:12px}}
+</style>
+<script type="importmap">{"imports":{"three":"/vendor/three.module.js","three/addons/controls/OrbitControls.js":"/vendor/OrbitControls.js"}}</script>
+</head><body><header><h1>LittleTake · 单帧几何验证</h1><span id="status" class="muted">读取已保存的测量；本页面不会调用模型</span></header>
+<main><p id="description"></p><p id="error" role="alert"></p>
+<div class="row"><a class="action" href="scene.json" download>下载可编辑场景</a><a class="action" href="layout.json" download>布局与假设</a><a class="action" href="geometry.npz" download>原始数值深度</a><a class="action" href="numeric-checks.json">坐标检查</a></div>
+<div class="grid">
+<figure><figcaption>原图 · 保留原始像素与画幅</figcaption><img id="original" src="original.png" alt="原始参考帧"></figure>
+<figure><figcaption>还原 · 深度反算出的可编辑方块 proxy</figcaption><img id="restored" alt="反算布局的真实三维渲染"></figure>
+<figure><figcaption>SAM 3.1 分割 · 原图坐标</figcaption><img src="segmentation.png" alt="原图上的物体分割"></figure>
+<figure><figcaption>深度可视化 · 暗近亮远，计算使用浮点 NPZ</figcaption><img src="depth.png" alt="与原图对齐的深度显示图"></figure>
+</div>
+<div class="row"><button id="reset">参考相机</button><button id="top">俯视</button><button id="cloud">显示深度表面点</button><span class="muted">拖动旋转，滚轮缩放。俯视图由三维布局计算，不使用图像生成。</span></div>
+<canvas id="viewer" aria-label="可旋转检查的三维布局"></canvas>
+<details><summary>固定俯视图</summary><img id="topImage" style="max-width:100%" alt="由三维布局直接渲染的俯视图"></details>
+<p class="muted">下表使用独立物体 ID 渲染，包含实际遮挡。IoU 描述方块代理与可见 mask 的吻合程度，不代表完整三维重建正确。</p>
+<table><thead><tr><th>物体</th><th>有效深度覆盖</th><th>原图可见像素</th><th>还原可见像素</th><th>可见轮廓 IoU</th></tr></thead><tbody id="measurements"></tbody></table>
+<details><summary>未确定的部分</summary><pre id="assumptions"></pre></details>
+</main>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+
+const $=selector=>document.querySelector(selector);
+const load=async url=>{const response=await fetch(url);if(!response.ok)throw new Error(`${url}: HTTP ${response.status}`);return response.json();};
+const image=async url=>{const result=new Image();result.src=url;await result.decode();return result;};
+try{
+ const [layout,frame,cloudData]=await Promise.all([load('layout.json'),load('frame.json'),load('cloud.json')]);
+ const [width,height]=layout.sourceSize;
+ $('#description').textContent=`尺度：${layout.scale.units==='relative'?'相对尺度，尚未标定真实米数':'米制估计，请检查尺度依据'}。${layout.objects.length} 个可见物体，${layout.unplaced.length} 个因可信深度不足未摆放。来源帧：${frame.source.time===undefined?'图片':frame.source.time.toFixed(3)+' 秒'}。隐藏部分尚未恢复，结果等待视觉检查。`;
+ $('#assumptions').textContent=[...layout.assumptions,...layout.objects.map(object=>`${object.name}: ${object.assumptions.join(' ')}`),...layout.unplaced.map(object=>`${object.id}: ${object.reason}`),JSON.stringify(layout.sceneExport)].join('\n');
+ const renderer=new THREE.WebGLRenderer({canvas:$('#viewer'),antialias:true,preserveDrawingBuffer:true});
+ renderer.setPixelRatio(1);renderer.setSize(width,height,false);renderer.outputColorSpace=THREE.SRGBColorSpace;
+ renderer.toneMapping=THREE.NoToneMapping;
+ const scene=new THREE.Scene();scene.background=new THREE.Color('#e2e5db');
+ const meshes=layout.objects.map(object=>{
+   const mesh=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshBasicMaterial({color:object.color}));
+   mesh.position.fromArray(object.transform.position);mesh.rotation.set(...object.transform.rotation.map(THREE.MathUtils.degToRad));mesh.scale.fromArray(object.transform.scale);
+   mesh.userData.object=object;scene.add(mesh);return mesh;
+ });
+ const bounds=new THREE.Box3();for(const mesh of meshes)bounds.expandByObject(mesh);
+ const center=bounds.getCenter(new THREE.Vector3()),span=Math.max(1e-4,bounds.getSize(new THREE.Vector3()).length());
+ const near=Math.max(span/10000,1e-5),far=Math.max(span*100,100);
+ const reference=new THREE.PerspectiveCamera(layout.camera.fov,width/height,near,far);
+ reference.position.fromArray(layout.camera.position);
+ const r=layout.camera.rotationMatrix,matrix=new THREE.Matrix4().set(r[0][0],r[0][1],r[0][2],0,r[1][0],r[1][1],r[1][2],0,r[2][0],r[2][1],r[2][2],0,0,0,0,1);
+ reference.quaternion.setFromRotationMatrix(matrix);reference.updateMatrixWorld(true);
+ const k=layout.camera.intrinsics,cx=k[0][2]+.5,cy=k[1][2]+.5;
+ reference.projectionMatrix.set(2*k[0][0]/width,-2*k[0][1]/width,1-2*cx/width,0,0,2*k[1][1]/height,2*cy/height-1,0,0,0,-(far+near)/(far-near),-2*far*near/(far-near),0,0,-1,0);
+ reference.projectionMatrixInverse.copy(reference.projectionMatrix).invert();
+ const top=new THREE.OrthographicCamera(-span*width/height*.55,span*width/height*.55,span*.55,-span*.55,near,far);
+ top.position.set(center.x,bounds.max.y+span*2,center.z);top.up.set(0,0,-1);top.lookAt(center);top.updateMatrixWorld(true);
+ const camera=reference.clone(),controls=new OrbitControls(camera,renderer.domElement);
+ controls.target.copy(center);controls.enableDamping=false;
+ const cloudGeometry=new THREE.BufferGeometry();
+ cloudGeometry.setAttribute('position',new THREE.Float32BufferAttribute(cloudData.positions,3));
+ const colors=[],pointColor=new THREE.Color();
+ for(let index=0;index<cloudData.colors.length;index+=3){pointColor.setRGB(cloudData.colors[index]/255,cloudData.colors[index+1]/255,cloudData.colors[index+2]/255,THREE.SRGBColorSpace);colors.push(pointColor.r,pointColor.g,pointColor.b);}
+ cloudGeometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
+ const cloud=new THREE.Points(cloudGeometry,new THREE.PointsMaterial({size:span/650,vertexColors:true}));cloud.visible=false;scene.add(cloud);
+ const composite=document.createElement('canvas');composite.width=width;composite.height=height;
+ const ctx=composite.getContext('2d');
+ function capture(view,matte){
+   renderer.render(scene,view);ctx.clearRect(0,0,width,height);ctx.drawImage(renderer.domElement,0,0);
+   if(matte){const [x,y,w,h]=layout.crop;ctx.fillStyle='#000';ctx.fillRect(0,0,x,height);ctx.fillRect(x+w,0,width-x-w,height);ctx.fillRect(0,0,width,y);ctx.fillRect(0,y+h,width,height-y-h);}
+   return composite.toDataURL('image/png');
+ }
+ const restored=capture(reference,true),topDown=capture(top,false);
+ $('#restored').src=restored;$('#topImage').src=topDown;
+ const target=new THREE.WebGLRenderTarget(width,height,{minFilter:THREE.NearestFilter,magFilter:THREE.NearestFilter,depthBuffer:true});
+ const materials=meshes.map(mesh=>mesh.material),background=scene.background;
+ meshes.forEach((mesh,index)=>{const id=index+1;mesh.material=new THREE.MeshBasicMaterial({color:new THREE.Color((id&255)/255,((id>>8)&255)/255,((id>>16)&255)/255)});});
+ scene.background=new THREE.Color(0,0,0);renderer.outputColorSpace=THREE.LinearSRGBColorSpace;
+ renderer.setRenderTarget(target);renderer.render(scene,reference);
+ const pixels=new Uint8Array(width*height*4);renderer.readRenderTargetPixels(target,0,0,width,height,pixels);
+ renderer.setRenderTarget(null);renderer.outputColorSpace=THREE.SRGBColorSpace;scene.background=background;
+ meshes.forEach((mesh,index)=>{mesh.material.dispose();mesh.material=materials[index];});target.dispose();
+ const owner=new Uint32Array(width*height),[cropX,cropY,cropWidth,cropHeight]=layout.crop;
+ for(let y=cropY;y<cropY+cropHeight;y++)for(let x=cropX;x<cropX+cropWidth;x++){
+   const offset=((height-1-y)*width+x)*4;owner[y*width+x]=pixels[offset]+(pixels[offset+1]<<8)+(pixels[offset+2]<<16);
+ }
+ const maskCanvas=document.createElement('canvas');maskCanvas.width=width;maskCanvas.height=height;
+ const maskContext=maskCanvas.getContext('2d',{willReadFrequently:true});maskContext.imageSmoothingEnabled=false;
+ const measurements=[];
+ for(const [index,object] of layout.objects.entries()){
+   maskContext.clearRect(0,0,width,height);maskContext.drawImage(await image(object.mask),cropX,cropY,cropWidth,cropHeight);
+   const mask=maskContext.getImageData(0,0,width,height).data;
+   let expected=0,actual=0,intersection=0,x0=width,y0=height,x1=-1,y1=-1;
+   for(let offset=0;offset<owner.length;offset++){
+     const source=mask[offset*4]>127,rendered=owner[offset]===index+1;
+     if(source)expected++;if(rendered){actual++;const x=offset%width,y=Math.floor(offset/width);x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y);}
+     if(source&&rendered)intersection++;
+   }
+   const iou=intersection/Math.max(1,expected+actual-intersection);
+   measurements.push({id:object.id,sourcePixels:expected,visiblePixels:actual,visibleBox:actual?[x0,y0,x1+1,y1+1]:null,silhouetteIoU:iou});
+   const tr=document.createElement('tr');
+   for(const value of [object.name,(object.depthCoverage*100).toFixed(1)+'%',expected,actual,iou.toFixed(3)]){const td=document.createElement('td');td.textContent=String(value);tr.append(td);}$('#measurements').append(tr);
+ }
+ const saved=await fetch('capture',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({layoutId:layout.id,restored,topDown,measurements})});
+ if(!saved.ok)throw new Error('画面已渲染，但保存检查图失败。');
+ $('#status').textContent='还原图、俯视图和真实遮挡测量已保存；视觉质量尚未验收';
+ function referenceView(){camera.copy(reference);controls.target.copy(center);renderer.render(scene,camera);}
+ controls.addEventListener('change',()=>renderer.render(scene,camera));
+ $('#reset').onclick=referenceView;
+ $('#top').onclick=()=>{camera.position.copy(top.position);camera.up.copy(top.up);camera.lookAt(center);controls.target.copy(center);renderer.render(scene,camera);};
+ $('#cloud').onclick=()=>{cloud.visible=!cloud.visible;for(const mesh of meshes)mesh.visible=!cloud.visible;$('#cloud').textContent=cloud.visible?'显示方块 proxy':'显示深度表面点';renderer.render(scene,camera);};
+ renderer.render(scene,camera);
+ window.geometryInspection={layout,measurements,restored,topDown};
+}catch(error){$('#error').textContent=error.message;$('#status').textContent='检查未完成';}
+</script></body></html>

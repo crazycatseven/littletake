@@ -6,6 +6,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { evaluateComponents, evaluateFov, evaluateTransform } from './model';
 import { activePivot, fromPivotPose, toPivotPose } from './components/transform';
 import { createAssetGroup, disposeAssetGroup, type AssetDefinition } from './assets/model';
+import { createObjectGroup, primitiveGeometry } from './spatial/geometry';
 import { renderSceneSnapshot } from './scene-snapshot';
 import { configureHandles } from './placement/gizmo';
 import { ViewNavigation } from './placement/navigation';
@@ -512,59 +513,18 @@ export class Stage {
   }
 
   private geometry(kind: string): THREE.BufferGeometry {
-    const existing = this.geometries.get(kind);
-    if (existing) return existing;
-    let geometry: THREE.BufferGeometry;
-    switch (kind) {
-      case 'sphere': geometry = new THREE.SphereGeometry(0.5, 24, 16); break;
-      case 'cylinder': geometry = new THREE.CylinderGeometry(0.5, 0.5, 1, 32); break;
-      case 'cone': geometry = new THREE.ConeGeometry(0.5, 1, 32); break;
-      case 'capsule': geometry = new THREE.CapsuleGeometry(0.5, 1, 6, 12); break;
-      case 'plane': geometry = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2); break;
-      default: geometry = new THREE.BoxGeometry(1, 1, 1);
-    }
-    this.geometries.set(kind, geometry);
+    let geometry = this.geometries.get(kind);
+    if (!geometry) { geometry = primitiveGeometry(kind); this.geometries.set(kind, geometry); }
     return geometry;
   }
 
   private createEntity(object: SceneObject): EntityView {
-    const root = new THREE.Group();
-    root.userData.entityId = object.id;
-    const material = new THREE.MeshStandardMaterial({ color: object.color, roughness: 0.79, metalness: 0.01 });
-    const accent = material.clone();
-    accent.color.multiplyScalar(0.72);
-    if(object.kind==='asset'){
-      const asset=this.currentAssets.find(a=>a.id===object.asset?.id);
-      if(!asset)throw new Error('Missing asset: '+object.name);
-      const group=createAssetGroup(asset);root.add(group);group.traverse(node=>{if(node instanceof THREE.Mesh)(node.material as THREE.MeshStandardMaterial).color.multiply(new THREE.Color(object.color));});
-      return {root,bounds:new THREE.Box3().setFromObject(root),kind:object.kind,material,accent,color:object.color,assetKey:this.assetKey(asset),disposeAsset:()=>disposeAssetGroup(group)};
-    }
-    if (object.kind === 'plane') material.side = THREE.DoubleSide;
-    const add = (kind: string, x: number, y: number, z: number, sx: number, sy: number, sz: number, dark = false): THREE.Mesh => {
-      const mesh = new THREE.Mesh(this.geometry(kind), dark ? accent : material);
-      mesh.position.set(x, y, z);
-      mesh.scale.set(sx, sy, sz);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      root.add(mesh);
-      return mesh;
-    };
-    if (object.kind === 'human') {
-      add('capsule', 0, 1.12, 0, 0.41, 0.29, 0.27);
-      add('sphere', 0, 0.82, 0, 0.39, 0.28, 0.29, true);
-      add('cylinder', 0, 1.45, 0, 0.11, 0.12, 0.11);
-      add('sphere', 0, 1.63, 0, 0.32, 0.37, 0.32);
-      for (const side of [-1, 1]) {
-        add('capsule', side * 0.12, 0.43, 0, 0.14, 0.34, 0.15, true);
-        add('cube', side * 0.12, 0.055, -0.045, 0.155, 0.11, 0.28, true);
-        const arm = add('capsule', side * 0.315, 1.09, 0, 0.12, 0.28, 0.12);
-        arm.rotation.z = side * 0.1;
-        add('sphere', side * 0.344, 0.79, 0, 0.13, 0.15, 0.13);
-      }
-    } else {
-      add(object.kind, 0, 0, 0, 1, 1, 1);
-    }
-    return { root, bounds: new THREE.Box3().setFromObject(root), kind: object.kind, material, accent, color: object.color };
+    const material = new THREE.MeshStandardMaterial({ color: object.color, roughness: .79, metalness: .01 });
+    const accent = material.clone(); accent.color.multiplyScalar(.72);
+    const root = createObjectGroup(object, this.currentAssets, material, accent, kind => this.geometry(kind));
+    const asset = object.kind === 'asset' ? this.currentAssets.find(asset => asset.id === object.asset?.id) : undefined;
+    return { root, bounds: new THREE.Box3().setFromObject(root), kind: object.kind, material, accent, color: object.color,
+      ...(asset ? { assetKey: this.assetKey(asset), disposeAsset: () => disposeAssetGroup(root.children[0] as THREE.Group) } : {}) };
   }
 
   private createSelectionMarker(): void {

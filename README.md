@@ -33,6 +33,7 @@ Desktop scope: mouse/keyboard authoring, text prompts and reference clips.
 | **P0** | **Muse integration** | Video input, scene understanding and structured scene proposals. | Done |
 | **P0** | **Tool Calling & Harness** | Conversation context, native asset function calls, bounded expert tasks and atomic preview/apply. | Partial |
 | **P2** | **Vision adapters** | SAM 3.1 tracks people in reference clips alongside Muse analysis; tracks ground draft placement and motion timing and appear over the review video. | Partial |
+| **P2** | **Reference geometry** | Reference-frame SAM defaults to Meta API with optional local CUDA; local VGGT, layout backprojection and offline ablations. Automatic Agent consumption remains planned. | Partial |
 | **P2** | **SAM 3D Body service** | Separate model deployment and inference for human 3D pose estimation from reference frames. | Todo |
 
 ### Authoring
@@ -151,3 +152,9 @@ The workshop uses `components/model.ts` and `performance/motion.ts` for `asset.t
 The asset [construction toolkit](src/assets/toolkit/README.md) adds reusable groups, ordered Mirror/Array modifiers, parameter expressions and anchor connections inside the existing prefab Inspector. Both Muse specialists use the same evaluator as the stage and measurements. Saved recipes retain source relationships; generated copies can be detached individually or baked together.
 
 CPU asset previews use per-pixel depth testing. Generation reviews include rest and articulated trial poses, and revision tools can render explicit joint angles. See the [complete real-Muse acceptance flow and portable project](docs/verification/asset-toolkit.md).
+
+### Reference-frame geometry and spatial tools
+
+Reference-frame segmentation uses `SAM_PROVIDER=cloud` by default. A prepared local CUDA installation can select `local` through `/api/segmentation` or the geometry CLI; [setup and benchmark instructions](server/reference/geometry/README.md) live with the module. The existing reference-video tracking and look-frame flows remain available.
+
+[Spatial operations](src/spatial/README.md) provide measured support placement, relative edge gaps, facing, alignment, distribution, anchors and paths through scene edits, Muse tools and `POST /api/spatial`. They share viewport geometry and the editor's whole-animation transform logic, preserving property key times, interpolation and takes.

@@ -6,6 +6,8 @@ import type { ProjectContent, SceneEntity, Vec3 } from '../types.ts';
 import { trackPoses } from '../performance/motion.ts';
 import { assetSchema, validateAsset } from '../assets/model.ts';
 import { instantiateAsset } from '../assets/library.ts';
+import { isSpatialOperation, spatialOperationSchema } from '../spatial/schema.ts';
+import { solveSpatial } from '../spatial/methods.ts';
 
 const vector = (min: number, max: number) => z.array(z.number().min(min).max(max)).length(3) as unknown as z.ZodType<Vec3>;
 const position = vector(-1000, 1000);
@@ -29,6 +31,7 @@ const shotFields = { id, name, cameraId: id, start: z.number().min(0).max(60), d
 // Historical chat receipts keep their original proposed framing; this is never offered to the model.
 export const legacyShotOperationSchema = z.strictObject({ type: z.literal('add_shot'), sceneId: id, shot: z.strictObject({ ...cameraFields, ...shotFields }) });
 export const operationSchema = z.union([
+  ...spatialOperationSchema.options,
   z.strictObject({ type: z.literal('instantiate_asset'), sceneId: id, id, name, asset: assetSchema, transform, track: track.nullable() }),
   z.strictObject({ type: z.literal('add_scene'), sceneId: id, name, duration: z.number().min(1).max(60) }),
   z.strictObject({ type: z.literal('remove_scene'), sceneId: id }),
@@ -87,6 +90,17 @@ export function applyProjectOperations(source: ProjectContent, operations: Scene
       if (!item) throw new Error(`Operation ${index + 1} (${operation.type}): Unknown entity: ${id} in scene ${doc.id}. Available entity IDs: ${[...doc.objects, ...doc.cameras, ...doc.shots].map(item => item.id).join(', ') || '(none)'}.`);
       return item;
     };
+    if (isSpatialOperation(operation)) {
+      const result = solveSpatial(project, operation);
+      for (const update of result.updates) {
+        const item = find(update.id);
+        item.transform = structuredClone(update.transform);
+        item.track = structuredClone(update.track);
+        if (update.animation) item.animation = structuredClone(update.animation);
+        else delete item.animation;
+      }
+      continue;
+    }
     switch (operation.type) {
       case 'remove_scene': project.scenes = project.scenes.filter(scene => scene.id !== doc.id); break;
       case 'rename_scene': doc.name = operation.name; break;
