@@ -2,7 +2,7 @@ import { AIError, type AIProvider, type StructuredRequest, type ToolRequest, typ
 
 interface MetaConfig { apiKey: string; model: string }
 
-/** Muse's Responses API is the only place that knows Meta's wire format. */
+/** Muse Responses client. SAM uses its dedicated segmentation grammar parser. */
 export class MetaProvider implements AIProvider {
   readonly name = 'Meta';
   readonly model: string;

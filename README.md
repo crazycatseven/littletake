@@ -28,7 +28,7 @@ Desktop scope: mouse/keyboard authoring, text prompts and reference clips.
 | --- | --- | --- | --- |
 | **P0** | **Muse integration** | Video input, scene understanding and structured scene proposals. | Done |
 | **P0** | **Tool Calling & Harness** | Conversation context, native asset function calls, bounded expert tasks and atomic preview/apply. | Partial |
-| **P2** | **Vision adapters** | SAM 3.1 Segmentation for reference images/video through Meta Model API. | Todo |
+| **P2** | **Reference segmentation** | SAM 3.1 via Meta API by default, with explicit local CUDA inference; shared endpoint, geometry CLI and offline ablations. Automatic editor/Agent integration remains planned. | Partial |
 | **P2** | **SAM 3D Body service** | Separate model deployment and inference for human 3D pose estimation from reference frames. | Todo |
 
 ### Authoring
@@ -97,6 +97,8 @@ Scene editing uses JSON output with a supplied schema, followed by strict local 
 **Download diagnostics** exports this conversation's messages/application receipts and each request's original input, model request, raw output, parsed proposal, native tool calls/results and validation/provider errors, including rejected correction attempts. Inputs are saved to IndexedDB before inference; responses are saved before showing a preview. Records survive refresh on this browser and origin, independently of project localStorage. Headers and API credentials are never included. Export diagnostics separately from **Export project** to retain them outside this browser; clearing site data removes both stores.
 
 For video analysis, copy `.env.example` to `.env.local` and set `MODEL_API_KEY` and `MUSE_MODEL`. Vite serves the same `/api/reference` handler locally that Vercel runs in production. Model credentials are server-side environment variables.
+
+Reference-frame segmentation uses `SAM_PROVIDER=cloud` by default. A prepared local CUDA installation can select `local` through the same `/api/segmentation` endpoint or geometry CLI; [setup, provider selection and benchmark instructions](server/reference/geometry/README.md) live with that module. Vercel uses the cloud provider.
 
 Provider adapters live in `server/ai/`; the video-analysis workflow and validated scene conversion live in `server/reference/`. The editor consumes ordinary `SceneDocument` data. Replacing the AI provider requires an adapter and a factory entry, without changing the editor.
 
