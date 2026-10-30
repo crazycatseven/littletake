@@ -10,6 +10,8 @@
 .reference-source, .reference-result { min-width: 0; }
 .reference-video-frame { position: relative; display: grid; place-items: center; aspect-ratio: 16 / 9; overflow: hidden; border: 1px solid #d5d7c9; border-radius: 7px; background: #eaeae2; }
 .reference-video-frame video { display: block; width: 100%; height: 100%; object-fit: contain; background: #242a26; }
+.reference-video-frame img { display: block; width: 100%; height: 100%; object-fit: contain; background: #f6f6f1; }
+.reference-video-frame img[hidden] { display: none; }
 .reference-placeholder { display: flex; flex-direction: column; align-items: center; gap: 12px; color: #8f9881; font-size: 10px; }
 .reference-placeholder svg { width: 40px; height: 40px; color: #919e7a; }
 .reference-file-row { display: flex; align-items: center; gap: 11px; margin-top: 12px; }

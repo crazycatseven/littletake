@@ -8,7 +8,7 @@ import { parseSamBoxes, trackConcept, type SamTracks } from '../server/reference
 import { sceneFromProposal } from '../server/reference/draft.ts';
 import { createReferenceHandler } from '../server/reference-api.ts';
 import { evaluateTransform } from '../src/model.ts';
-import type { ReferenceDraft, ReferenceInput } from '../src/reference/types.ts';
+import type { ReferenceDraft, VideoReferenceInput } from '../src/reference/types.ts';
 
 const W = 640, H = 360;
 const pose = (position: number[]) => ({ position, rotation: [0, 0, 0], scale: [1, 1, 1] });
@@ -17,7 +17,7 @@ const proposal = (walker = [-2, 0, 0]) => ({
   objects: [{ name: 'Bellboy', kind: 'human', transform: pose(walker), motion: null }, { name: 'Desk', kind: 'cube', transform: pose([2, 0.5, -2]), motion: null }],
   camera: { position: [0, 1.6, 6], target: [0, 0.9, 0], fov: 50, motion: null },
 });
-const input = (): ReferenceInput => ({ video: { dataUrl: 'data:video/mp4;base64,' + Buffer.from('not an mp4').toString('base64'), duration: 5, width: W, height: H }, direction: '' });
+const input = (): VideoReferenceInput => ({ video: { dataUrl: 'data:video/mp4;base64,' + Buffer.from('not an mp4').toString('base64'), duration: 5, width: W, height: H }, direction: '' });
 const draft = (walker?: number[]): ReferenceDraft => ({ ...sceneFromProposal(proposal(walker), 5), provider: 'Meta', model: 'test' });
 
 /** Ground truth: the bellboy walks from (-2, 0, 0) to (1, 0, -1) between 1 s and 3 s; boxes are its projection at 10 fps. */

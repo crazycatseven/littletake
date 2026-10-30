@@ -121,3 +121,43 @@ test('API bounds streamed payloads before model execution', async () => {
   const invalidJSON = new Request('https://littletake.vercel.app/api/reference', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' });
   assert.equal((await handler(invalidJSON)).status, 400);
 });
+
+const png = () => Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+const sketch = (dataUrl = 'data:image/png;base64,' + png().toString('base64')) => ({ image: { dataUrl, duration: 5, width: 1200, height: 800 }, direction: '' });
+
+test('a sketch or storyboard image is accepted only as a real PNG, JPEG or WebP within the limit', () => {
+  const parsed = parseReferenceInput(sketch());
+  assert.ok('image' in parsed && parsed.image.duration === 5);
+  const jpeg = 'data:image/jpeg;base64,' + Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16]).toString('base64');
+  const webp = 'data:image/webp;base64,' + Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WEBPVP8 ')]).toString('base64');
+  for (const dataUrl of [jpeg, webp]) assert.ok('image' in parseReferenceInput(sketch(dataUrl)));
+  for (const dataUrl of ['data:image/png;base64,' + Buffer.from('not a png').toString('base64'), 'data:image/jpeg;base64,' + png().toString('base64'),
+    'data:image/gif;base64,' + Buffer.from('GIF89a').toString('base64'), 'https://private.example/sketch.png']) {
+    assert.throws(() => parseReferenceInput(sketch(dataUrl)), (error: unknown) => error instanceof AIError && error.status === 400);
+  }
+  assert.throws(() => parseReferenceInput(sketch('data:image/png;base64,' + Buffer.concat([png(), Buffer.alloc(3_000_000)]).toString('base64'))), (error: unknown) => error instanceof AIError && error.code === 'image_too_large');
+  // One source per request: a video and an image together are not a valid reference.
+  assert.throws(() => parseReferenceInput({ ...sketch(), video: input().video }));
+});
+
+test('an image is staged by Muse as one shot of the chosen length, with drawn arrows read as movement', async () => {
+  let seen: StructuredRequest | undefined;
+  const provider: AIProvider = { name: 'Replacement', model: 'test-model', async generateObject(value) { seen = value; return proposal(); } };
+  const draft = await analyzeReference(parseReferenceInput(sketch()), provider);
+  assert.equal(draft.scene.duration, 5); assert.equal(draft.scene.shots[0].duration, 5);
+  assert.deepEqual(seen!.content.map(part => part.type), ['text', 'image']);
+  assert.match(seen!.instructions, /storyboard panel, a rough sketch/); assert.match(seen!.instructions, /arrows/); assert.ok(seen!.instructions.includes('DEGREES'));
+  assert.match((seen!.content[0] as { text: string }).text, /Scene duration: 5\.000 seconds/);
+  // The video prompt is unchanged by the image path.
+  await analyzeReference(input(), provider);
+  assert.match(seen!.instructions, /^Create an EDITABLE 3D whitebox filming scene from a reference video\./);
+});
+
+test('the API stages an image without starting SAM video tracking', async () => {
+  let tracked = 0;
+  const handler = createReferenceHandler({ MODEL_API_KEY: 'test-key' }, () => ({ name: 'Test', model: 'test', async generateObject() { return proposal(); } }),
+    () => async () => { tracked++; return { boxes: [], frames: 0 } as never; });
+  const response = await handler(request(sketch()));
+  assert.equal(response.status, 200); assert.equal((await response.json()).scene.duration, 5); assert.equal(tracked, 0);
+  assert.equal((await handler(request(sketch('data:image/png;base64,' + Buffer.from('fake').toString('base64'))))).status, 400);
+});
