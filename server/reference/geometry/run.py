@@ -150,10 +150,10 @@ def serve(run: Path, port: int) -> None:
 
 
 def parser() -> argparse.ArgumentParser:
-    cli = argparse.ArgumentParser(description="Reference geometry: cloud/local SAM, local VGGT, explicit inspection.")
+    cli = argparse.ArgumentParser(description="Reference geometry: cloud/local SAM, local VGGT and SAM 3D Body, explicit inspection.")
     commands = cli.add_subparsers(dest="command", required=True)
     prepare = commands.add_parser("prepare", help="Download pinned source and weights, without loading models")
-    prepare.add_argument("--model", choices=["sam3", "vggt", "all"], default="vggt", help="Default cloud SAM needs no local weights")
+    prepare.add_argument("--model", choices=["sam3", "vggt", "sam3dbody", "all"], default="vggt", help="Default cloud SAM needs no local weights")
     prepare.add_argument("--vggt-repo", choices=["facebook/VGGT-1B", "facebook/VGGT-1B-Commercial"], default="facebook/VGGT-1B")
     source = commands.add_parser("extract", help="Save an exact reference frame and source mapping")
     source.add_argument("--run", type=Path, required=True)
@@ -162,7 +162,7 @@ def parser() -> argparse.ArgumentParser:
     media.add_argument("--video", type=Path)
     source.add_argument("--frame-index", type=int, default=0)
     source.add_argument("--keep-borders", action="store_true")
-    for name in ("segment", "depth", "layout", "all", "serve"):
+    for name in ("segment", "depth", "body", "layout", "all", "serve"):
         command = commands.add_parser(name)
         command.add_argument("--run", type=Path, required=True)
         if name in ("segment", "all"):
@@ -174,8 +174,12 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--depth-device", choices=["cuda", "cpu"], default="cuda")
         if name == "depth":
             command.add_argument("--context-runs", nargs="+", type=Path, help="Additional views of the same scene; saves joint geometry in every new run folder")
-        if name in ("segment", "depth", "all"):
+        if name in ("segment", "depth", "body", "all"):
             command.add_argument("--min-free-vram-gb", type=float, default=16)
+        if name in ("body", "all"):
+            command.add_argument("--person-concepts", nargs="+", default=["person"], help="Segmentation concepts that name people")
+        if name == "all":
+            command.add_argument("--body", action="store_true", help="Also estimate full-body joints with local SAM 3D Body before layout")
         if name in ("layout", "all"):
             command.add_argument("--floor-concepts", nargs="+", default=["floor"])
             command.add_argument("--known-height", help="Explicit unoccluded dimension constraint, e.g. p00-o1:1.8; never inferred automatically")
@@ -203,6 +207,8 @@ def main() -> None:
             subprocess.run(base + ["segment", "--run", str(args.run), "--sam-provider", args.sam_provider, "--threshold", str(args.threshold), "--max-api-calls", str(args.max_api_calls), "--min-free-vram-gb", str(args.min_free_vram_gb), "--concepts", *args.concepts], check=True)
             if not (args.run / "geometry.json").exists():
                 subprocess.run(base + ["depth", "--run", str(args.run), "--depth-device", args.depth_device, "--min-free-vram-gb", str(args.min_free_vram_gb)], check=True)
+            if args.body and not (args.run / "bodies.json").exists():
+                subprocess.run(base + ["body", "--run", str(args.run), "--min-free-vram-gb", str(args.min_free_vram_gb), "--person-concepts", *args.person_concepts], check=True)
             command = base + ["layout", "--run", str(args.run), "--floor-concepts", *args.floor_concepts]
             if args.known_height:
                 command += ["--known-height", args.known_height]
@@ -223,6 +229,11 @@ def main() -> None:
             os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
             from models import depth
             depth(args.run, args.depth_device, args.min_free_vram_gb, args.context_runs)
+        elif args.command == "body":
+            os.environ["HF_HUB_OFFLINE"] = "1"
+            os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+            from body import estimate
+            estimate(args.run, args.person_concepts, args.min_free_vram_gb)
         elif args.command == "layout":
             from layout import reconstruct
             anchor = None
