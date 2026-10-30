@@ -1,7 +1,7 @@
-import { animationFor, ensureAnimation, evaluateTransform } from '../model';
-import { repositionTrack, trackPoses, transformSchema } from '../performance/motion';
-import { evaluateProperty, putKey, transformAnimatedSelection } from '../animation/model';
-import type { SceneEntity, Transform } from '../types';
+import { animationFor, ensureAnimation, evaluateTransform } from '../model.ts';
+import { repositionTrack, trackPoses, transformSchema } from '../performance/motion.ts';
+import { evaluateProperty, putKey, transformAnimatedSelection } from '../animation/model.ts';
+import type { SceneEntity, Transform } from '../types.ts';
 
 export interface PoseUpdate { id: string; transform: Transform }
 export type TransformPhase = 'start' | 'change' | 'end' | 'cancel';
