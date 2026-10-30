@@ -71,3 +71,10 @@
 @media (min-width:1700px) { :root { --properties-width: 420px; } }
 @media (max-width:1200px) { :root { --properties-width: 360px; } .chat-messages { padding: 20px 20px 10px; } .model-pill { font-size: 9px; } }
 @media (max-width:850px) { :root { --properties-width: 310px; } .panel-tabs { padding: 0 10px; gap: 2px; } .composer-footer > span { font-size: 8px; } .chat-messages { padding: 18px 16px 8px; } }
+.chat-reference{padding:8px 12px;border-top:1px solid var(--line,#e3e5dc);font-size:12px;max-height:230px;overflow:auto;color:var(--muted,#7f8877)}
+.chat-reference p{margin:5px 0}.chat-reference summary{cursor:pointer;color:var(--ink,#35412f);overflow-wrap:anywhere}
+.reference-candidates{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:8px 0}
+.reference-candidates button{display:flex;flex-direction:column;gap:3px;min-width:0;padding:3px;background:transparent;border:1px solid #e3e5dc;border-radius:5px;font-size:10px;text-align:left}
+.reference-candidates img{width:100%;aspect-ratio:16/9;object-fit:contain;background:#24282d}.reference-candidates small{opacity:.7}
+.chat-reference-view{max-width:min(92vw,1000px);border:1px solid #dfe4d4;border-radius:12px;padding:18px;background:#fafbf7}.chat-reference-view img{display:block;max-width:85vw;max-height:72vh;object-fit:contain}.chat-reference-view p{font-size:12px;color:#67735b}
+.composer-footer [data-chat="attach-reference"]{font-size:11px;padding:4px 5px;white-space:nowrap;color:#687a4d}

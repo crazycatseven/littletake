@@ -605,7 +605,7 @@ syncDocument();
 const referenceDialog = new ReferenceDialog(next => {
   pause(); flushFieldEdit(); const imported=cloneDocument(next);imported.id=nextId('scene',project.scenes);project.scenes.push(imported);project.activeSceneId=imported.id;project.activeShotId=imported.shots[0]?.id??null;selection.active=null;time=0;syncDocument();
   changed('Reference scene loaded · every object and camera is editable'); persist(); stage?.resetView();
-});
+}, async (file, video, cuts) => { await sceneEditor?.attachReference(file, video, cuts); });
 
 function editSelection(updates:PoseUpdate[],phase:TransformPhase,wholeMotion:TransformScope):boolean {
   if(editPreview||performanceSession||storageError)return false;
