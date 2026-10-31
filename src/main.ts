@@ -27,7 +27,7 @@ import { ReferenceDialog } from './reference/dialog';
 import { SceneEditPanel } from './scene-edit/panel';
 import { projectContent, serializeContent, validateProjectContent } from './project/model';
 import { applyProjectOperations } from './scene-edit/operations';
-import { sketchedPath } from './spatial/sketch';
+import { sketchedCameraMove, sketchedPath, withCameraMove } from './spatial/sketch';
 import './project/panel.css';
 import type { SceneSnapshot } from './scene-edit/operations';
 import { type ProjectDocument, ProjectStorage, createProject, parseProject, serializeProject, PROJECT_STORAGE_KEY, MAX_PROJECT_SIZE } from './project/storage';
@@ -469,7 +469,7 @@ function renderInspector() {
   const material='kind' in item?'<div class="inspector-section"><div class="section-label">MATERIAL</div><div class="color-palette">'+colors.map(color=>'<button class="color-swatch '+(item.color===color?'active':'')+'" style="--swatch:'+color+'" data-color="'+color+'" aria-label="Set color '+color+'"></button>').join('')+'<label class="custom-color" title="Custom color"><input type="color" aria-label="Custom object color" id="objectColor" value="'+item.color+'"/></label></div></div>':'';
   $('#inspector').innerHTML=title+links+('kind' in item?visibilityCard([item]):'')+transform+
     ('kind' in item?componentInspector({...item,components:evaluateComponents(item,time)?.map(component=>component.type==='pivot'?{...component,offset:['x','y','z'].map(axis=>propertyValue(item,`pivot.${axis}` as PropertyPath)) as Transform['position']}:component)},Boolean(editPreview)||playing||!!performanceSession||!!item.hidden,performanceSession?.mode==='control',false,group=>keyButton(animationFor(item),group,time,locked),(group,index)=>componentAxisKey(item,group,index,locked)):'')+
-    (isCamera?'<button class="add-motion camera-align" data-action="use-view">'+icon('eye')+'Use current scene view</button>':'')+
+    (isCamera?'<button class="add-motion camera-align" data-action="use-view">'+icon('eye')+'Use current scene view</button><button class="add-motion" data-action="draw-path" title="Drag across the floor; the camera travels it over its shot and keeps the framed subject in view" '+(locked||playing||!!performanceSession||!!editPreview?'disabled':'')+'>'+icon('camera')+'Draw camera move on floor</button>':'')+
     ('kind' in item?'<button class="add-motion" data-action="draw-path" title="Drag across the floor; the object walks the line from the playhead" '+(locked||playing||!!performanceSession||!!item.hidden||!!editPreview?'disabled':'')+'>'+icon('move')+'Draw path on floor</button>':'')+
     material+(shot?shotFields(shot,inspectedDoc):'');
   const pending=[...unkeyed.entries()].filter(([key,draft])=>key.startsWith(`${doc.id}|${item.id}|`)&&Math.abs(draft.time-time)<1e-6);
@@ -749,9 +749,13 @@ app.addEventListener('click',event=>{
     case 'record-performance':beginPerformance();startPerformanceRecord();break;
     case 'focus':stage?.focusSelection();break;
     case 'ground':pause();stage?.dropSelection();break;
-    case 'draw-path':{const item=entity();if(!stage||!item||!('kind' in item))break;if(stage.drawingPath){stage.cancelPath();break;}pause();flushFieldEdit();const sceneId=doc.id,id=item.id;
-      stage.drawPath(points=>{const object=doc.id===sceneId?doc.objects.find(o=>o.id===id):undefined;if(!object){status('That object is no longer in this scene.');return;}
-        try{const path=sketchedPath(doc,object,points,time);replaceContent(applyProjectOperations(projectContent(project),[path.operation],time));changed(`Path set · ${path.length.toFixed(1)} m in ${path.operation.duration.toFixed(1)} s from ${path.operation.start.toFixed(1)} s${path.fitted?' · sped up to finish with the scene':''}`);}catch(error){status((error as Error).message);}
+    case 'draw-path':{const item=entity();if(!stage||!item)break;if(stage.drawingPath){stage.cancelPath();break;}pause();flushFieldEdit();const sceneId=doc.id,id=item.id,isCamera='fov' in item;
+      stage.drawPath(points=>{if(doc.id!==sceneId){status('Switch back to that scene to draw its path.');return;}
+        try{
+          if(isCamera){const camera=doc.cameras.find(c=>c.id===id);if(!camera)throw new Error('That camera is no longer in this scene.');const move=sketchedCameraMove(doc,camera,points,time,activeShot()??null);replaceContent(withCameraMove(projectContent(project),sceneId,id,move.track));changed(`Camera move set · ${move.length.toFixed(1)} m over ${move.duration.toFixed(1)} s from ${move.start.toFixed(1)} s · ${move.subject?'keeps '+move.subject.name+' in frame':'keeps its current aim'}`);return;}
+          const object=doc.objects.find(o=>o.id===id);if(!object)throw new Error('That object is no longer in this scene.');
+          const path=sketchedPath(doc,object,points,time);replaceContent(applyProjectOperations(projectContent(project),[path.operation],time));changed(`Path set · ${path.length.toFixed(1)} m in ${path.operation.duration.toFixed(1)} s from ${path.operation.start.toFixed(1)} s${path.fitted?' · sped up to finish with the scene':''}`);
+        }catch(error){status((error as Error).message);}
       },()=>status('Path drawing cancelled'));break;}
     case 'reset-view':stage?.resetView();break;
     case 'use-view':{const view=stage?.captureView(),item=entity();if(!view||!item||!('fov' in item))break;pause();let saved=false;for(const group of ['position','rotation'] as const)for(const [i,axis] of ['x','y','z'].entries())saved=editProperty(item,`${group}.${axis}` as PropertyPath,view.transform[group][i])||saved;saved=editProperty(item,'fov',clamp(view.fov,10,120))||saved;if(saved)changed('Framing aligned to scene view');else{renderAll();status('Framing previewed · Insert keys to keep it');}break;}

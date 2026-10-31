@@ -65,3 +65,36 @@ test('a drawn path becomes walking motion that faces along the path, from the pl
   assert.equal(again.operation.replaceMotion, true);
   assert.throws(() => sketchedPath(project.scenes[0], actor, [[0, 0, 0], [.05, 0, 0]], 0), /longer path/);
 });
+
+test('a drawn camera move dollies over its shot while keeping a moving subject in frame', async () => {
+  const { createCamera } = await import('../model.ts');
+  const { framedSubject, sketchedCameraMove, withCameraMove } = await import('./sketch.ts');
+  const scene = createEmptyScene('set', 'Set'); scene.duration = 8;
+  const runner: SceneObject = { ...createObject('human', 1), id: 'runner', name: 'Runner', transform: { position: [-2, 0, 0], rotation: [0, 90, 0], scale: [1, 1, 1] },
+    track: { start: 0, duration: 8, from: { position: [-2, 0, 0], rotation: [0, 90, 0], scale: [1, 1, 1] }, to: { position: [4, 0, 0], rotation: [0, 90, 0], scale: [1, 1, 1] } } };
+  const tree: SceneObject = { ...createObject('cylinder', 2), id: 'tree', name: 'Tree', transform: { position: [-6, 1, -3], rotation: [0, 0, 0], scale: [1, 2, 1] } };
+  const camera = createCamera('cam'); camera.transform = { position: [-2, 1.6, 6], rotation: [0, 0, 0], scale: [1, 1, 1] };
+  scene.objects = [runner, tree]; scene.cameras = [camera];
+  scene.shots = [{ id: 'shot', name: 'Shot', cameraId: 'cam', start: 2, duration: 4 }];
+  const project = validateProjectContent({ name: 'Dolly', scenes: [scene] });
+  const set = project.scenes[0];
+  assert.equal(framedSubject(set, set.cameras[0], 0)?.id, 'runner');
+  const stroke: Vec3[] = Array.from({ length: 61 }, (_, i) => [-2 + i * .1, 0, 6]);
+  const move = sketchedCameraMove(set, set.cameras[0], stroke, 0, set.shots[0]);
+  assert.equal(move.subject?.id, 'runner'); assert.equal(move.start, 2); assert.equal(move.duration, 4); near(move.length, 6, .01);
+  const moved = withCameraMove(project, 'set', 'cam', move.track).scenes[0];
+  for (const when of [2, 3.3, 4.5, 6]) {
+    const pose = evaluateTransform(moved.cameras[0], when), eye = new Vector3(...pose.position);
+    near(pose.position[1], 1.6); near(pose.position[0], -2 + 6 * (when - 2) / 4, .02);
+    const look = new Vector3(0, 0, -1).applyEuler(new Euler(...pose.rotation.map(MathUtils.degToRad) as Vec3, 'XYZ'));
+    const runnerAt = new Vector3(...evaluateTransform(moved.objects[0], when).position).add(new Vector3(0, 1.4, 0));
+    assert.ok(look.angleTo(runnerAt.sub(eye)) < MathUtils.degToRad(1), `aimed at the runner at ${when}s`);
+  }
+  // Away from any subject the camera keeps looking where it looked; a camera outside the shot uses the playhead.
+  set.cameras[0].transform.rotation = [0, 180, 0];
+  assert.equal(framedSubject(set, set.cameras[0], 0), null);
+  const free = sketchedCameraMove(set, { ...set.cameras[0], id: 'other' }, stroke, 1, set.shots[0]);
+  assert.equal(free.subject, null); assert.equal(free.start, 1); assert.equal(free.duration, 7);
+  assert.throws(() => sketchedCameraMove(set, set.cameras[0], [[0, 0, 6], [.05, 0, 6]], 0, set.shots[0]), /longer camera path/);
+  assert.throws(() => withCameraMove(project, 'set', 'missing', move.track), /no longer/);
+});
