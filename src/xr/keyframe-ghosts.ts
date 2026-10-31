@@ -8,6 +8,7 @@ export class XRKeyframeGhosts {
   private selection?: XRKeyframeSelection;
   private parts: { mesh: THREE.InstancedMesh; matrices: THREE.Matrix4[] }[] = [];
   private active = -1;
+  private selectedKey = '';
   private zero = new THREE.Matrix4().makeScale(0, 0, 0);
 
   sync(state: XRTimelineState | null, source?: THREE.Object3D): void {
@@ -49,6 +50,14 @@ export class XRKeyframeGhosts {
       }
       this.active = active;
     }
+    const selectedKey=(state?.selectedKeyTimes??[]).join(',');
+    if(selectedKey!==this.selectedKey){
+      for(const {mesh} of this.parts){
+        selection.frames.forEach((frame,index)=>mesh.setColorAt(index,new THREE.Color(state?.selectedKeyTimes?.some(time=>Math.abs(time-frame.time)<1e-6)?'#c9f86b':'#ffffff')));
+        if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
+      }
+      this.selectedKey=selectedKey;
+    }
     this.root.updateMatrixWorld(true);
   }
 
@@ -73,7 +82,7 @@ export class XRKeyframeGhosts {
       mesh.dispose(); // Instance buffers, never the source geometry or textures.
       for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) material.dispose();
     }
-    this.root.clear(); this.parts = []; this.selection = undefined; this.source = undefined; this.active = -1;
+    this.root.clear(); this.parts = []; this.selection = undefined; this.source = undefined; this.active = -1; this.selectedKey = '';
   }
   dispose(): void { this.clear(); this.root.removeFromParent(); }
 }

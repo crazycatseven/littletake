@@ -444,6 +444,7 @@ test('XR controller gestures select, commit once, cancel on tracking loss, and r
     controls.start(session, new THREE.Vector3(0, 0, -3));
     fire('connected', { gripSpace: {} });
     fire('selectstart'); assert.deepEqual(selections, ['object-1']);
+    fire('selectend'); phases.length = 0;
     fire('squeezestart'); grips[0].position.x = .5; controls.update(frame); fire('squeezeend'); fire('squeezeend');
     assert.deepEqual(phases, ['start', 'change', 'end']);
     // Enter through the spatial button, not a private method. At entry the tracked
@@ -515,7 +516,7 @@ test('XR controller gestures select, commit once, cancel on tracking loss, and r
   const reference = new EventTarget();
   const session = Object.assign(new EventTarget(), { visibilityState: 'visible' });
   const renderer = { xr: { getController: (i: number) => controllers[i], getControllerGrip: (i: number) => grips[i], getReferenceSpace: () => reference } } as unknown as THREE.WebGLRenderer;
-  let time = 5, tracked = true;
+  let time = 5, tracked = true, playing = false;
   const modes: boolean[] = [], actions: string[] = [], phases: string[] = [], selections: string[] = [];
   const target = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial());
   target.position.set(0, 0, -2); target.userData.entityId = 'object-1'; target.updateMatrixWorld();
@@ -524,8 +525,8 @@ test('XR controller gestures select, commit once, cancel on tracking loss, and r
   const buttons = Array.from({ length: 6 }, () => ({ pressed: false }));
   const controls = new XRControls(renderer, {
     targets: () => showTarget ? [target] : [], editable: () => true, select: id => selections.push(id), pose: () => pose, transform: (_, __, phase) => { phases.push(phase); return true; },
-    menuState: () => ({ playing: false, canUndo: true }),
-    action: action => actions.push(action), timelineState: () => ({ time, duration: 10, fps: 24 }),
+    menuState: () => ({ playing, canUndo: true }),
+    action: action => {actions.push(action);if(action==='play')playing=!playing;}, timelineState: () => ({ time, duration: 10, fps: 24 }),
     seek: value => { time = value; }, timelineChanged: active => modes.push(active),
   });
   const click = (action: number) => { aimMenu(controls, controllers[0], action); controllers[0].dispatchEvent({ type: 'selectstart' } as never); };
@@ -537,8 +538,13 @@ test('XR controller gestures select, commit once, cancel on tracking loss, and r
     controls.updateView(frame, 0); controls.updateView(frame, 50); assert.equal(time, 5);
     axes[2] = 0; controls.updateView(frame, 100);
     axes[2] = 1; controls.updateView(frame, 150); assert.ok(Math.abs(time - 5.1) < 1e-9);
-    buttons[5].pressed = true; controls.update(frame); assert.deepEqual(actions, []);
+    buttons[5].pressed = true; controls.update(frame); assert.deepEqual(actions, ['play']);assert.equal(playing,true);
+    const playbackTime=time;controls.updateView(frame,175);controls.update(frame);assert.equal(time,playbackTime);assert.equal(actions.length,1);
     buttons[5].pressed = false; controls.update(frame);
+    buttons[5].pressed = true; controls.update(frame);assert.equal(playing,false);assert.deepEqual(actions,['play','play']);
+    buttons[5].pressed = false; controls.update(frame);
+    controls.updateView(frame,180);assert.equal(time,playbackTime); // held stick must return to neutral after pause
+    actions.length=0;
     controllers[0].quaternion.identity(); controllers[0].dispatchEvent({ type: 'squeezestart' } as never);
     grips[0].position.x = 1; controls.updateView(frame, 200); assert.equal(controls.rig.position.x, -1);
     controllers[0].dispatchEvent({ type: 'squeezeend' } as never);
@@ -546,6 +552,7 @@ test('XR controller gestures select, commit once, cancel on tracking loss, and r
     controls.updateView(frame, 200);
     controllers[0].dispatchEvent({ type: 'selectstart' } as never);
     assert.deepEqual(selections, ['object-1']);
+    controllers[0].dispatchEvent({ type: 'selectend' } as never); phases.length = 0;
     controllers[0].dispatchEvent({ type: 'squeezestart' } as never);
     const grabTime = time; grips[0].position.x = .5;
     controls.updateView(frame, 210); controls.update(frame);
@@ -579,9 +586,11 @@ test('VR trigger selects ghost poses and timeline diamonds without starting docu
   target.position.set(1, 0, -3); target.userData.entityId = 'cube';
   const selection = { id: 'cube', name: 'Cube', frames: [0, 1, 2].map(time => ({ time, transform: { position: [time, 0, -3], rotation: [0, 0, 0], scale: [1, 1, 1] } as Transform })) };
   let time = 1, edits = 0, hasSelection = true;
+  const deletions:(number[]|undefined)[]=[];
   const controls = new XRControls(renderer, {
     targets: () => [target], editable: () => true, select: () => {}, pose: () => pose,
     transform: () => { edits++; return true; }, action: () => {}, timelineObject: () => target,
+    deleteKeyframe:times=>deletions.push(times),
     timelineState: () => ({ time, duration: 2, fps: 24, selection: hasSelection ? selection : undefined }),
     seek: value => { time = value; target.position.x = value; target.updateMatrixWorld(); },
   });
@@ -601,7 +610,21 @@ test('VR trigger selects ghost poses and timeline diamonds without starting docu
     const point = panel.localToWorld(new THREE.Vector3(.96 * (1376 / 1440 - .5), .96 * (200 - 174) / 1440, 0));
     const direction = controls.rig.worldToLocal(point).sub(controllers[0].position).normalize();
     controllers[0].quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), direction);
-    fire('selectstart'); assert.equal(time, 2); assert.equal(edits, 0);
+    fire('selectstart'); fire('selectend'); assert.equal(time, 2); assert.equal(edits, 0);
+    fire('selectstart'); fire('selectend'); // Toggle the second key off, then back on.
+    fire('selectstart'); fire('selectend');
+    const aimTimeline=(point:THREE.Vector3)=>controllers[0].quaternion.setFromUnitVectors(new THREE.Vector3(0,0,-1),controls.rig.worldToLocal(point).sub(controllers[0].position).normalize());
+    const deleteButton=controls.timelineRoot.children.find(child=>child.userData.xrAction===XR_DELETE_KEY)!;
+    aimTimeline(deleteButton.getWorldPosition(new THREE.Vector3()));fire('selectstart');assert.deepEqual(deletions,[[0,2]]);
+    aimTimeline(panel.localToWorld(new THREE.Vector3(0,-.045,0)));fire('selectstart');fire('selectend'); // Empty timeline background clears selection.
+    aimTimeline(deleteButton.getWorldPosition(new THREE.Vector3()));fire('selectstart');assert.equal(deletions[1],undefined);
+    const aimTime=(t:number)=>aimTimeline(panel.localToWorld(new THREE.Vector3(.96*((64+1312*t/2)/1440-.5),-.045,0)));
+    const dragFrame={getPose:()=>({})} as unknown as XRFrame;
+    aimTime(.1);fire('selectstart');aimTime(1.9);controls.update(dragFrame);fire('selectend');
+    aimTimeline(deleteButton.getWorldPosition(new THREE.Vector3()));fire('selectstart');assert.deepEqual(deletions[2],[1]);
+    aimTime(2);fire('selectstart');aimTime(0);controls.update(dragFrame);fire('selectend');
+    aimTimeline(deleteButton.getWorldPosition(new THREE.Vector3()));fire('selectstart');assert.deepEqual(deletions[3],[0,1,2]);
+    assert.equal(edits,0); // Range selection never starts an object transform.
     hasSelection = false; controls.updateView(undefined, 100);
     assert.equal(controls.keyframeGhosts.root.children.length, 0);
     hasSelection = true; controls.updateView(undefined, 200);
@@ -715,6 +738,8 @@ test('near sphere replaces the ray, grips the highlighted object and restores di
     grips[0].position.z = -.4; controls.update(frame); assert.equal(controls.nearSelection.root.children[0].visible, true);
     fire('selectstart'); assert.deepEqual(selected, ['near']);
     fire('squeezestart'); grips[0].position.x += .2; controls.update(frame); fire('squeezeend');
+    assert.deepEqual(phases, ['near:start', 'near:change']); // Grip release cannot end a trigger-owned grab.
+    fire('selectend'); fire('selectend');
     assert.deepEqual(phases, ['near:start', 'near:change', 'near:end']); assert.ok(Math.abs(near.position.x - .5) < 1e-6);
     tracked = false; controls.update(frame); assert.equal(sphere.visible, false); assert.equal(controls.nearSelection.root.children[0].visible, false);
     tracked = true; grips[0].position.set(0, 0, 0); controls.update(frame); assert.equal(ray.visible, true); assert.equal(sphere.visible, false);
@@ -754,7 +779,7 @@ test('XR feedback distinguishes hover, selection and held objects, then clears o
     fire('connected', { gripSpace: {}, targetRaySpace: {} }); controls.update(frame);
     const pointer = controllers[0].getObjectByName('XR pointer')!;
     assert.equal(pointer.visible, true); assert.ok(colors().includes('c9f86b'));
-    fire('selectstart'); controllers[0].rotation.y = Math.PI / 2; controls.update(frame);
+    fire('selectstart'); fire('selectend'); controllers[0].rotation.y = Math.PI / 2; controls.update(frame);
     assert.ok(colors().includes('62dded')); assert.ok(!colors().includes('c9f86b'));
     controllers[0].quaternion.identity(); fire('squeezestart'); grips[0].position.x = .1; controls.update(frame);
     assert.ok(colors().includes('ffbd66')); assert.equal(target.position.x, .1);

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { MenuTexture } from './texture';
 import { keyframeAtTimeline, xrTimelineSvg, type XRTimelineState } from './timeline';
+import type { XRRecordingState } from './recording';
 
 export interface XRMenuState { playing: boolean; canUndo: boolean; following: boolean; hasCamera: boolean; scale: number; timeline?: boolean; dragging?: boolean; timelineDragging?: boolean }
 export const XR_MENU_TOGGLE = 4;
@@ -8,6 +9,16 @@ export const XR_MENU_DRAG = 6;
 export const XR_TIMELINE_DRAG = 7;
 export const XR_ADD_KEY = 8;
 export const XR_DELETE_KEY = 9;
+export const XR_RECORD = 10, XR_RECORD_PREVIEW = 11, XR_RECORD_APPLY = 12, XR_RECORD_DISCARD = 13;
+export function xrRecordingSvg(state: XRRecordingState, hovered: ReadonlySet<number> = new Set()): string {
+  const review = state.mode === 'review', active = state.mode !== 'idle';
+  const status = state.mode === 'recording' ? 'Recording · Release to smooth and review' : state.mode === 'armed' ? 'Ready · Hold trigger or grip on the selected object' : review ? `Smoothed take · ${state.samples} samples → ${state.keys} pose keys · Apply replaces this time range` : 'Single-hand recording · Select an object, then Record';
+  const labels = [state.mode === 'recording' ? 'Recording' : state.mode === 'armed' ? 'Armed' : 'Record', state.previewing ? 'Pause preview' : 'Preview', 'Apply', 'Discard'];
+  const enabled = [!active && state.canRecord, review, review, active && state.mode !== 'recording'];
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="180" viewBox="0 0 1440 180"><rect x="4" y="4" width="1432" height="172" rx="20" fill="#182b26" stroke="${active ? '#ffbd66' : '#587167'}" stroke-width="3"/>
+    <g font-family="Segoe UI, Arial, sans-serif"><circle cx="36" cy="36" r="8" fill="${state.mode === 'recording' ? '#ff837a' : active ? '#ffbd66' : '#789084'}"/><text x="58" y="45" fill="#f6f3e9" font-size="26">${status}</text>
+    ${labels.map((label,i)=>{const x=24+i*352,hover=enabled[i]&&hovered.has(XR_RECORD+i);return `<rect x="${x}" y="68" width="336" height="88" rx="12" fill="${hover?'#c9f86b':'#2b403b'}" stroke="${enabled[i]?'#c9f86b':'#587167'}" stroke-width="${hover?5:2}"/><text x="${x+168}" y="123" text-anchor="middle" fill="${hover?'#10231e':enabled[i]?'#f6f3e9':'#a4b5ae'}" font-size="32">${label}</text>`;}).join('')}</g></svg>`;
+}
 const icons = {
   camera: '<rect x="-24" y="-16" width="33" height="32" rx="5"/><path d="m9-8 16-9v34L9 8"/>',
   free: '<path d="M-24-9v-14h14M10-23h14v14M24 9v14H10M-10 23h-14V9"/><circle r="8"/>',
@@ -57,6 +68,9 @@ export class XRMenu {
   private panelTexture = new MenuTexture(720, 320);
   private handleTexture = new MenuTexture(200, 200);
   private timelineTexture = new MenuTexture(1440, 400);
+  private recordingTexture = new MenuTexture(1440, 180);
+  private recordingPanel: THREE.Mesh;
+  private recordingButtons: THREE.Mesh[] = [];
   private timelineState: XRTimelineState | null = null;
   private hoveredKey?: number;
   private timelinePanel: THREE.Mesh;
@@ -84,6 +98,7 @@ export class XRMenu {
     this.timelinePanel = this.plane(.96, .96 * 400 / 1440, this.timelineTexture.texture);
     this.timelineRoot.add(this.timelinePanel); this.timelineRoot.visible = false;
     this.timelinePanel.userData.xrAction = -1; this.timelinePanel.visible = false;
+    this.timelinePanel.userData.xrTimeline = true;
     this.timelineTitle = this.plane(.96 * 1392 / 1440, .96 * 80 / 1440);
     this.timelineTitle.position.set(0, .96 * (200 - 56) / 1440, .002); this.timelineTitle.userData.xrAction = XR_TIMELINE_DRAG;
     this.addKey = this.plane(.96 * 376 / 1440, .96 * 80 / 1440);
@@ -93,13 +108,21 @@ export class XRMenu {
     this.deleteKey.position.set(.96 * (788 - 720) / 1440, .96 * (200 - 330) / 1440, .002);
     this.deleteKey.userData.xrAction = XR_DELETE_KEY;
     this.timelineRoot.add(this.timelineTitle, this.addKey, this.deleteKey);
+    this.recordingPanel = this.plane(.96, .12, this.recordingTexture.texture);
+    this.recordingPanel.position.set(0, -.21, 0); this.recordingPanel.userData.xrAction = -1;
+    this.timelineRoot.add(this.recordingPanel);
+    [XR_RECORD, XR_RECORD_PREVIEW, XR_RECORD_APPLY, XR_RECORD_DISCARD].forEach((action,index)=>{
+      const button=this.plane(.96*336/1440,.96*88/1440);
+      button.position.set(.96*(192+index*352-720)/1440,-.21+.96*(90-112)/1440,.002);
+      button.userData.xrAction=action;this.recordingButtons.push(button);this.timelineRoot.add(button);
+    });
     this.repaint();
   }
   private plane(width: number, height: number, map?: THREE.Texture): THREE.Mesh {
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ map: map ?? null, transparent: true, opacity: map ? 1 : 0, depthTest: false, depthWrite: false, toneMapped: false }));
     mesh.renderOrder = 100; mesh.frustumCulled = false; this.root.add(mesh); return mesh;
   }
-  targets(): THREE.Mesh[] { return [...(this.expanded ? [this.handle, this.title, ...this.buttons, this.panel] : [this.handle]), ...(this.timelineRoot.visible && this.timelinePanel.visible ? [this.timelineTitle, this.addKey, this.deleteKey, this.timelinePanel] : [])]; }
+  targets(): THREE.Mesh[] { return [...(this.expanded ? [this.handle, this.title, ...this.buttons, this.panel] : [this.handle]), ...(this.timelineRoot.visible && this.timelinePanel.visible ? [this.timelineTitle, this.addKey, this.deleteKey, this.timelinePanel, ...(this.recordingPanel.visible ? [...this.recordingButtons,this.recordingPanel] : [])] : [])]; }
   nearTitle(point: THREE.Vector3, radius: number, timeline = false): THREE.Vector3 | undefined {
     if (timeline ? !this.timelineRoot.visible : !this.expanded || !this.root.visible) return;
     const title = timeline ? this.timelineTitle : this.title;
@@ -111,6 +134,14 @@ export class XRMenu {
     if (closest.distanceTo(point) <= radius) return closest;
   }
   enabled(action: number): boolean {
+    const recording=this.timelineState?.recording,active=!!recording&&recording.mode!=='idle';
+    if(active && [3,5,XR_ADD_KEY,XR_DELETE_KEY].includes(action))return false;
+    if(action>=XR_RECORD&&action<=XR_RECORD_DISCARD){
+      if(!this.timelineRoot.visible||!recording)return false;
+      if(action===XR_RECORD)return !active&&!!recording.canRecord;
+      if(action===XR_RECORD_DISCARD)return active&&recording.mode!=='recording';
+      return recording.mode==='review';
+    }
     if (action === XR_TIMELINE_DRAG) return this.timelineRoot.visible;
     if (action === XR_ADD_KEY) return this.timelineRoot.visible && !!this.timelineState?.canAddKey;
     if (action === XR_DELETE_KEY) return this.timelineRoot.visible && !!this.timelineState?.canDeleteKey;
@@ -119,6 +150,7 @@ export class XRMenu {
   setTimeline(state: XRTimelineState | null): void {
     this.timelineState = state;
     this.timelineRoot.visible = !!state; this.timelinePanel.visible = !!state;
+    this.recordingPanel.visible=!!state?.recording;this.recordingButtons.forEach(button=>button.visible=!!state?.recording);
     this.repaintTimeline();
   }
   keyframeTime(hit: THREE.Intersection): number | undefined {
@@ -150,6 +182,7 @@ export class XRMenu {
     this.handleTexture.draw(xrMenuHandleSvg(this.expanded, this.hovered.has(XR_MENU_TOGGLE)));
   }
   private repaintTimeline(): void {
+    if(this.timelineState?.recording)this.recordingTexture.draw(xrRecordingSvg(this.timelineState.recording,this.hovered));
     if (this.timelineState) this.timelineTexture.draw(xrTimelineSvg(this.timelineState, this.hoveredKey, {
       titleHover: this.hovered.has(XR_TIMELINE_DRAG), dragging: this.state.timelineDragging,
       addHover: this.hovered.has(XR_ADD_KEY),
@@ -157,7 +190,7 @@ export class XRMenu {
     }));
   }
   dispose(): void {
-    this.root.removeFromParent(); this.panelTexture.dispose(); this.handleTexture.dispose(); this.timelineTexture.dispose();
+    this.root.removeFromParent(); this.panelTexture.dispose(); this.handleTexture.dispose(); this.timelineTexture.dispose();this.recordingTexture.dispose();
     this.timelineRoot.removeFromParent();
     for (const child of [...this.root.children, ...this.timelineRoot.children]) { const mesh = child as THREE.Mesh; mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose(); }
   }

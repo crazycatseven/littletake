@@ -1,16 +1,42 @@
 import { animationFor, evaluateTransform, ensureAnimation } from '../model';
 import { removePropertyKeys, type PropertyPath } from '../animation/model';
 import type { SceneEntity, Transform } from '../types';
+import type { XRRecordingState } from './recording';
 
 export interface XRKeyframe { time: number; transform: Transform }
 export interface XRKeyframeSelection { id: string; name: string; frames: XRKeyframe[] }
-export interface XRTimelineState { time: number; duration: number; fps: number; selection?: XRKeyframeSelection; canAddKey?: boolean; canDeleteKey?: boolean }
+export interface XRTimelineState { time: number; duration: number; fps: number; selection?: XRKeyframeSelection; selectedKeyTimes?: number[]; keyDragRange?: [number, number]; canAddKey?: boolean; canDeleteKey?: boolean; recording?: XRRecordingState }
+
+/** Selection is transient, object-scoped, and pruned when keys are edited or undone. */
+export class XRKeyframeMultiSelection {
+  private id?: string;
+  times: number[] = [];
+  sync(selection?: XRKeyframeSelection): void {
+    if(this.id!==selection?.id){this.times=[];this.id=selection?.id;}
+    this.times=this.times.filter(time=>selection?.frames.some(frame=>Math.abs(frame.time-time)<1e-6));
+  }
+  toggle(selection: XRKeyframeSelection, time: number): void {
+    this.sync(selection);
+    const frame=selection.frames.find(frame=>Math.abs(frame.time-time)<1e-6);if(!frame)return;
+    if(this.times.some(value=>Math.abs(value-frame.time)<1e-6))this.times=this.times.filter(value=>Math.abs(value-frame.time)>=1e-6);
+    else this.times=[...this.times,frame.time].sort((a,b)=>a-b);
+  }
+  clear(): void { this.times=[];this.id=undefined; }
+  range(selection: XRKeyframeSelection, from: number, to: number, previous: readonly number[]): void {
+    this.sync(selection);
+    const low=Math.min(from,to)-1e-6,high=Math.max(from,to)+1e-6;
+    this.times=selection.frames.filter(frame=>frame.time>=low&&frame.time<=high||previous.some(time=>Math.abs(time-frame.time)<1e-6)).map(frame=>frame.time);
+  }
+}
 
 /** Delete the merged marker, including every property keyed at this time. */
 export function deleteXRKeyframe(entity: SceneEntity, time: number): SceneEntity | undefined {
+  return deleteXRKeyframes(entity,[time]);
+}
+export function deleteXRKeyframes(entity: SceneEntity, times: readonly number[]): SceneEntity | undefined {
   const animation = animationFor(entity);
   const matches = Object.entries(animation?.curves ?? {}).flatMap(([path, keys]) =>
-    (keys ?? []).filter(key => Math.abs(key.time - time) < 1e-6).map(key => ({ path: path as PropertyPath, time: key.time })));
+    (keys ?? []).filter(key => times.some(time=>Math.abs(key.time-time)<1e-6)).map(key => ({ path: path as PropertyPath, time: key.time })));
   if (!matches.length) return;
   const copy = structuredClone(entity), target = ensureAnimation(copy);
   for (const match of matches) removePropertyKeys(target, [match.path], match.time);
@@ -62,9 +88,10 @@ export function xrTimelineSvg(state: XRTimelineState, hovered?: number, ui: { ti
   const ticks = Array.from({ length: 6 }, (_, i) => `<path d="M${64 + i * 262.4} 210v14" stroke="#789084"/><text x="${64 + i * 262.4}" y="260" text-anchor="middle" fill="#c7d6ce" font-size="28">${(state.duration * i / 5).toFixed(1)}s</text>`).join('');
   const frames = state.selection?.frames ?? [];
   const markers = frames.map(frame => {
+    const selected=state.selectedKeyTimes?.some(time=>Math.abs(time-frame.time)<1e-6);
     const at = 64 + 1312 * frame.time / (state.duration || 1), active = Math.abs(state.time - frame.time) < 1e-6;
-    const hover = hovered === frame.time, radius = hover || active ? 24 : 20;
-    return `<path d="M${at} ${174 - radius}l${radius} ${radius}-${radius} ${radius}-${radius}-${radius}Z" fill="${hover ? '#c9f86b' : active ? '#62dded' : '#2b403b'}" stroke="${active || hover ? '#f6f3e9' : '#d7e9b2'}" stroke-width="${active || hover ? 5 : 4}"/>${active || hover ? `<circle cx="${at}" cy="174" r="6" fill="#10231e"/>` : ''}`;
+    const hover = hovered === frame.time, radius = hover || active || selected ? 24 : 20;
+    return `<path d="M${at} ${174 - radius}l${radius} ${radius}-${radius} ${radius}-${radius}-${radius}Z" fill="${hover || selected ? '#c9f86b' : active ? '#62dded' : '#2b403b'}" stroke="${active || hover || selected ? '#f6f3e9' : '#d7e9b2'}" stroke-width="${active || hover || selected ? 5 : 4}"/>${selected ? `<path d="m${at-10} 174 7 7 14-16" fill="none" stroke="#10231e" stroke-width="5" stroke-linecap="round"/>` : active || hover ? `<circle cx="${at}" cy="174" r="6" fill="#10231e"/>` : ''}`;
   }).join('');
   const label = state.selection ? `${state.selection.name.slice(0, 40)}${state.selection.name.length > 40 ? '…' : ''} · ${frames.length} keyframes` : 'Select an object to see its keyframes';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="400" viewBox="0 0 1440 400">
@@ -72,13 +99,14 @@ export function xrTimelineSvg(state: XRTimelineState, hovered?: number, ui: { ti
     <g font-family="Segoe UI, Arial, sans-serif">${ui.titleHover || ui.dragging ? `<rect x="24" y="16" width="1392" height="80" rx="12" fill="${ui.dragging ? '#ffbd66' : '#c9f86b'}"/>` : ''}<text x="64" y="72" fill="${ui.titleHover || ui.dragging ? '#10231e' : '#d7e9b2'}" font-size="36" font-weight="600">Timeline</text>
     <text x="300" y="72" fill="${ui.titleHover || ui.dragging ? '#10231e' : '#c7d6ce'}" font-size="27">${ui.dragging ? 'Release to place' : ui.titleHover ? 'Hold grip to move' : 'Grip to move'}</text>
     <text x="1376" y="72" text-anchor="end" fill="${ui.titleHover || ui.dragging ? '#10231e' : '#f6f3e9'}" font-size="36">${state.time.toFixed(2)} / ${state.duration.toFixed(2)} s</text>
-    <text x="64" y="116" fill="#c7d6ce" font-size="27">${escapeXml(label)}</text>
+    <text x="64" y="116" fill="#c7d6ce" font-size="27">${escapeXml(label)}${state.selectedKeyTimes?.length ? ` · ${state.selectedKeyTimes.length} selected` : ''}</text>
+    ${state.keyDragRange ? `<rect x="${64+1312*Math.min(...state.keyDragRange)/(state.duration||1)}" y="132" width="${1312*Math.abs(state.keyDragRange[1]-state.keyDragRange[0])/(state.duration||1)}" height="80" rx="8" fill="#c9f86b" fill-opacity=".2" stroke="#c9f86b" stroke-width="3"/>` : ''}
     <rect x="64" y="164" width="1312" height="20" rx="10" fill="#587167"/><rect x="64" y="164" width="${1312 * progress}" height="20" rx="10" fill="#c9f86b"/>
     <path d="M${x} 134v74" stroke="#10231e" stroke-width="12"/><path d="M${x} 134v74" stroke="#f6f3e9" stroke-width="6"/><path d="m${x - 10} 130h20l-10 12Z" fill="#f6f3e9"/>${markers}${ticks}
     <text x="64" y="344" fill="#c7d6ce" font-size="27">Frame ${Math.round(state.time * state.fps)} · ${state.fps} fps</text>
-    <text x="64" y="380" fill="#c7d6ce" font-size="25">${hovered !== undefined ? `Jump to ${hovered.toFixed(2)} s · Press trigger` : 'Thumbstick to scrub · Trigger a key to jump'}</text>
+    <text x="64" y="380" fill="#c7d6ce" font-size="25">${state.keyDragRange ? 'Release trigger to finish selection' : hovered !== undefined ? `Trigger: select / drag · ${hovered.toFixed(2)} s` : state.selectedKeyTimes?.length ? 'Trigger blank timeline to clear selection' : 'Hold trigger and drag to select keys'}</text>
     <rect x="600" y="290" width="376" height="80" rx="12" fill="${state.canDeleteKey && ui.deleteHover ? '#efc9b4' : '#253432'}" stroke="${state.canDeleteKey ? '#efc9b4' : '#789084'}" stroke-width="${state.canDeleteKey && ui.deleteHover ? 5 : 2}"/>
-    <text x="788" y="342" text-anchor="middle" fill="${state.canDeleteKey ? ui.deleteHover ? '#10231e' : '#efc9b4' : '#a4b5ae'}" font-size="32" font-weight="600">Delete keyframe</text>
+    <text x="788" y="342" text-anchor="middle" fill="${state.canDeleteKey ? ui.deleteHover ? '#10231e' : '#efc9b4' : '#a4b5ae'}" font-size="32" font-weight="600">${state.selectedKeyTimes?.length ? `Delete ${state.selectedKeyTimes.length} keys` : 'Delete keyframe'}</text>
     <rect x="1000" y="290" width="376" height="80" rx="12" fill="${state.canAddKey ? ui.addHover ? '#c9f86b' : '#35554d' : '#253432'}" stroke="${state.canAddKey ? '#c9f86b' : '#789084'}" stroke-width="${ui.addHover && state.canAddKey ? 5 : 2}"/>
     <text x="1188" y="342" text-anchor="middle" fill="${state.canAddKey ? ui.addHover ? '#10231e' : '#f6f3e9' : '#a4b5ae'}" font-size="32" font-weight="600">${!state.selection ? 'Select an object' : frames.some(frame => Math.abs(frame.time - state.time) < 1e-6) ? 'Update keyframe' : '+ Keyframe'}</text></g></svg>`;
 }
