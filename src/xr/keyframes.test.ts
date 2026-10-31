@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { XRKeyframeReader, keyframeAtTimeline, xrTimelineSvg, deleteXRKeyframe } from './timeline';
+import { XRKeyframeReader, XRKeyframeMultiSelection, keyframeAtTimeline, xrTimelineSvg, deleteXRKeyframe, deleteXRKeyframes } from './timeline';
+import { History } from '../model';
 import { XRKeyframeGhosts } from './keyframe-ghosts';
 import type { SceneObject } from '../types';
 
@@ -14,6 +15,25 @@ function object(): SceneObject {
     } },
   };
 }
+
+test('key multi-selection toggles, prunes stale times and clears when the object changes', () => {
+  const reader=new XRKeyframeReader(), selection=reader.read(object(),3)!, selected=new XRKeyframeMultiSelection();
+  selected.toggle(selection,0);selected.toggle(selection,2);assert.deepEqual(selected.times,[0,2]);
+  selected.toggle(selection,2+1e-9);assert.deepEqual(selected.times,[0]);
+  selected.toggle(selection,9);assert.deepEqual(selected.times,[0]);
+  selected.sync({...selection,frames:selection.frames.filter(frame=>frame.time!==0)});assert.deepEqual(selected.times,[]);
+  selected.toggle(selection,1);selected.sync({...selection,id:'another'});assert.deepEqual(selected.times,[]);
+});
+
+test('batch key deletion preserves unselected keys and is one undoable change', () => {
+  const item=object(), original=structuredClone(item), history=new History(item);
+  const result=deleteXRKeyframes(item,[0,2,2])!;
+  assert.deepEqual(new XRKeyframeReader().read(result,3)!.frames.map(frame=>frame.time),[1]);
+  assert.deepEqual(result.animation!.curves['rotation.y'],original.animation!.curves['rotation.y']!.slice(1));
+  assert.deepEqual(item,original);
+  history.commit(result as SceneObject);assert.deepEqual(history.undo(),original);assert.deepEqual(history.redo(),result);
+  assert.equal(deleteXRKeyframes(item,[]),undefined);
+});
 
 test('deleting a merged XR marker removes only its property keys and refreshes previews', () => {
   const item = object(), original = structuredClone(item), reader = new XRKeyframeReader();
@@ -88,6 +108,9 @@ test('keyframe ghosts preserve source resources, use world poses and hide the cu
   ghosts.sync({ time: 1, duration: 3, fps: 24, selection }, source);
   mesh.getMatrixAt(1, matrix); assert.equal(matrix.determinant(), 0); assert.equal(ghosts.timeAt(hit), undefined);
   assert.equal(ghosts.boundsAt(1), undefined);
+  ghosts.sync({time:1,duration:3,fps:24,selection,selectedKeyTimes:[0,2]},source);
+  const color=new THREE.Color();mesh.getColorAt(0,color);assert.equal(color.getHexString(),'c9f86b');
+  mesh.getColorAt(1,color);assert.equal(color.getHexString(),'ffffff');
   ghosts.sync({ time: 2, duration: 3, fps: 24, selection }, source);
   mesh.getMatrixAt(1, matrix); assert.ok(Math.abs(matrix.determinant() - 1) < 1e-6);
   (mesh.material as THREE.Material).addEventListener('dispose', () => { ghostMaterialDisposed = true; });

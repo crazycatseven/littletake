@@ -14,7 +14,7 @@ export function xrControllerIconSvg(action: 'undo' | 'play' | 'menu', playing = 
 }
 
 export function xrLeftHintsSvg(fallback: boolean): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="240" viewBox="0 0 640 240"><rect x="4" y="4" width="632" height="232" rx="24" fill="#182b26" stroke="#c9f86b" stroke-width="5"/><g font-family="Segoe UI, Arial, sans-serif" fill="#f6f3e9" font-size="38" font-weight="600"><text x="32" y="66">X  Undo</text><text x="300" y="66">Y  Play / Pause</text><text x="32" y="137" fill="#c9f86b">${fallback ? 'Stick press' : 'Menu key'}  ·  Modes</text><text x="32" y="203" font-size="30" fill="#c7d6ce">Trigger: select  ·  Grip: move</text></g></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="240" viewBox="0 0 640 240"><rect x="4" y="4" width="632" height="232" rx="24" fill="#182b26" stroke="#c9f86b" stroke-width="5"/><g font-family="Segoe UI, Arial, sans-serif" fill="#f6f3e9" font-size="38" font-weight="600"><text x="32" y="66">X  Undo</text><text x="300" y="66">Y  Play / Pause</text><text x="32" y="137" fill="#c9f86b">${fallback ? 'Stick press' : 'Menu key'}  ·  Modes</text><text x="32" y="203" font-size="30" fill="#c7d6ce">Trigger / Grip: grab</text></g></svg>`;
 }
 
 type ButtonKey = 'x' | 'y' | 'menu';

@@ -1,4 +1,5 @@
-import { XRKeyframeReader, deleteXRKeyframe } from './xr/timeline';
+import { XRKeyframeReader, deleteXRKeyframes } from './xr/timeline';
+import { XRRecording, type XRRecordAction } from './xr/recording';
 import './style.css';
 import { Stage } from './stage';
 import { EditorSelection, type SelectionMode } from './placement/selection';
@@ -129,6 +130,7 @@ let assetSaveBusy = false;
 let assetProjectToken = crypto.randomUUID();
 let assetEditor: AssetEditor | null = null;
 let performanceSession: PerformanceSession | null = null;
+let xrRecording: XRRecording | null = null;
 let storageAvailable = true;
 let timelineOpen = false;
 let timelineHeight = window.innerHeight <= 720 ? 180 : 220;
@@ -363,6 +365,7 @@ function keyTransform(item:SceneEntity):void {
 }
 const xrKeyframes = new XRKeyframeReader();
 function syncStage() { const item=entity(), visibleDoc=sceneWithDrafts(visibleScene()),session=performanceSession;
+  if(xrRecording && xrRecording.mode!=='armed')visibleDoc.objects=visibleDoc.objects.map(object=>object.id===xrRecording!.before.id?{...object,track:null,animation:undefined,transform:xrRecording!.preview(time)}:object);
   const component=inputController(session?.before.components);stage?.setControlled(session?{id:session.before.id,pose:session.preview(time),world:component?.type==='movement'&&component.space==='world'}:null);
   stage?.update(visibleDoc,Math.min(time,visibleDoc.duration),selection.ids,Boolean(editPreview) || !!session || playing, editPreview ? previewShotId : project.activeShotId,(editPreview??project).assets??[]); }
 function seek(value: number) { time=clamp(value,0,visibleScene().duration); renderTime(); syncStage(); if(!playing)renderInspector(); }
@@ -607,6 +610,41 @@ const referenceDialog = new ReferenceDialog(next => {
   changed('Reference scene loaded · every object and camera is editable'); persist(); stage?.resetView();
 }, async (file, video, cuts) => { await sceneEditor?.attachReference(file, video, cuts); });
 
+function xrRecordAction(action:XRRecordAction):void {
+  try {
+    if(action==='record'){
+      const item=entity();
+      if(xrRecording||!item||!('kind' in item)||item.hidden||playing||transformEdit||editPreview||performanceSession||storageError||unkeyed.size)return;
+      flushFieldEdit();pause();xrRecording=new XRRecording(item,time,doc.duration);
+      status('Recording armed · Hold trigger or grip on the selected object, move it, then release to review');
+    }else if(action==='discard'){
+      if(!xrRecording)return;time=xrRecording.start;xrRecording=null;status('Recording discarded · Original animation kept');
+    }else if(action==='preview')xrRecording?.togglePreview();
+    else if(action==='apply'){
+      if(!xrRecording||xrRecording.mode!=='review')return;
+      const item=entity(xrRecording.before.id);
+      if(!item||JSON.stringify(item)!==JSON.stringify(xrRecording.before))throw new Error('The object changed. Discard this take and record again.');
+      const next=xrRecording.apply();Object.assign(item,next);xrRecording=null;
+      selectedPropertyKey=null;changed('XR recording applied · Smoothed motion keys · Undo available');return;
+    }
+    if(xrRecording)time=xrRecording.time;renderTime();syncStage();
+  }catch(error){status(error instanceof Error?error.message:'Recording failed');}
+}
+function xrTransform(id:string,pose:Transform,phase:TransformPhase):boolean {
+  const recording=xrRecording;
+  if(!recording)return editSelection([{id,transform:pose}],phase,'keyframe-pose');
+  if(id!==recording.before.id)return false;
+  try{
+    if(phase==='start'){if(recording.mode!=='armed')return false;recording.begin(performance.now());}
+    else if(phase==='change')recording.sample(pose,performance.now());
+    else if(phase==='end'){recording.sample(pose,performance.now());recording.stop();}
+    else recording.cancelGrip();
+    time=recording.time;renderTime();syncStage();
+    if(recording.mode==='review')status('Smoothed take ready · Preview, Apply or Discard');
+    return true;
+  }catch(error){recording.cancelGrip();time=recording.time;syncStage();status(error instanceof Error?error.message:'Recording failed');return false;}
+}
+
 function editSelection(updates:PoseUpdate[],phase:TransformPhase,wholeMotion:TransformScope):boolean {
   if(editPreview||performanceSession||storageError)return false;
   if(phase==='start'){
@@ -646,30 +684,35 @@ try {
     onFrame:tick,
     canEnterXR:()=>!assetEditor&&!editPreview&&!performanceSession&&!storageError&&!unkeyed.size&&!document.querySelector('dialog[open]'),
     onXRChange:active=>{
+      if(!active && xrRecording){time=xrRecording.start;xrRecording=null;renderAll();}
       pause();flushFieldEdit();lastFrame=performance.now();
       if(active)sceneEditor?.session.cancel('VR opened. Retry after returning to the desktop editor.');
       app.classList.toggle('xr-presenting',active);
       app.querySelectorAll<HTMLElement>(':scope > header,:scope > main,:scope > .timeline-panel,:scope > footer').forEach(element=>element.inert=active);
       persist();
     },
-    onXRAction:action=>{if(action==='play')togglePlay();else{flushFieldEdit();restore(history.undo());}},
-    xrTimelineState:()=>({time,duration:visibleScene().duration,fps:fps(),selection:xrKeyframes.read(sceneEntity(visibleScene(),selection.active),visibleScene().duration)}),
-    onXRSeek:seek,
+    onXRAction:action=>{if(xrRecording)return;if(action==='play')togglePlay();else{flushFieldEdit();restore(history.undo());}},
+    xrTimelineState:()=>({time,duration:visibleScene().duration,fps:fps(),selection:xrKeyframes.read(xrRecording?.keyframeEntity()??sceneEntity(visibleScene(),selection.active),visibleScene().duration),recording:xrRecording?.state()??{mode:'idle',canRecord:!!entity()&&'kind' in entity()!&&!playing&&!transformEdit&&!unkeyed.size&&!storageError&&doc.duration-time>=.1}}),
+    onXRSeek:value=>{if(xrRecording){if(xrRecording.mode!=='review')return;xrRecording.previewing=false;xrRecording.time=value;}seek(value);},
+    onXRTransform:xrTransform,
+    onXRRecordAction:xrRecordAction,
     onXRAddKeyframe:()=>{
+      if(xrRecording)return;
       const item=entity();
       if(!item||!('kind' in item)||item.hidden||playing||transformEdit||editPreview||performanceSession||storageError||assetEditor)return;
       try{flushFieldEdit();keyTransform(item);}catch(error){status(error instanceof Error?error.message:'Could not add keyframe');}
     },
-    onXRDeleteKeyframe:()=>{
+    onXRDeleteKeyframe:times=>{
+      if(xrRecording)return;
       const item=entity();
       if(!item||!('kind' in item)||item.hidden||playing||transformEdit||editPreview||performanceSession||storageError||assetEditor)return;
       try{
-        flushFieldEdit();const next=deleteXRKeyframe(item,time);if(!next)return;
-        Object.assign(item,next);selectedPropertyKey=null;changed('Keyframe deleted');
+        flushFieldEdit();const next=deleteXRKeyframes(item,times?.length?times:[time]);if(!next)return;
+        Object.assign(item,next);selectedPropertyKey=null;changed(times?.length ? `${times.length} keyframes deleted` : 'Keyframe deleted');
       }catch(error){status(error instanceof Error?error.message:'Could not delete keyframe');}
     },
     onXRTimelineChange:active=>{if(active)pause();},
-    xrMenuState:()=>({playing,canUndo:history.canUndo&&!editPreview&&!performanceSession&&!assetEditor}),
+    xrMenuState:()=>({playing,canUndo:history.canUndo&&!editPreview&&!performanceSession&&!assetEditor&&!xrRecording}),
   });
   const xrButton=document.createElement('button');xrButton.id='enterVR';xrButton.textContent='Checking VR…';xrButton.disabled=true;
   xrButton.title='Trigger selects · Grip empty space to navigate · Two grips rotate and scale the free view';
@@ -934,7 +977,7 @@ window.addEventListener('keydown',event=>{
 window.addEventListener('keyup',event=>performanceSession?.keys.delete(event.code.startsWith('Key')?event.code.slice(3).toLowerCase():event.code==='Space'?' ':event.key.toLowerCase()));
 window.addEventListener('blur',()=>{performanceSession?.keys.clear();if(performanceSession?.mode==='record')stopPerformanceRecord();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){performanceSession?.keys.clear();if(performanceSession?.mode==='record')stopPerformanceRecord();}});
-function tick(now:number){const delta=Math.min((now-lastFrame)/1000,0.05);lastFrame=now;if(performanceSession&&performanceSession.mode!=='review'){const stopped=performanceSession.update(delta,doc.duration);time=performanceSession.time;renderTime();syncStage();$('#inspector').querySelectorAll<HTMLInputElement>('[data-pose]').forEach(input=>input.value=String(num(performanceSession!.pose[input.dataset.pose as keyof Transform][Number(input.dataset.component)])));if(stopped)renderAll();else if(performanceSession.mode==='record')$('#performanceClock').textContent=timecode(time);}
+function tick(now:number){const delta=Math.min((now-lastFrame)/1000,0.05);lastFrame=now;if(xrRecording?.previewing){xrRecording.advance(delta);time=xrRecording.time;renderTime();syncStage();}if(performanceSession&&performanceSession.mode!=='review'){const stopped=performanceSession.update(delta,doc.duration);time=performanceSession.time;renderTime();syncStage();$('#inspector').querySelectorAll<HTMLInputElement>('[data-pose]').forEach(input=>input.value=String(num(performanceSession!.pose[input.dataset.pose as keyof Transform][Number(input.dataset.component)])));if(stopped)renderAll();else if(performanceSession.mode==='record')$('#performanceClock').textContent=timecode(time);}
 if(playing){const shot=activeShot(),take=performanceSession?.draft,end=take?take.start+take.duration:shot?shot.start+shot.duration:doc.duration;time=Math.min(time+delta,end);if(time>=end){pause();renderInspector();if(performanceSession?.mode==='review')renderPerformance();}renderTime();syncStage();}}
 window.addEventListener('storage',event=>{if(event.key===PROJECT_STORAGE_KEY)persist();});
 window.addEventListener('pagehide',()=>{sceneEditor?.session.cancel('This response was interrupted. Retry when you are ready.');persist();});

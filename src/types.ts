@@ -24,7 +24,9 @@ export interface StageOptions {
   xrTimelineState?(): import('./xr/timeline').XRTimelineState;
   onXRSeek?(time: number): void;
   onXRAddKeyframe?(): void;
-  onXRDeleteKeyframe?(): void;
+  onXRDeleteKeyframe?(times?: number[]): void;
+  onXRRecordAction?(action: import('./xr/recording').XRRecordAction): void;
+  onXRTransform?(id: string, pose: Transform, phase: TransformPhase): boolean;
   onXRTimelineChange?(active: boolean): void;
   onXRAction?(action: 'play' | 'undo'): void;
   xrMenuState?(): { playing: boolean; canUndo: boolean };
