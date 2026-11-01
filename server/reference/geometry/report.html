@@ -32,7 +32,7 @@ try{
  const [layout,frame,cloudData]=await Promise.all([load('layout.json'),load('frame.json'),load('cloud.json')]);
  const [width,height]=layout.sourceSize;
  $('#description').textContent=`尺度：${layout.scale.units==='relative'?'相对尺度，尚未标定真实米数':'米制估计，请检查尺度依据'}。${layout.objects.length} 个可见物体，${layout.unplaced.length} 个因可信深度不足未摆放。来源帧：${frame.source.time===undefined?'图片':frame.source.time.toFixed(3)+' 秒'}。隐藏部分尚未恢复，结果等待视觉检查。`;
- $('#assumptions').textContent=[...layout.assumptions,...layout.objects.map(object=>`${object.name}: ${object.assumptions.join(' ')}`),...layout.unplaced.map(object=>`${object.id}: ${object.reason}`),JSON.stringify(layout.sceneExport)].join('\n');
+ $('#assumptions').textContent=[...layout.assumptions,...layout.objects.map(object=>`${object.name}: ${object.assumptions.join(' ')}`),...layout.unplaced.map(object=>`${object.id}: ${object.reason}`),...(layout.bodies??[]).map(body=>`${body.id} SAM 3D Body: ${body.posture}, facing ${body.facingYaw.toFixed(0)}°. ${body.assumptions.join(' ')}`),...(layout.unplacedBodies??[]).map(body=>`${body.id}: ${body.reason}`),JSON.stringify(layout.sceneExport)].join('\n');
  const renderer=new THREE.WebGLRenderer({canvas:$('#viewer'),antialias:true,preserveDrawingBuffer:true});
  renderer.setPixelRatio(1);renderer.setSize(width,height,false);renderer.outputColorSpace=THREE.SRGBColorSpace;
  renderer.toneMapping=THREE.NoToneMapping;
@@ -42,6 +42,13 @@ try{
    mesh.position.fromArray(object.transform.position);mesh.rotation.set(...object.transform.rotation.map(THREE.MathUtils.degToRad));mesh.scale.fromArray(object.transform.scale);
    mesh.userData.object=object;scene.add(mesh);return mesh;
  });
+ const skeletons=new THREE.Group();
+ for(const body of layout.bodies??[]){
+   const positions=layout.bodyBones.flatMap(([a,b])=>[...body.joints[a],...body.joints[b]]),geometry=new THREE.BufferGeometry();
+   geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+   skeletons.add(new THREE.LineSegments(geometry,new THREE.LineBasicMaterial({color:'#c2185b',depthTest:false})));
+ }
+ scene.add(skeletons);
  const bounds=new THREE.Box3();for(const mesh of meshes)bounds.expandByObject(mesh);
  const center=bounds.getCenter(new THREE.Vector3()),span=Math.max(1e-4,bounds.getSize(new THREE.Vector3()).length());
  const near=Math.max(span/10000,1e-5),far=Math.max(span*100,100);
@@ -74,10 +81,10 @@ try{
  const target=new THREE.WebGLRenderTarget(width,height,{minFilter:THREE.NearestFilter,magFilter:THREE.NearestFilter,depthBuffer:true});
  const materials=meshes.map(mesh=>mesh.material),background=scene.background;
  meshes.forEach((mesh,index)=>{const id=index+1;mesh.material=new THREE.MeshBasicMaterial({color:new THREE.Color((id&255)/255,((id>>8)&255)/255,((id>>16)&255)/255)});});
- scene.background=new THREE.Color(0,0,0);renderer.outputColorSpace=THREE.LinearSRGBColorSpace;
+ skeletons.visible=false; scene.background=new THREE.Color(0,0,0);renderer.outputColorSpace=THREE.LinearSRGBColorSpace;
  renderer.setRenderTarget(target);renderer.render(scene,reference);
  const pixels=new Uint8Array(width*height*4);renderer.readRenderTargetPixels(target,0,0,width,height,pixels);
- renderer.setRenderTarget(null);renderer.outputColorSpace=THREE.SRGBColorSpace;scene.background=background;
+ renderer.setRenderTarget(null);renderer.outputColorSpace=THREE.SRGBColorSpace;scene.background=background;skeletons.visible=true;
  meshes.forEach((mesh,index)=>{mesh.material.dispose();mesh.material=materials[index];});target.dispose();
  const owner=new Uint32Array(width*height),[cropX,cropY,cropWidth,cropHeight]=layout.crop;
  for(let y=cropY;y<cropY+cropHeight;y++)for(let x=cropX;x<cropX+cropWidth;x++){

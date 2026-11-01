@@ -1,29 +1,37 @@
 import { z } from 'zod';
 import { Euler, MathUtils, Matrix4, Vector3 } from 'three';
-import { createEmptyScene, evaluateTransform, sceneEntity } from '../model.ts';
+import { createEmptyScene, ensureAnimation, evaluateTransform, sceneEntity, setTransformMotion } from '../model.ts';
 import { validateProjectContent } from '../project/model.ts';
-import type { ProjectContent, SceneEntity, Vec3 } from '../types.ts';
-import { trackPoses } from '../performance/motion.ts';
-import { assetSchema, validateAsset } from '../assets/model.ts';
+import type { ProjectContent, SceneEntity, Transform, Vec3 } from '../types.ts';
+import { trackPoses, motionSchema, recordedTrack } from '../performance/motion.ts';
+import { sceneLookSchema } from './look.ts';
+import { assetSchema, validateAsset,validateJointAngles } from '../assets/model.ts';
+
 import { instantiateAsset } from '../assets/library.ts';
 import { isSpatialOperation, spatialOperationSchema } from '../spatial/schema.ts';
 import { solveSpatial } from '../spatial/methods.ts';
+import { reparentScene } from '../placement/transforms.ts';
+import { descendants, sceneEntities, localTransform, worldTransform } from '../placement/hierarchy.ts';
+import { jointProperty, putKey, replacePropertyKeys, setKeyInterpolation, type PropertyPath } from '../animation/model.ts';
 
 const vector = (min: number, max: number) => z.array(z.number().min(min).max(max)).length(3) as unknown as z.ZodType<Vec3>;
 const position = vector(-1000, 1000);
 const rotation = vector(-360000, 360000);
 const scale = vector(0.01, 100);
 const transform = z.strictObject({ position, rotation, scale });
-const track = z.strictObject({ start: z.number().min(0).max(60), duration: z.number().min(0.1).max(60), from: transform, to: transform });
+const track = motionSchema;
 const id = z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/);
 const name = z.string().trim().min(1).max(120);
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 const pose = z.enum(['static', 'start', 'end']);
+const propertyKey = { time: z.number().min(0).max(60), value: z.number(), interpolation: z.enum(['linear', 'constant', 'smooth']) };
+const propertyTarget = { sceneId: id, id, path: z.string().min(1).max(2060) };
 export const viewSchema = z.enum(['top_down', 'shot']);
 export type SceneView = z.infer<typeof viewSchema>;
 export interface SceneSnapshot {
   view: SceneView; time: number; width: number; height: number; dataUrl: string;
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number } | null;
+  visibleBoxes?:Record<string,{box:[number,number,number,number];pixels:number}|null>;
 }
 
 const cameraFields = { id, name, fov: z.number().min(10).max(120), transform, track: track.nullable() };
@@ -33,9 +41,11 @@ export const legacyShotOperationSchema = z.strictObject({ type: z.literal('add_s
 export const operationSchema = z.union([
   ...spatialOperationSchema.options,
   z.strictObject({ type: z.literal('instantiate_asset'), sceneId: id, id, name, asset: assetSchema, transform, track: track.nullable() }),
+  z.strictObject({ type: z.literal('set_asset'), sceneId:id,id,asset:assetSchema }),
   z.strictObject({ type: z.literal('add_scene'), sceneId: id, name, duration: z.number().min(1).max(60) }),
   z.strictObject({ type: z.literal('remove_scene'), sceneId: id }),
   z.strictObject({ type: z.literal('rename_scene'), sceneId: id, name }),
+  z.strictObject({ type: z.literal('set_scene_look'), sceneId: id, look: sceneLookSchema }),
   z.strictObject({ type: z.literal('add_camera'), sceneId: id, camera: z.strictObject(cameraFields) }),
   z.strictObject({ type: z.literal('remove_camera'), sceneId: id, id }),
   z.strictObject({ type: z.literal('add_shot'), sceneId: id, shot: z.strictObject(shotFields) }),
@@ -44,8 +54,13 @@ export const operationSchema = z.union([
   z.strictObject({ sceneId: id, type: z.literal('translate'), id, offset: position }),
   z.strictObject({ sceneId: id, type: z.literal('set_transform'), id, pose, transform }),
   z.strictObject({ sceneId: id, type: z.literal('set_motion'), id, track: track.nullable() }),
+  z.strictObject({ sceneId: id, type: z.literal('set_asset_joint'), id, partId: z.string().min(1).max(2048), angle: z.number().min(-360).max(360) }),
+  z.strictObject({ type: z.literal('set_property_key'), ...propertyTarget, ...propertyKey }),
+  z.strictObject({ type: z.literal('set_property_keys'), ...propertyTarget, keys: z.array(z.strictObject(propertyKey)).min(1).max(3602) }),
   z.strictObject({ sceneId: id, type: z.literal('aim_camera'), id, pose, position, target: position, fov: z.number().min(10).max(120) }),
+  z.strictObject({ sceneId:id,type:z.literal('set_camera_motion'),id,frames:z.array(z.strictObject({time:z.number().min(0).max(60),position,target:position})).min(2).max(120) }),
   z.strictObject({ sceneId: id, type: z.literal('rename'), id, name }),
+  z.strictObject({ sceneId: id, type: z.literal('set_parent'), id, parentId: id.nullable() }),
   z.strictObject({ sceneId: id, type: z.literal('set_color'), id, color }),
   z.strictObject({ sceneId: id, type: z.literal('add_object'), object: z.strictObject({ id, name, kind: z.enum(['cube', 'sphere', 'cylinder', 'cone', 'plane', 'human']), color, transform, track: track.nullable() }) }),
   z.strictObject({ sceneId: id, type: z.literal('remove_object'), id }),
@@ -63,8 +78,16 @@ export const editPlanSchema = z.strictObject({
 export type SceneOperation = z.infer<typeof operationSchema>;
 export type EditPlan = z.infer<typeof editPlanSchema>;
 
+/** Camera aiming is shared by direct edits, animated keys and reference reconstruction. */
+export function aimedCameraTransform(position:Vec3,target:Vec3):Transform{
+  const eye=new Vector3(...position),look=new Vector3(...target);
+  if(eye.distanceToSquared(look)<1e-8)throw new Error('Camera position and target must differ.');
+  const euler=new Euler().setFromRotationMatrix(new Matrix4().lookAt(eye,look,new Vector3(0,1,0)),'XYZ');
+  return {position:[...position],rotation:[euler.x,euler.y,euler.z].map(value=>value===0?0:MathUtils.radToDeg(value)) as Vec3,scale:[1,1,1]};
+}
+
 function poseTarget(item: SceneEntity, target: z.infer<typeof pose>) {
-  if (item.animation) throw new Error(`${item.id} has property animation. Edit its keys before changing its pose.`);
+  if (Object.keys(item.animation?.curves??{}).some(path=>/^(position|rotation|scale)\./.test(path))) throw new Error(`${item.id} has transform property animation. Edit its keys before changing its pose.`);
   if (target === 'static') {
     if (item.track) throw new Error(`${item.id} is animated. Edit its start/end pose or translate its whole path.`);
     return item.transform;
@@ -104,12 +127,14 @@ export function applyProjectOperations(source: ProjectContent, operations: Scene
     switch (operation.type) {
       case 'remove_scene': project.scenes = project.scenes.filter(scene => scene.id !== doc.id); break;
       case 'rename_scene': doc.name = operation.name; break;
+      case 'set_scene_look': doc.look = structuredClone(operation.look); break;
       case 'add_camera': doc.cameras.push(structuredClone(operation.camera)); break;
       case 'remove_camera': {
         const item = find(operation.id);
         if ('kind' in item) throw new Error('Select a camera to remove.');
-        if (doc.shots.some(shot => shot.cameraId === item.id)) throw new Error('Remove or reassign shots before removing their camera.');
-        doc.cameras = doc.cameras.filter(camera => camera.id !== item.id); break;
+        const removed=descendants(sceneEntities(doc),item.id);
+        if (doc.shots.some(shot => removed.has(shot.cameraId))) throw new Error('Remove or reassign shots before removing their camera.');
+        doc.cameras = doc.cameras.filter(camera => !removed.has(camera.id));doc.objects=doc.objects.filter(object=>!removed.has(object.id));break;
       }
       case 'add_shot': doc.shots.push(structuredClone(operation.shot)); break;
       case 'remove_shot': { if (!doc.shots.some(shot => shot.id === operation.id)) throw new Error('Select a shot.'); doc.shots = doc.shots.filter(shot => shot.id !== operation.id); break; }
@@ -128,22 +153,48 @@ export function applyProjectOperations(source: ProjectContent, operations: Scene
       }
       case 'set_transform': Object.assign(poseTarget(find(operation.id), operation.pose), structuredClone(operation.transform)); break;
       case 'set_motion': {
-        const item = find(operation.id);
-        if (operation.track === null) item.transform = evaluateTransform(item, time);
-        else item.transform = structuredClone(operation.track.from);
-        delete item.animation;item.track = structuredClone(operation.track); break;
+        setTransformMotion(find(operation.id), operation.track, time);
+        break;
+      }
+      case 'set_asset_joint': {
+        const object = find(operation.id);
+        if (!('kind' in object) || !object.asset) throw new Error('Select an asset instance.');
+        const asset = project.assets!.find(asset => asset.id === object.asset!.id)!;
+        validateJointAngles(asset, { [operation.partId]: operation.angle });
+        if (object.animation?.curves[jointProperty(operation.partId)]?.length) throw new Error('This joint is animated. Edit its property keys.');
+        object.jointAngles = { ...object.jointAngles, [operation.partId]: operation.angle }; break;
+      }
+      case 'set_property_key': case 'set_property_keys': {
+        const item = find(operation.id), path = operation.path as PropertyPath;
+        const keys = (operation.type === 'set_property_key' ? [operation] : operation.keys).map(key => {
+          const orientation = path.startsWith('rotation.') ? evaluateTransform(item, key.time).rotation : undefined;
+          if (orientation) orientation['xyz'.indexOf(path.at(-1)!)] = key.value;
+          return { time: key.time, value: key.value, interpolation: key.interpolation, ...(orientation ? { orientation } : {}) };
+        });
+        const animation = ensureAnimation(item);
+        if (operation.type === 'set_property_keys') item.animation = replacePropertyKeys(animation, path, keys, doc.duration);
+        else {
+          const key = keys[0]; putKey(animation, path, key.time, key.value, key.orientation);
+          setKeyInterpolation(animation, [path], key.time, key.interpolation);
+        }
+        break;
       }
       case 'aim_camera': {
-        const eye = new Vector3(...operation.position), target = new Vector3(...operation.target);
-        if (eye.distanceToSquared(target) < 1e-8) throw new Error('Camera position and target must differ.');
-        const euler = new Euler().setFromRotationMatrix(new Matrix4().lookAt(eye, target, new Vector3(0, 1, 0)), 'XYZ');
         const camera = find(operation.id); if (!('fov' in camera)) throw new Error('Select a camera.');
         const cameraPose = poseTarget(camera, operation.pose);
-        cameraPose.position = [...operation.position];
-        cameraPose.rotation = [euler.x, euler.y, euler.z].map(MathUtils.radToDeg) as Vec3;
+        const aimed=aimedCameraTransform(operation.position,operation.target);
+        const world={...worldTransform(doc,camera.id,time),position:aimed.position,rotation:aimed.rotation};
+        const local=localTransform(doc,camera.id,world,time);
+        cameraPose.position=local.position; cameraPose.rotation=local.rotation;
         camera.fov = operation.fov; break;
       }
+      case 'set_camera_motion': {
+        const camera=find(operation.id);if(!('fov' in camera))throw new Error('Select a camera.');
+        if(operation.frames.some((frame,i,all)=>i>0&&frame.time<=all[i-1].time))throw new Error('Camera keys must be in strictly increasing absolute scene time.');
+          setTransformMotion(camera,recordedTrack(operation.frames.map(frame=>({time:frame.time,transform:localTransform(doc,camera.id,{...aimedCameraTransform(frame.position,frame.target),scale:worldTransform(doc,camera.id,frame.time).scale},frame.time)}))),time);break;
+      }
       case 'rename': (doc.shots.find(shot => shot.id === operation.id) ?? find(operation.id)).name = operation.name; break;
+      case 'set_parent': Object.assign(doc,reparentScene(doc,[operation.id],operation.parentId,time));break;
       case 'set_color': {
         const item = find(operation.id); if (!('color' in item)) throw new Error('The camera has no material.');
         item.color = operation.color; break;
@@ -154,12 +205,18 @@ export function applyProjectOperations(source: ProjectContent, operations: Scene
         project.assets = [...(project.assets ?? []).filter(a => a.id !== asset.id), asset];
         const instance=instantiateAsset(asset,operation.id,operation.transform.position,doc.duration);
         instance.name=operation.name;instance.transform=structuredClone(operation.transform);
-        if(operation.track)instance.track=structuredClone(operation.track);
+        if(operation.track)setTransformMotion(instance,operation.track,time);
         doc.objects.push(instance);break;
+      }
+      case 'set_asset': {
+        const object=find(operation.id);if(!('kind' in object))throw new Error('Only a scene object can use an asset.');
+        const asset=validateAsset(operation.asset);project.assets=[...(project.assets??[]).filter(item=>item.id!==asset.id),asset];
+        object.kind='asset';object.asset={id:asset.id};break;
       }
       case 'remove_object': {
         if (!('kind' in find(operation.id))) throw new Error('Select an object to remove.');
-        doc.objects = doc.objects.filter(object => object.id !== operation.id); break;
+        const removed=descendants(sceneEntities(doc),operation.id);
+        doc.objects = doc.objects.filter(object => !removed.has(object.id));doc.cameras=doc.cameras.filter(camera=>!removed.has(camera.id));doc.shots=doc.shots.filter(shot=>!removed.has(shot.cameraId));break;
       }
       case 'set_duration': doc.duration = operation.duration; break;
     }

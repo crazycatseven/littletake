@@ -1,3 +1,4 @@
+import { newId } from "../id.ts";
 import { z } from 'zod';
 import { operationSchema, legacyShotOperationSchema } from './operations.ts';
 
@@ -12,7 +13,7 @@ const identifier = z.string().min(1).max(64);
 const userMessageSchema = z.strictObject({
   id: identifier, role: z.literal('user'), text: z.string().min(1).max(2000),
   status: z.enum(['pending', 'answered', 'failed', 'stopped']), detail: z.string().max(500).optional(),
-  context: z.strictObject({ sceneId: identifier.nullable(), shotId: identifier.nullable(), selectedId: identifier.nullable().optional(), time: z.number().min(0).max(60).optional() }).optional(),
+  context: z.strictObject({ sceneId: identifier.nullable(), shotId: identifier.nullable(), selectedId: identifier.nullable().optional(), selectedIds: z.array(identifier).optional(), time: z.number().min(0).max(60).optional() }).optional(),
 });
 const assistantMessageSchema = z.strictObject({
   id: identifier, role: z.literal('assistant'), text: z.string().min(1).max(4000), model: z.string().max(160),
@@ -40,7 +41,7 @@ export type AssistantMessage = Extract<ChatMessage, { role: 'assistant' }>;
 export type UserMessage = Extract<ChatMessage, { role: 'user' }>;
 
 export function newConversation(): Conversation {
-  return { id: crypto.randomUUID(), title: 'New conversation', draft: '', messages: [] };
+  return { id: newId(), title: 'New conversation', draft: '', messages: [] };
 }
 export function createConversations(): ConversationBook {
   const thread = newConversation();

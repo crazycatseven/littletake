@@ -1,9 +1,10 @@
 import { createAIProvider, aiConnection, type AIEnvironment } from './ai/index.ts';
 import { AIError, type AIProvider } from './ai/provider.ts';
 import { parseSceneEditInput, proposeSceneEdit } from './scene-edit.ts';
-import { newDiagnostic } from '../src/scene-edit/diagnostics.ts';
+import { newDiagnostic,compactDiagnosticMedia } from '../src/scene-edit/diagnostics.ts';
 import { AssetLibrary } from './assets/library.ts';
 import { ReferenceTools } from './reference/sam/tools.ts';
+import type { LocalDepthService } from './reference/geometry/depth.ts';
 import { brotliCompressSync, constants } from 'node:zlib';
 
 const MAX_BODY = 4_100_000;
@@ -21,7 +22,7 @@ function json(value: unknown, status = 200, request?: Request) {
   }
   return new Response(body, { status, headers });
 }
-export function createSceneEditHandler(env: AIEnvironment = process.env, providerFactory = (): AIProvider => createAIProvider(env)) {
+export function createSceneEditHandler(env: AIEnvironment = process.env, providerFactory = (): AIProvider => createAIProvider(env), depth?: Pick<LocalDepthService, 'available' | 'estimate'>) {
   const library = new AssetLibrary(env.LITTLETAKE_ASSET_DIR);
   return async (request: Request): Promise<Response> => {
     if (request.method === 'GET') return json(aiConnection(env), 200, request);
@@ -43,14 +44,14 @@ export function createSceneEditHandler(env: AIEnvironment = process.env, provide
       } finally { reader.releaseLock(); }
       let body: unknown; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new AIError('invalid_input', 'The scene request could not be read.', 400); }
       diagnostic.input = body;
-      const input = parseSceneEditInput(body); references = new ReferenceTools(input.reference, env);
+      const input = parseSceneEditInput(body); references = new ReferenceTools(input.reference, env, undefined, depth);
       const result = await proposeSceneEdit(input, providerFactory(), request.signal, diagnostic, library, references);
-      return json({ ...result, diagnostic }, 200, request);
+      return json({ ...result, diagnostic:compactDiagnosticMedia(diagnostic) }, 200, request);
     } catch (error) {
       const detail = error instanceof AIError ? { code: error.code, message: error.message }
         : { code: 'edit_failed', message: 'The edit could not finish. Your scene is unchanged.' };
       diagnostic.outcome = 'failed'; diagnostic.error = detail;
-      return json({ error: detail, diagnostic, ...(references?.available ? { reference: references.progress() } : {}) }, error instanceof AIError ? error.status : 500, request);
+      return json({ error: detail, diagnostic:compactDiagnosticMedia(diagnostic), ...(references?.available ? { reference: references.progress() } : {}) }, error instanceof AIError ? error.status : 500, request);
     }
   };
 }

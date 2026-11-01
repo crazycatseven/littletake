@@ -1,16 +1,15 @@
+import { newId } from "../id.ts";
+import { projectFetch } from '../project/client';
 import './dialog.css';
 import type { ShotRenderer } from '../shot-export/renderer';
 import type { Shot } from '../types';
 import { exportVideo, videoExportIssue } from '../shot-export/export';
 import { briefInput, videoPackage, type BriefFrame, type VideoBrief } from './brief';
 import { framedObjects } from './subjects';
+import type { Workspace } from '../project/workspace';
+import { copyText } from '../clipboard';
 
-interface Frame { time: number; label: string; previs: string; boxes: Map<string, [number, number, number, number]>; result?: string; message: string; state: 'waiting' | 'running' | 'done' | 'failed' }
-const DIRECTION_KEY = 'littletake.look.direction';
-/** The first approved frame of a scene anchors the look of every later frame and shot while the page is open. */
-const anchors = new Map<string, string>();
-
-const storage = { get(key: string) { try { return localStorage.getItem(key); } catch { return null; } }, set(key: string, value: string) { try { localStorage.setItem(key, value); } catch {} } };
+interface Frame { time: number; label: string; previs: string; boxes: Map<string, [number, number, number, number]>; result?: string; savedId?: string; message: string; state: 'waiting' | 'running' | 'done' | 'failed' }
 
 function toJPEG(source: CanvasImageSource, width: number, height: number, max: number): string {
   const scale = Math.min(1, max / Math.max(width, height)), canvas = document.createElement('canvas');
@@ -24,7 +23,7 @@ const frameTimes = (shot: Shot, time: number, mode: 'current' | 'keys', fps: num
 ];
 
 /** Muse Image renders finished film stills from clean previs frames; the composition stays the camera's. */
-export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number): void {
+export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number, workspace: Workspace): void {
   shot = structuredClone(shot);
   const doc = renderer.document, camera = doc.cameras.find(item => item.id === shot.cameraId)!;
   const dialog = document.createElement('dialog'); dialog.className = 'look-dialog'; dialog.setAttribute('aria-label', 'Look frames');
@@ -41,8 +40,11 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number)
     <p class="look-message" role="status"></p><div class="look-actions"><button data-cancel hidden>Cancel</button><button data-brief title="Muse Spark writes a prompt for any image-to-video model from these frames and the shot's timing">Write video brief</button><button data-package hidden>Download package</button><button data-render class="primary-button">Render look frames</button></div>`;
   const find = <T extends HTMLElement = HTMLElement>(selector: string) => dialog.querySelector<T>(selector)!;
   find('.look-subtitle').textContent = `${shot.name} · ${camera.name} · composition locked to the shot camera`;
-  const direction = find<HTMLTextAreaElement>('textarea'); direction.value = storage.get(DIRECTION_KEY) ?? '';
+  const direction = find<HTMLTextAreaElement>('textarea'); direction.value = workspace.lookSettings(doc.id).direction;
   let mode: 'current' | 'keys' = 'keys', frames: Frame[] = [], style: string | undefined, busy = false, available = false, controller: AbortController | null = null, brief: VideoBrief | null = null;
+  let anchor: string | undefined, loading = true;
+  const room = workspace.room;
+  const save = (kind: 'look-frame' | 'video-brief', name: string, value: unknown) => workspace.putOutput({ id: newId(), kind, sceneId: doc.id, shotId: shot.id, name, mime: 'application/json' }, new Blob([JSON.stringify(value)], { type: 'application/json' }), room);
   const message = (text: string) => { find('.look-message').textContent = text; };
 
   const capture = () => {
@@ -69,10 +71,11 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number)
   const update = () => {
     find<HTMLFieldSetElement>('.look-settings').disabled = busy;
     find('[data-cancel]').hidden = !busy;
-    const render = find<HTMLButtonElement>('[data-render]'); render.textContent = busy ? 'Rendering…' : 'Render look frames'; render.disabled = busy || !available;
-    find<HTMLButtonElement>('[data-brief]').disabled = busy || !available;
+    const render = find<HTMLButtonElement>('[data-render]'); render.textContent = busy ? 'Rendering…' : 'Render look frames'; render.disabled = busy || loading || !available || !workspace.canEdit;
+    find<HTMLButtonElement>('[data-brief]').disabled = busy || loading || !available || !workspace.canEdit;
+    direction.readOnly = !workspace.canEdit; find<HTMLInputElement>('input[type=file]').disabled = !workspace.canEdit;
     const pack = find<HTMLButtonElement>('[data-package]'); pack.hidden = !brief; pack.disabled = busy;
-    find('.look-anchor').hidden = !(anchors.has(doc.id) && find<HTMLInputElement>('[data-anchor]').checked);
+    find('.look-anchor').hidden = !(anchor && find<HTMLInputElement>('[data-anchor]').checked);
     dialog.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(button => { const active = button.dataset.mode === mode; button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1; });
   };
   const showBrief = () => {
@@ -86,11 +89,11 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number)
   dialog.addEventListener('close', () => { controller?.abort(); if (!busy) cleanup(); });
   find('[data-close]').onclick = () => dialog.close();
   find('[data-cancel]').onclick = () => { controller?.abort(); message('Cancelling…'); };
-  find('[data-reset]').onclick = () => { anchors.delete(doc.id); update(); };
+  find('[data-reset]').onclick = () => { if (!workspace.canEdit) return; anchor = undefined; workspace.setLookSettings(doc.id, { anchorId: null }); update(); };
   find('[data-anchor]').onchange = update;
-  direction.oninput = () => storage.set(DIRECTION_KEY, direction.value);
+  direction.oninput = () => workspace.setLookSettings(doc.id, { direction: direction.value });
   dialog.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(button => button.onclick = () => { mode = button.dataset.mode as typeof mode; brief = null; capture(); draw(); showBrief(); update(); });
-  find('[data-copy]').onclick = () => { if (brief) navigator.clipboard.writeText(brief.prompt).then(() => message('Prompt copied.'), () => message('Copy failed. Select the prompt text instead.')); };
+  find('[data-copy]').onclick = () => { if (brief) copyText(brief.prompt, dialog).then(() => message('Prompt copied.'), () => message('Copy failed. Select the prompt text instead.')); };
   find('[data-brief]').onclick = async () => {
     if (busy) return;
     busy = true; controller = new AbortController(); update(); message('Muse Spark is writing the video brief…');
@@ -100,10 +103,11 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number)
         const image = await loadImage(frame.result ?? frame.previs);
         sent.push({ at: Math.max(0, frame.time - shot.start), image: toJPEG(image, image.naturalWidth, image.naturalHeight, 960), kind: frame.result ? 'look' : 'previs' });
       }
-      const response = await fetch('/api/brief', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(briefInput(doc, shot, direction.value, sent)), signal: controller.signal });
+      const response = await projectFetch('/api/brief', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(briefInput(doc, shot, direction.value, sent)), signal: controller.signal });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error?.message ?? 'The video brief could not be written.');
       brief = data as VideoBrief; showBrief();
+      await save('video-brief', shot.name + ' · video brief', { brief, direction: direction.value, frameIds: frames.flatMap(frame => frame.savedId ? [frame.savedId] : []) });
       message(sent.some(frame => frame.kind === 'look') ? 'Video brief ready.' : 'Video brief ready from previs frames. Render look frames first for a styled brief.');
     } catch (error) { message(controller.signal.aborted ? 'Cancelled.' : (error as Error).message); }
     finally { busy = false; if (dialog.open) update(); else cleanup(); }
@@ -129,26 +133,26 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number)
   find<HTMLInputElement>('input[type=file]').onchange = async event => {
     const file = (event.target as HTMLInputElement).files?.[0]; style = undefined;
     if (!file) return;
-    try { const bitmap = await createImageBitmap(file); style = toJPEG(bitmap, bitmap.width, bitmap.height, 1024); bitmap.close(); message(''); }
-    catch { message('That style reference could not be read. Choose a PNG, JPEG or WebP image.'); }
+    try { const bitmap = await createImageBitmap(file); style = toJPEG(bitmap, bitmap.width, bitmap.height, 1024); bitmap.close(); const saved = await workspace.putOutput({ id: newId(), kind: 'style-reference', sceneId: doc.id, shotId: '', name: 'Style reference', mime: 'image/jpeg' }, await (await fetch(style)).blob(), room); workspace.setLookSettings(doc.id, { styleId: saved.id }); message('Style reference saved with this project.'); }
+    catch (error) { message((error as Error).message); }
   };
   find('[data-render]').onclick = async () => {
     if (busy) return;
     const look = direction.value.trim();
     if (!look) { message('Describe the look and mood first.'); direction.focus(); return; }
-    busy = true; controller = new AbortController(); update();
+    busy = true; controller = new AbortController(); capture(); brief = null; showBrief(); update();
     const consistent = find<HTMLInputElement>('[data-anchor]').checked;
     frames.forEach(frame => { frame.state = 'waiting'; frame.result = undefined; frame.message = ''; });
-    let done = 0, previous: string | undefined;
+    let done = 0, previous: string | undefined, saveProblem = "";
     try {
       for (const frame of frames) {
         frame.state = 'running'; draw(); message(`Rendering ${frame.label.toLowerCase()} · ${done + 1} of ${frames.length}`);
         // Within one render, each frame follows the previous finished frame, so neighbouring frames change only by the blocking between them.
-        const reference = consistent ? previous ?? anchors.get(doc.id) : undefined;
+        const reference = consistent ? previous ?? anchor : undefined;
         const subjects = framedObjects(doc, shot.cameraId, frame.time).map(({ object, position, depth }) => ({ name: object.name.trim().slice(0, 80), position, depth, ...(frame.boxes.has(object.id) ? { box: frame.boxes.get(object.id) } : {}) }));
         const body = { frame: frame.previs, direction: look, subjects, ...(reference ? { anchor: reference } : {}), ...(style ? { style } : {}) };
         try {
-          const response = await fetch('/api/look', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
+          const response = await projectFetch('/api/look', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
           const data = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(data.error?.message ?? 'The look frame could not be rendered.');
           frame.result = data.image; frame.state = 'done'; done++;
@@ -156,14 +160,16 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number)
           previous = await new Promise<string>(resolve => {
             const image = new Image(); image.onload = () => resolve(toJPEG(image, image.naturalWidth, image.naturalHeight, 512)); image.onerror = () => resolve(data.image); image.src = data.image;
           });
-          if (consistent && !anchors.has(doc.id)) anchors.set(doc.id, previous);
+          const saved = await save('look-frame', shot.name + ' · ' + frame.label, { time: frame.time, previs: frame.previs, image: data.image, direction: look }); frame.savedId = saved.id;
+          if (consistent && !anchor) { anchor = previous; workspace.setLookSettings(doc.id, { anchorId: saved.id }); }
         } catch (error) {
-          frame.state = 'failed'; frame.message = controller.signal.aborted ? 'Cancelled' : (error as Error).message;
+          frame.state = frame.result ? 'done' : 'failed'; frame.message = controller.signal.aborted ? 'Cancelled' : (error as Error).message;
+          if (frame.result) { saveProblem = 'Image ready and kept on this device. ' + frame.message; break; }
           if (controller.signal.aborted) break;
         }
         draw();
       }
-      message(controller.signal.aborted ? 'Cancelled. Finished frames are kept.' : `${done} of ${frames.length} look frame${frames.length === 1 ? '' : 's'} ready.`);
+      message(saveProblem || (controller.signal.aborted ? 'Cancelled. Finished frames are kept.' : `${done} of ${frames.length} look frame${frames.length === 1 ? '' : 's'} ready.`));
     } finally {
       busy = false; frames.filter(frame => frame.state !== 'done' && frame.state !== 'failed').forEach(frame => { frame.state = 'waiting'; });
       if (dialog.open) { draw(); update(); } else cleanup();
@@ -171,6 +177,20 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number)
   };
   document.body.append(dialog);
   try { capture(); draw(); update(); dialog.showModal(); } catch (error) { cleanup(); throw error; }
-  fetch('/api/look').then(response => response.json()).then(data => { available = Boolean(data.available); if (!available) message('Muse Image is not configured on this server. Set MODEL_API_KEY to render look frames.'); update(); })
+  projectFetch('/api/look').then(response => response.json()).then(data => { available = Boolean(data.available); if (!available) message('Muse Image is not configured on this server. Set MODEL_API_KEY to render look frames.'); update(); })
     .catch(() => { message('The look-frame service could not be reached.'); });
+  void (async () => {
+    try {
+      const settings = workspace.lookSettings(doc.id);
+      if (settings.anchorId) anchor = JSON.parse(await (await workspace.output(settings.anchorId)).text()).image;
+      if (settings.styleId) style = await new Promise<string>((resolve, reject) => { void workspace.output(settings.styleId!).then(blob => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(blob); }, reject); });
+      const savedFrames = room?.outputs.filter(output => output.kind === 'look-frame' && output.sceneId === doc.id && output.shotId === shot.id) ?? [];
+      const loaded = new Set<number>();
+      for (const output of savedFrames) { const value = JSON.parse(await (await workspace.output(output.id)).text()), frame = frames.find(frame => Math.abs(frame.time - value.time) < .001); if (frame && !loaded.has(frame.time)) { frame.result = value.image; frame.previs = value.previs; frame.state = 'done'; frame.savedId = output.id; loaded.add(frame.time); } }
+      const savedBrief = room?.outputs.find(output => output.kind === 'video-brief' && output.sceneId === doc.id && output.shotId === shot.id);
+      if (savedBrief) brief = JSON.parse(await (await workspace.output(savedBrief.id)).text()).brief;
+      if (loaded.size || brief) message('Saved results restored. Render again to use the current scene.');
+    } catch (error) { message((error as Error).message); }
+    finally { loading = false; if (dialog.open) { draw(); showBrief(); update(); } }
+  })();
 }

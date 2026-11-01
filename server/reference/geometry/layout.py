@@ -100,6 +100,16 @@ def oriented_bounds(points: np.ndarray, minimum: float) -> dict:
             "rotation": [0., math.degrees(math.atan2(-axis[1], axis[0])), 0.], "scale": size.tolist()}
 
 
+def scene_object(obj: dict, body: dict | None) -> dict:
+    """Editable scene object; a person with a grounded skeleton becomes a human mannequin standing at its feet."""
+    exported = {key: value for key, value in obj.items() if key in ("id", "name", "kind", "color", "transform")} | {"track": None}
+    if body is not None:
+        # The mannequin is modelled in metres and faces +Z at zero rotation.
+        exported |= {"kind": "human", "transform": {"position": body["groundPoint"], "rotation": [0., body["facingYaw"], 0.],
+                                                     "scale": [body["unitsPerMetre"]] * 3}}
+    return exported
+
+
 def xyz_euler(matrix: np.ndarray) -> list[float]:
     """Three.js intrinsic XYZ Euler convention, in degrees."""
     y = math.asin(float(np.clip(matrix[0, 2], -1, 1)))
@@ -241,6 +251,23 @@ def reconstruct(run: Path, floor_concepts: list[str], anchor: tuple[str, float] 
         draw.text((box[0] + crop_x + 3, box[1] + crop_y + 2), item["id"] + " " + item["concept"], fill="white", stroke_width=1, stroke_fill="black")
     if not any(not item["isFloor"] for item in objects):
         raise ValueError("No objects have enough reliable depth to form a layout.")
+    bodies, unplaced_bodies, body_bones, body_hint = [], [], [], None
+    if (run / "bodies.json").exists():
+        from body import BONE_INDICES, FORMAT as BODY_FORMAT, frame_intrinsics, ground_body, metric_hint
+        record = read_json(run / "bodies.json")
+        if record.get("format") != BODY_FORMAT or record.get("frameId") != frame["id"] or record.get("status") != "complete":
+            raise ValueError("Saved bodies belong to a different frame or are incomplete; use a new run folder.")
+        intrinsics = frame_intrinsics(k, affine)
+        if not np.allclose(record["camera"]["intrinsics"], intrinsics, rtol=1e-4, atol=1e-3):
+            raise ValueError("Bodies were estimated with a different camera; rerun body after depth in a new run folder.")
+        for person in record["people"]:
+            region = np.asarray(Image.open(run / person["mask"]).convert("L").filter(ImageFilter.MinFilter(3))) > 127
+            selection = sample_source(region, affine, depth.shape) & valid
+            if selection.sum() < 24:
+                unplaced_bodies.append({"id": person["id"], "reason": "Too few reliable depth samples to scale this body; no depth was guessed."})
+                continue
+            bodies.append(ground_body(person, float(np.median(depth[selection])), intrinsics, e, origin, basis, scale))
+        body_bones, body_hint = BONE_INDICES, metric_hint(bodies, scale_info["units"])
     Image.alpha_composite(overlays, overlay).convert("RGB").save(run / "segmentation.png")
     full_width, full_height = frame["originalSize"]
     visible = frame["frameBounds"]
@@ -254,6 +281,7 @@ def reconstruct(run: Path, floor_concepts: list[str], anchor: tuple[str, float] 
               "experiment": {"regionMode": region_mode, "objectDepth": object_depth,
                              "conditioning": "Camera, ground and candidate inventory held fixed; not an end-to-end no-SAM/no-VGGT baseline."},
               "objects": objects, "unplaced": unplaced,
+              "bodies": bodies, "bodyBones": body_bones, "unplacedBodies": unplaced_bodies, "bodyMetricHint": body_hint,
               "sceneExport": {"projection": "Native centered vertical-FOV camera; exact full intrinsics remain available in this layout.",
                               "principalPointOffsetPixels": [float(full_k[0, 2] - (full_width - 1) / 2), float(full_k[1, 2] - (full_height - 1) / 2)]},
               "quality": {"status": "unreviewed", "note": "Numerical measurements do not establish visual reconstruction quality."},
@@ -285,7 +313,7 @@ def reconstruct(run: Path, floor_concepts: list[str], anchor: tuple[str, float] 
     depth_display.save(run / "depth.png")
     write_json(run / "depth-visualization.json", {"low": float(low), "high": float(high), "units": geometry["scale"], "note": "PNG is display-only; use geometry.npz for computation."})
     scene = {"format": "LittleTake.scene", "version": 3, "id": frame["id"], "name": "Reference geometry (" + scale_info["units"] + ")", "duration": 5,
-             "objects": [{key: value for key, value in obj.items() if key in ("id", "name", "kind", "color", "transform")} | {"track": None} for obj in objects],
+             "objects": [scene_object(obj, {body["id"]: body for body in bodies}.get(obj["id"])) for obj in objects],
              "cameras": [{"id": "geometry-camera", "name": "Reference camera", "fov": fov, "transform": {"position": camera_position.tolist(), "rotation": xyz_euler(camera_rotation), "scale": [1, 1, 1]}, "track": None, "frameBounds": visible}],
              "shots": [{"id": "geometry-shot", "name": "Reference frame", "cameraId": "geometry-camera", "start": 0, "duration": 5}]}
     write_json(run / "scene.json", scene)

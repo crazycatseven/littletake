@@ -1,3 +1,4 @@
+import { newId } from "../id.ts";
 import { serializeContent } from '../project/model.ts';
 import type { ProjectContent } from '../types.ts';
 import { requestSceneEdit } from './client.ts';
@@ -6,7 +7,7 @@ import { conversationHistory, newConversation, type AssistantMessage, type Conve
 import type { SceneEditInput, SceneEditResponse } from './types.ts';
 import type { ReferenceContext, ReferenceProgress } from '../reference/observations.ts';
 
-export interface EditorContext { project: ProjectContent; sceneId: string | null; shotId: string | null; revision: number; time: number; selectedId: string | null }
+export interface EditorContext { project: ProjectContent; sceneId: string | null; shotId: string | null; revision: number; time: number; selectedId: string | null; selectedIds?: string[] }
 export interface SessionOptions {
   context(): EditorContext;
   prepare(): void;
@@ -115,15 +116,16 @@ export class ConversationSession {
       message = latest; message.status = 'pending'; delete message.detail;
     } else {
       const text = thread.draft.trim(); if (!text) return;
-      message = { id: crypto.randomUUID(), role: 'user', text, status: 'pending' };
+      message = { id: newId(), role: 'user', text, status: 'pending' };
       if (!thread.messages.length) thread.title = text.replace(/\s+/g, ' ').slice(0, 80);
       for (const older of thread.messages) if (older.role === 'assistant' && older.edit?.status === 'pending') older.edit.status = 'discarded';
       thread.messages.push(message); thread.draft = '';
     }
     this.clearPreview(); this.options.prepare();
     const context = this.options.context(), project = structuredClone(context.project);
-    message.context = { sceneId: context.sceneId, shotId: context.shotId, selectedId: context.selectedId, time: context.time };
-    const run: Run = { id: crypto.randomUUID(), threadId: thread.id, message, controller: new AbortController(), base: serializeContent(project), revision: context.revision };
+    const selectedIds = [...(context.selectedIds ?? (context.selectedId ? [context.selectedId] : []))];
+    message.context = { sceneId: context.sceneId, shotId: context.shotId, selectedId: context.selectedId, selectedIds, time: context.time };
+    const run: Run = { id: newId(), threadId: thread.id, message, controller: new AbortController(), base: serializeContent(project), revision: context.revision };
     this.run = run; this.evidence = []; this.evidenceMessageId = message.id; this.activity = 'Muse is thinking…'; this.emit();
     if (this.run !== run) return;
     const current = () => {
@@ -137,7 +139,7 @@ export class ConversationSession {
       return true;
     };
     try {
-      const input: SceneEditInput = { project, sceneId: context.sceneId, shotId: context.shotId, time: context.time, selectedId: context.selectedId, prompt: message.text,
+      const input: SceneEditInput = { project, sceneId: context.sceneId, shotId: context.shotId, time: context.time, selectedId: context.selectedId, selectedIds, prompt: message.text,
         history: conversationHistory(thread.messages.slice(0, -1)), snapshots: [] };
       const reference = this.options.reference ? await this.options.reference(thread.id) : undefined;
       if (!current()) return;
@@ -170,7 +172,7 @@ export class ConversationSession {
       }
       if (response.status !== 'ready' || response.plan.requestedViews.length)
         throw new Error('Muse requested more views than this turn supports. Try a more specific message.');
-      const reply: AssistantMessage = { id: crypto.randomUUID(), role: 'assistant', text: response.plan.summary, model: response.model };
+      const reply: AssistantMessage = { id: newId(), role: 'assistant', text: response.plan.summary, model: response.model };
       if (response.plan.operations.length) {
         applyProjectOperations(project, response.plan.operations, context.time);
         reply.edit = { operations: response.plan.operations, time: context.time, revision: context.revision, sceneId: context.sceneId, shotId: context.shotId, status: 'pending' };

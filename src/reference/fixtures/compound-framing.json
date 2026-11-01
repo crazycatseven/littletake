@@ -1,0 +1,1669 @@
+{
+  "description": "Recorded compound-door and floating-point timestamp failure before visual acceptance.",
+  "analysis": {
+    "assumptions": [
+      "Cut candidates 1.8761666 and 5.5047916 accepted as true cuts; no other cuts observed.",
+      "Central picture is pillarboxed inside 1280x720 frame; boxes normalized to full frame including side black bars.",
+      "Two recurring principals tracked as concierge and lobby_boy distinguished by age, height, bow-tie vs cap.",
+      "Doorman in top hat is background and not tracked as principal."
+    ],
+    "entities": [
+      {
+        "color": "#5A2A8A",
+        "description": "Tall older man with slicked light hair and mustache in purple tailcoat with red piping, white shirt and black bow tie, holding notepad.",
+        "name": "concierge",
+        "principal": true
+      },
+      {
+        "color": "#5A2A8A",
+        "description": "Younger man in purple buttoned uniform and purple LOBBY BOY cap, acting as assistant.",
+        "name": "lobby_boy",
+        "principal": true
+      },
+      {
+        "color": "#D9C49A",
+        "description": "Cream double entrance doors with glass panes and brass handles at hotel entry.",
+        "name": "entrance_doors",
+        "principal": false
+      },
+      {
+        "color": "#D9C49A",
+        "description": "Long cream reception counter with panels in background of lobby under arches.",
+        "name": "reception_counter",
+        "principal": false
+      },
+      {
+        "color": "#C9A86A",
+        "description": "Small distinct curved wooden desk in mid-lobby passed during walk.",
+        "name": "curved_desk",
+        "principal": false
+      },
+      {
+        "color": "#F2E6D0",
+        "description": "Rear wall with three illuminated arched niches with lights above reception area.",
+        "name": "arched_niches",
+        "principal": false
+      },
+      {
+        "color": "#2E5A2E",
+        "description": "Tall potted palm plants beside entrance and inside lobby.",
+        "name": "lobby_palm",
+        "principal": false
+      }
+    ],
+    "frames": [
+      {
+        "setting": "Hotel exterior entry with cream glass doors, chandelier above, red mat; pinkish wall and gridded side windows.",
+        "shotIndex": 0,
+        "subjects": [
+          {
+            "action": "gesturing with right arm extended while speaking",
+            "box": [
+              0.13,
+              0.222,
+              0.41,
+              0.902
+            ],
+            "facing": "left",
+            "name": "lobby_boy",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "standing holding notepad and pencil looking down at it",
+            "box": [
+              0.564,
+              0.192,
+              0.79,
+              0.902
+            ],
+            "facing": "left",
+            "name": "concierge",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.129,
+              0.022,
+              0.302,
+              0.732
+            ],
+            "facing": "front",
+            "name": "entrance_doors",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.437,
+              0.237,
+              0.675,
+              0.641
+            ],
+            "facing": "front",
+            "name": "arched_niches",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.61,
+              0.35,
+              0.703,
+              0.627
+            ],
+            "facing": "front",
+            "name": "lobby_palm",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          }
+        ],
+        "time": 0.166125
+      },
+      {
+        "setting": "Same exterior entry; two men facing each other conversing in front of central doors with doorman behind.",
+        "shotIndex": 0,
+        "subjects": [
+          {
+            "action": "pointing with right hand toward other man while speaking",
+            "box": [
+              0.17,
+              0.212,
+              0.408,
+              0.902
+            ],
+            "facing": "right",
+            "name": "lobby_boy",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "holding notepad looking toward lobby boy",
+            "box": [
+              0.57,
+              0.186,
+              0.795,
+              0.902
+            ],
+            "facing": "left",
+            "name": "concierge",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.129,
+              0.019,
+              0.298,
+              0.72
+            ],
+            "facing": "front",
+            "name": "entrance_doors",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.442,
+              0.225,
+              0.672,
+              0.646
+            ],
+            "facing": "front",
+            "name": "arched_niches",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.71,
+              0.053,
+              0.869,
+              0.72
+            ],
+            "facing": "front",
+            "name": "lobby_palm",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          }
+        ],
+        "time": 0.916875
+      },
+      {
+        "setting": "Same exterior entry; lobby boy raises fingers counting while concierge listens and writes.",
+        "shotIndex": 0,
+        "subjects": [
+          {
+            "action": "raising right hand with fingers up while speaking",
+            "box": [
+              0.132,
+              0.219,
+              0.408,
+              0.902
+            ],
+            "facing": "right",
+            "name": "lobby_boy",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "holding pencil and pad looking at lobby boy",
+            "box": [
+              0.564,
+              0.195,
+              0.79,
+              0.902
+            ],
+            "facing": "left",
+            "name": "concierge",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.129,
+              0.022,
+              0.305,
+              0.73
+            ],
+            "facing": "front",
+            "name": "entrance_doors",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.44,
+              0.232,
+              0.675,
+              0.646
+            ],
+            "facing": "front",
+            "name": "arched_niches",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.715,
+              0.062,
+              0.866,
+              0.715
+            ],
+            "facing": "front",
+            "name": "lobby_palm",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          }
+        ],
+        "time": 1.667625
+      },
+      {
+        "setting": "Grand hotel lobby interior with red patterned carpet, tiled floor, cream reception counter and lit arches in depth.",
+        "shotIndex": 1,
+        "subjects": [
+          {
+            "action": "static",
+            "box": [
+              0.13,
+              0.095,
+              0.335,
+              0.884
+            ],
+            "facing": "front",
+            "name": "entrance_doors",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.498,
+              0.445,
+              0.768,
+              0.564
+            ],
+            "facing": "front",
+            "name": "reception_counter",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.539,
+              0.211,
+              0.867,
+              0.448
+            ],
+            "facing": "front",
+            "name": "arched_niches",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.405,
+              0.187,
+              0.55,
+              0.657
+            ],
+            "facing": "front",
+            "name": "lobby_palm",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          }
+        ],
+        "time": 2.2098333333333335
+      },
+      {
+        "setting": "Same lobby interior seen through open door; two purple-uniformed men briskly entering left to right across red carpet.",
+        "shotIndex": 1,
+        "subjects": [
+          {
+            "action": "walking rightward through doorway looking down at pad",
+            "box": [
+              0.312,
+              0.318,
+              0.426,
+              0.83
+            ],
+            "facing": "right",
+            "name": "concierge",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "walking rightward beside concierge partially obscured by door",
+            "box": [
+              0.157,
+              0.34,
+              0.22,
+              0.807
+            ],
+            "facing": "right",
+            "name": "lobby_boy",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.13,
+              0.095,
+              0.349,
+              0.89
+            ],
+            "facing": "front",
+            "name": "entrance_doors",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.502,
+              0.445,
+              0.77,
+              0.56
+            ],
+            "facing": "front",
+            "name": "reception_counter",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.549,
+              0.214,
+              0.865,
+              0.446
+            ],
+            "facing": "front",
+            "name": "arched_niches",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.408,
+              0.19,
+              0.554,
+              0.657
+            ],
+            "facing": "front",
+            "name": "lobby_palm",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          }
+        ],
+        "time": 3.669625
+      },
+      {
+        "setting": "Same lobby interior with open entrance door left, doorman holding door, lobby boy crossing frame rightward.",
+        "shotIndex": 1,
+        "subjects": [
+          {
+            "action": "walking rightward across lobby",
+            "box": [
+              0.707,
+              0.344,
+              0.796,
+              0.81
+            ],
+            "facing": "right",
+            "name": "lobby_boy",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.13,
+              0.095,
+              0.325,
+              0.882
+            ],
+            "facing": "front",
+            "name": "entrance_doors",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.498,
+              0.448,
+              0.768,
+              0.563
+            ],
+            "facing": "front",
+            "name": "reception_counter",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.612,
+              0.211,
+              0.867,
+              0.448
+            ],
+            "facing": "front",
+            "name": "arched_niches",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.405,
+              0.19,
+              0.547,
+              0.657
+            ],
+            "facing": "front",
+            "name": "lobby_palm",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          }
+        ],
+        "time": 5.129416666666667
+      },
+      {
+        "setting": "Lobby interior tracking close on two men walking; red carpet, blurred reception lights and palms behind.",
+        "shotIndex": 2,
+        "subjects": [
+          {
+            "action": "walking forward writing in small pad",
+            "box": [
+              0.199,
+              0.15,
+              0.657,
+              0.905
+            ],
+            "facing": "right",
+            "name": "concierge",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "walking beside leaning in to look at pad",
+            "box": [
+              0.517,
+              0.269,
+              0.657,
+              0.9
+            ],
+            "facing": "front",
+            "name": "lobby_boy",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.246,
+              0.278,
+              0.358,
+              0.508
+            ],
+            "facing": "front",
+            "name": "reception_counter",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.152,
+              0.128,
+              0.337,
+              0.274
+            ],
+            "facing": "front",
+            "name": "arched_niches",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.692,
+              0.095,
+              0.807,
+              0.625
+            ],
+            "facing": "front",
+            "name": "lobby_palm",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          }
+        ],
+        "time": 6.130416666666667
+      },
+      {
+        "setting": "Lobby interior beside curved wooden desk; staff and lamps in background under lit arches as pair continues walking.",
+        "shotIndex": 2,
+        "subjects": [
+          {
+            "action": "walking while writing in pad",
+            "box": [
+              0.161,
+              0.144,
+              0.646,
+              0.902
+            ],
+            "facing": "right",
+            "name": "concierge",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "walking beside looking forward",
+            "box": [
+              0.472,
+              0.289,
+              0.645,
+              0.902
+            ],
+            "facing": "front",
+            "name": "lobby_boy",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.56,
+              0.519,
+              0.867,
+              0.902
+            ],
+            "facing": "front",
+            "name": "curved_desk",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.522,
+              0.434,
+              0.609,
+              0.53
+            ],
+            "facing": "front",
+            "name": "reception_counter",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.562,
+              0.156,
+              0.865,
+              0.338
+            ],
+            "facing": "front",
+            "name": "arched_niches",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          }
+        ],
+        "time": 8.758041666666667
+      },
+      {
+        "setting": "Lobby interior passing stone planter and marble pillar; red carpet and arched doorways behind pair still walking.",
+        "shotIndex": 2,
+        "subjects": [
+          {
+            "action": "walking holding pad and pencil speaking",
+            "box": [
+              0.169,
+              0.148,
+              0.61,
+              0.905
+            ],
+            "facing": "right",
+            "name": "concierge",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "walking beside listening",
+            "box": [
+              0.443,
+              0.275,
+              0.617,
+              0.902
+            ],
+            "facing": "right",
+            "name": "lobby_boy",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.657,
+              0.585,
+              0.867,
+              0.905
+            ],
+            "facing": "front",
+            "name": "curved_desk",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.709,
+              0.195,
+              0.862,
+              0.488
+            ],
+            "facing": "front",
+            "name": "arched_niches",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          },
+          {
+            "action": "static",
+            "box": [
+              0.597,
+              0.128,
+              0.743,
+              0.598
+            ],
+            "facing": "front",
+            "name": "lobby_palm",
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null
+          }
+        ],
+        "time": 11.343958333333333
+      }
+    ],
+    "shots": [
+      {
+        "description": "Static medium exterior at hotel entrance; lobby boy on left gestures and talks while taller concierge on right takes notes; doorman stands centered in doorway behind; cream doors, chandelier and pink walls visible. No camera move.",
+        "duration": 1.8761666666666668,
+        "framing": "waist_up",
+        "start": 0
+      },
+      {
+        "description": "Wide static interior of grand lobby from entrance; doorman holds door open left; concierge and lobby boy enter and cross left to right over red carpet toward depth; long reception counter, lit arches, palms and patterned rugs visible.",
+        "duration": 3.628625,
+        "framing": "full_body",
+        "start": 1.8761666666666668
+      },
+      {
+        "description": "Tracking medium close-up following concierge and lobby boy walking through lobby past curved desk and planters; concierge writes in pad while speaking, lobby boy listens; camera dollies with them keeping red carpet, arches and desks in background.",
+        "duration": 6.506500333333333,
+        "framing": "waist_up",
+        "start": 5.504791666666667
+      }
+    ],
+    "summary": "Two hotel staff in purple uniforms converse outside the entrance, then enter and walk through the ornate red-carpeted lobby while the senior man dictates notes; camera moves from static exterior medium to wide lobby entrance to tracking interior medium."
+  },
+  "scene": {
+    "format": "LittleTake.scene",
+    "version": 3,
+    "id": "scene-1",
+    "name": "Grand Hotel Entrance and Lobby Walk",
+    "duration": 12.011292457580566,
+    "objects": [
+      {
+        "id": "object-1",
+        "name": "concierge",
+        "kind": "human",
+        "color": "#5A2A8A",
+        "transform": {
+          "position": [
+            0.8,
+            0,
+            6
+          ],
+          "rotation": [
+            0,
+            -90,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "track": {
+          "start": 0,
+          "duration": 11.343958333333333,
+          "from": {
+            "position": [
+              0.8,
+              0,
+              6
+            ],
+            "rotation": [
+              0,
+              -90,
+              0
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          },
+          "to": {
+            "position": [
+              1.2,
+              0,
+              -5
+            ],
+            "rotation": [
+              0,
+              180,
+              0
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          },
+          "samples": [
+            {
+              "at": 0.16538905952140456,
+              "transform": {
+                "position": [
+                  0.8,
+                  0,
+                  6
+                ],
+                "rotation": [
+                  0,
+                  -90,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              }
+            },
+            {
+              "at": 0.3234871719527649,
+              "transform": {
+                "position": [
+                  -1.2,
+                  0,
+                  3
+                ],
+                "rotation": [
+                  0,
+                  90,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              }
+            },
+            {
+              "at": 0.4521716772878368,
+              "transform": {
+                "position": [
+                  1.2,
+                  0,
+                  0.5
+                ],
+                "rotation": [
+                  0,
+                  90,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              }
+            },
+            {
+              "at": 0.5404124809461718,
+              "transform": {
+                "position": [
+                  1.2,
+                  0,
+                  -0.5
+                ],
+                "rotation": [
+                  0,
+                  180,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              }
+            },
+            {
+              "at": 0.7720445905493013,
+              "transform": {
+                "position": [
+                  1.2,
+                  0,
+                  -3
+                ],
+                "rotation": [
+                  0,
+                  180,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "object-2",
+        "name": "lobby_boy",
+        "kind": "human",
+        "color": "#5A2A8A",
+        "transform": {
+          "position": [
+            -0.8,
+            0,
+            6
+          ],
+          "rotation": [
+            0,
+            90,
+            0
+          ],
+          "scale": [
+            1,
+            0.95,
+            1
+          ]
+        },
+        "track": {
+          "start": 0,
+          "duration": 11.343958333333333,
+          "from": {
+            "position": [
+              -0.8,
+              0,
+              6
+            ],
+            "rotation": [
+              0,
+              90,
+              0
+            ],
+            "scale": [
+              1,
+              0.95,
+              1
+            ]
+          },
+          "to": {
+            "position": [
+              1.9,
+              0,
+              -5
+            ],
+            "rotation": [
+              0,
+              180,
+              0
+            ],
+            "scale": [
+              1,
+              0.95,
+              1
+            ]
+          },
+          "samples": [
+            {
+              "at": 0.16538905952140456,
+              "transform": {
+                "position": [
+                  -0.8,
+                  0,
+                  6
+                ],
+                "rotation": [
+                  0,
+                  90,
+                  0
+                ],
+                "scale": [
+                  1,
+                  0.95,
+                  1
+                ]
+              }
+            },
+            {
+              "at": 0.3234871719527649,
+              "transform": {
+                "position": [
+                  -1.9,
+                  0,
+                  3
+                ],
+                "rotation": [
+                  0,
+                  90,
+                  0
+                ],
+                "scale": [
+                  1,
+                  0.95,
+                  1
+                ]
+              }
+            },
+            {
+              "at": 0.4521716772878368,
+              "transform": {
+                "position": [
+                  1.9,
+                  0,
+                  0.5
+                ],
+                "rotation": [
+                  0,
+                  90,
+                  0
+                ],
+                "scale": [
+                  1,
+                  0.95,
+                  1
+                ]
+              }
+            },
+            {
+              "at": 0.5404124809461718,
+              "transform": {
+                "position": [
+                  1.9,
+                  0,
+                  -0.5
+                ],
+                "rotation": [
+                  0,
+                  180,
+                  0
+                ],
+                "scale": [
+                  1,
+                  0.95,
+                  1
+                ]
+              }
+            },
+            {
+              "at": 0.7720445905493013,
+              "transform": {
+                "position": [
+                  1.9,
+                  0,
+                  -3
+                ],
+                "rotation": [
+                  0,
+                  180,
+                  0
+                ],
+                "scale": [
+                  1,
+                  0.95,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "object-3",
+        "name": "doorman",
+        "kind": "human",
+        "color": "#2A2440",
+        "transform": {
+          "position": [
+            0,
+            0,
+            5
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "track": null
+      },
+      {
+        "id": "object-4",
+        "name": "entrance_left_door",
+        "kind": "cube",
+        "color": "#D9C49A",
+        "transform": {
+          "position": [
+            -1.8,
+            1.4,
+            5
+          ],
+          "rotation": [
+            0,
+            70,
+            0
+          ],
+          "scale": [
+            1.1,
+            2.8,
+            0.12
+          ]
+        },
+        "track": null
+      },
+      {
+        "id": "object-5",
+        "name": "entrance_right_door",
+        "kind": "cube",
+        "color": "#D9C49A",
+        "transform": {
+          "position": [
+            1.8,
+            1.4,
+            5
+          ],
+          "rotation": [
+            0,
+            -70,
+            0
+          ],
+          "scale": [
+            1.1,
+            2.8,
+            0.12
+          ]
+        },
+        "track": null
+      },
+      {
+        "id": "object-6",
+        "name": "entrance_left_post",
+        "kind": "cube",
+        "color": "#D9B98A",
+        "transform": {
+          "position": [
+            -1.2,
+            1.5,
+            5.2
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.3,
+            3,
+            0.4
+          ]
+        },
+        "track": null
+      },
+      {
+        "id": "object-7",
+        "name": "entrance_right_post",
+        "kind": "cube",
+        "color": "#D9B98A",
+        "transform": {
+          "position": [
+            1.2,
+            1.5,
+            5.2
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.3,
+            3,
+            0.4
+          ]
+        },
+        "track": null
+      },
+      {
+        "id": "object-8",
+        "name": "entrance_lintel",
+        "kind": "cube",
+        "color": "#D9B98A",
+        "transform": {
+          "position": [
+            0,
+            3,
+            5.2
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2.7,
+            0.5,
+            0.4
+          ]
+        },
+        "track": null
+      },
+      {
+        "id": "object-9",
+        "name": "lobby_carpet",
+        "kind": "plane",
+        "color": "#A8262C",
+        "transform": {
+          "position": [
+            0.5,
+            0.02,
+            -2
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            10,
+            1,
+            16
+          ]
+        },
+        "track": null
+      },
+      {
+        "id": "object-10",
+        "name": "reception_counter",
+        "kind": "cube",
+        "color": "#D9C49A",
+        "transform": {
+          "position": [
+            1.5,
+            0.6,
+            -7
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            6,
+            1.2,
+            0.8
+          ]
+        },
+        "track": null
+      },
+      {
+        "id": "object-11",
+        "name": "rear_wall",
+        "kind": "cube",
+        "color": "#F2E6D0",
+        "transform": {
+          "position": [
+            1.5,
+            2,
+            -8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            9,
+            4,
+            0.4
+          ]
+        },
+        "track": null
+      },
+      {
+        "id": "object-12",
+        "name": "arch_left",
+        "kind": "cube",
+        "color": "#F2E6D0",
+        "transform": {
+          "position": [
+            -1,
+            2.2,
+            -7.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.8,
+            1.8,
+            0.3
+          ]
+        },
+        "track": null
+      },
+      {
+        "id": "object-13",
+        "name": "arch_center",
+        "kind": "cube",
+        "color": "#F2E6D0",
+        "transform": {
+          "position": [
+            1.5,
+            2.2,
+            -7.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.8,
+            1.8,
+            0.3
+          ]
+        },
+        "track": null
+      },
+      {
+        "id": "object-14",
+        "name": "arch_right",
+        "kind": "cube",
+        "color": "#F2E6D0",
+        "transform": {
+          "position": [
+            4,
+            2.2,
+            -7.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.8,
+            1.8,
+            0.3
+          ]
+        },
+        "track": null
+      },
+      {
+        "id": "object-15",
+        "name": "curved_desk",
+        "kind": "cylinder",
+        "color": "#C9A86A",
+        "transform": {
+          "position": [
+            2.8,
+            0.5,
+            -3
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.8,
+            1,
+            1.8
+          ]
+        },
+        "track": null
+      },
+      {
+        "id": "object-16",
+        "name": "palm_entrance",
+        "kind": "cylinder",
+        "color": "#2E5A2E",
+        "transform": {
+          "position": [
+            -2.2,
+            1,
+            2.5
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.8,
+            2,
+            0.8
+          ]
+        },
+        "track": null
+      },
+      {
+        "id": "object-17",
+        "name": "palm_inner",
+        "kind": "cylinder",
+        "color": "#2E5A2E",
+        "transform": {
+          "position": [
+            3.5,
+            0.9,
+            -2
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.8,
+            1.8,
+            0.8
+          ]
+        },
+        "track": null
+      }
+    ],
+    "cameras": [
+      {
+        "id": "camera-1",
+        "name": "shot1_exterior_talk camera",
+        "fov": 38,
+        "transform": {
+          "position": [
+            0,
+            1.6,
+            8.8
+          ],
+          "rotation": [
+            -5.194428907734806,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "track": null
+      },
+      {
+        "id": "camera-2",
+        "name": "shot2_lobby_entrance_wide camera",
+        "fov": 45,
+        "transform": {
+          "position": [
+            0,
+            2,
+            4.5
+          ],
+          "rotation": [
+            -3.9793824526782053,
+            -4.957818906408601,
+            -0.3444573657410971
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "track": null
+      },
+      {
+        "id": "camera-3",
+        "name": "shot3_tracking_walk camera",
+        "fov": 40,
+        "transform": {
+          "position": [
+            -0.5,
+            1.6,
+            0.8
+          ],
+          "rotation": [
+            -17.102728969052375,
+            -55.78141729235104,
+            -14.274895133958205
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "track": {
+          "start": 5.504791666666667,
+          "duration": 6.506500333333332,
+          "from": {
+            "position": [
+              -0.5,
+              1.6,
+              0.8
+            ],
+            "rotation": [
+              -17.102728969052375,
+              -55.78141729235104,
+              -14.274895133958205
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          },
+          "to": {
+            "position": [
+              -0.5,
+              1.6,
+              -3.7
+            ],
+            "rotation": [
+              -17.10272896905238,
+              -55.78141729235105,
+              -14.274895133958212
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          },
+          "samples": [
+            {
+              "at": 0.4999999743845912,
+              "transform": {
+                "position": [
+                  -0.5,
+                  1.6,
+                  -1.7
+                ],
+                "rotation": [
+                  -17.102728969052375,
+                  -55.78141729235104,
+                  -14.274895133958205
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "shots": [
+      {
+        "id": "shot-1",
+        "name": "shot1_exterior_talk",
+        "cameraId": "camera-1",
+        "start": 0,
+        "duration": 1.8761666
+      },
+      {
+        "id": "shot-2",
+        "name": "shot2_lobby_entrance_wide",
+        "cameraId": "camera-2",
+        "start": 1.8761666,
+        "duration": 3.628625
+      },
+      {
+        "id": "shot-3",
+        "name": "shot3_tracking_walk",
+        "cameraId": "camera-3",
+        "start": 5.5047916,
+        "duration": 6.5065008575805665
+      }
+    ],
+    "look": {
+      "background": "#E8C9A8",
+      "ground": "#A8262C",
+      "ambientColor": "#FFD9B8",
+      "ambientIntensity": 0.75,
+      "keyColor": "#FFD9A0",
+      "keyIntensity": 2.2,
+      "keyPosition": [
+        5,
+        8,
+        6
+      ],
+      "exposure": 1.05
+    }
+  },
+  "summary": "Two purple-uniformed staff talk outside hotel doors, enter through open leaves into red-carpet lobby with palms, cross to depth past reception arches, then walk together past curved desk while senior writes notes.",
+  "assumptions": [
+    "Exterior at z~6 and lobby interior z 4 to -8 share one world; pillarbox bars ignored.",
+    "Doorman static background, not principal.",
+    "Hand/notepad gestures omitted; only whole-body pose tracked.",
+    "Cut times 1.8761666 and 5.5047916 exact.",
+    "All dimensions estimates in metres."
+  ],
+  "bindings": {
+    "concierge": [
+      "object-1"
+    ],
+    "lobby_boy": [
+      "object-2"
+    ],
+    "entrance_doors": [
+      "object-4",
+      "object-5"
+    ],
+    "reception_counter": [
+      "object-10"
+    ],
+    "curved_desk": [
+      "object-15"
+    ],
+    "arched_niches": [
+      "object-11",
+      "object-12",
+      "object-13",
+      "object-14"
+    ],
+    "lobby_palm": [
+      "object-16",
+      "object-17"
+    ]
+  }
+}

@@ -1,5 +1,6 @@
+import { worldTransform, localTransform, sceneEntities, descendants, hierarchyRoots } from '../placement/hierarchy.ts';
 import { Box3, Euler, MathUtils, Matrix3, Matrix4, Quaternion, Vector3 } from 'three';
-import { evaluateTransform } from '../model.ts';
+import { evaluateTransform,setTransformMotion } from '../model.ts';
 import { motionSchema, recordedTrack, trackPoses, transformSchema } from '../performance/motion.ts';
 import { animationSchema } from '../animation/model.ts';
 import { transformSelection } from '../placement/transforms.ts';
@@ -18,7 +19,7 @@ export function inspectSpatial(project: ProjectContent, value: SpatialQuery) {
     const frame = snapshot.frame(args.frame), boxes = new Map<string, Box3>();
     const objects = unique(args.objectIds).map(id => {
       const object = snapshot.object(id), bounds = snapshot.bounds(id, frame); boxes.set(id, bounds);
-      return { id, name: object.name, transform: evaluateTransform(object, args.time), bounds: boxData(snapshot.bounds(id)),
+      return { id, name: object.name, transform: worldTransform(snapshot.scene,object.id,args.time), bounds: boxData(snapshot.bounds(id)),
         boundsInFrame: boxData(bounds), anchors: snapshot.anchors(id), support: snapshot.support(id) };
     });
     const relations = objects.flatMap((a, i) => objects.slice(i + 1).map(b => {
@@ -57,10 +58,10 @@ export function solveSpatial(project: ProjectContent, value: SpatialOperation): 
   const op = spatialOperationSchema.parse(value), snapshot = new SpatialScene(project, op.sceneId, op.time);
   const poses = new Map<string, Transform>(), observations: Record<string, unknown> = {};
   const move = (id: string, offset: Vector3) => {
-    const pose = structuredClone(poses.get(id) ?? evaluateTransform(snapshot.object(id), op.time));
+    const pose = structuredClone(poses.get(id) ?? worldTransform(snapshot.scene,id,op.time));
     pose.position = new Vector3(...pose.position).add(offset).toArray(); poses.set(id, pose); snapshot.pose(id, pose);
   };
-  const distinct = (a: string, b: string) => { if (a === b) throw new Error('A spatial relation needs two different objects.'); };
+  const distinct = (a: string, b: string) => { if (descendants(sceneEntities(snapshot.scene),a).has(b)) throw new Error('The reference must be independent of the moved object, rather than itself or a descendant.'); };
   try {
     switch (op.type) {
       case 'place_on': {
@@ -97,7 +98,7 @@ export function solveSpatial(project: ProjectContent, value: SpatialOperation): 
         move(op.id, offset); observations.edgeGap = op.gap; observations.worldOffset = offset.toArray(); break;
       }
       case 'face_target': {
-        distinct(op.id, op.targetId); const pose = evaluateTransform(snapshot.object(op.id), op.time);
+        distinct(op.id, op.targetId); const pose = worldTransform(snapshot.scene,op.id,op.time);
         const direction = snapshot.bounds(op.targetId).getCenter(new Vector3()).sub(new Vector3(...pose.position)).setY(0);
         const quaternion = new Quaternion().setFromEuler(new Euler(...pose.rotation.map(MathUtils.degToRad) as Vec3, 'XYZ'));
         const current = forwardVector(op.forward).applyQuaternion(quaternion).setY(0);
@@ -109,8 +110,9 @@ export function solveSpatial(project: ProjectContent, value: SpatialOperation): 
       }
       case 'align_objects': {
         const frame = snapshot.frame(op.frame), axis = axisIndex[op.axis], target = pointAt(snapshot.bounds(op.referenceId, frame), op.edge).getComponent(axis);
-        for (const id of unique(op.objectIds)) {
+        for (const id of hierarchyRoots(sceneEntities(snapshot.scene),unique(op.objectIds))) {
           if (id === op.referenceId) continue;
+          distinct(id,op.referenceId);
           const delta = target - pointAt(snapshot.bounds(id, frame), op.edge).getComponent(axis);
           move(id, new Vector3().setComponent(axis, delta).applyMatrix3(new Matrix3().setFromMatrix4(frame)));
         }
@@ -118,7 +120,8 @@ export function solveSpatial(project: ProjectContent, value: SpatialOperation): 
       }
       case 'distribute_objects': {
         const frame = snapshot.frame(op.frame), axis = axisIndex[op.axis];
-        const rows = unique(op.objectIds).map(id => ({ id, bounds: snapshot.bounds(id, frame) })).sort((a, b) => a.bounds.getCenter(new Vector3()).getComponent(axis) - b.bounds.getCenter(new Vector3()).getComponent(axis));
+        const rows = hierarchyRoots(sceneEntities(snapshot.scene),unique(op.objectIds)).map(id => ({ id, bounds: snapshot.bounds(id, frame) })).sort((a, b) => a.bounds.getCenter(new Vector3()).getComponent(axis) - b.bounds.getCenter(new Vector3()).getComponent(axis));
+        if(rows.length<2)throw new Error('Select at least two independent hierarchy roots to distribute.');
         const first = rows[0].bounds, last = rows.at(-1)!.bounds;
         const start = pointAt(first, op.spacing === 'gaps' ? 'min' : 'center').getComponent(axis), end = pointAt(last, op.spacing === 'gaps' ? 'max' : 'center').getComponent(axis);
         const size = (box: Box3) => box.max.getComponent(axis) - box.min.getComponent(axis);
@@ -139,43 +142,54 @@ export function solveSpatial(project: ProjectContent, value: SpatialOperation): 
         observations.binding = 'one-time alignment; no persistent dependency'; break;
       }
       case 'follow_path': {
-        const object = snapshot.object(op.id);
+        const object = sceneEntities(snapshot.scene).find(item=>item.id===op.id);
+        if(!object)throw new Error('Unknown path object or camera: '+op.id);
+        let parent=sceneEntities(snapshot.scene).find(item=>item.id===object.parentId);
+        while(parent){if(parent.track||parent.animation)throw new Error('Detach from animated parents before assigning a world-space path.');parent=sceneEntities(snapshot.scene).find(item=>item.id===parent!.parentId);}
         if ((object.track || object.animation) && !op.replaceMotion) throw new Error('This object already has motion. Set replaceMotion=true only to replace it explicitly.');
         if (op.start + op.duration > snapshot.scene.duration + 1e-9) throw new Error('Path motion must finish within the scene.');
+        if(op.orientation==='look_at'&&(!op.target||!('fov' in object)))throw new Error('Look-at paths need a camera and a world-space target.');
         const points = op.points.map(p => new Vector3(...p)), distances = [0];
         for (let i = 1; i < points.length; i++) {
           const distance = points[i].distanceTo(points[i - 1]); if (distance < 1e-6) throw new Error('Consecutive path points must differ.');
           distances.push(distances[i - 1] + distance);
         }
-        const length = distances.at(-1)!, fractions = new Set([0, 1, ...distances.map(d => d / length)]);
+        if(op.pointTimes&&(op.pointTimes.length!==points.length||Math.abs(op.pointTimes[0]-op.start)>1e-8||Math.abs(op.pointTimes.at(-1)!-op.start-op.duration)>1e-8||op.pointTimes.some((at,i)=>i>0&&at<=op.pointTimes![i-1])))throw new Error('Path pointTimes must match the points, increase strictly, and span start to start+duration.');
+        const length = distances.at(-1)!,knots=op.pointTimes?op.pointTimes.map(at=>(at-op.start)/op.duration):distances.map(d=>d/length), fractions = new Set([0, 1, ...knots]);
+        if(op.orientation==='look_at')for(let i=1;i<Math.ceil(op.duration*30);i++)fractions.add(i/Math.ceil(op.duration*30));
         // Straight segments interpolate exactly. Keep corners and one pre-turn pose,
         // rather than repeating identical headings at 30fps into projects/tool contexts.
         if (op.orientation === 'tangent') for (let i = 1; i < distances.length - 1; i++) {
-          const corner = distances[i] / length, previous = distances[i - 1] / length;
+          const corner = knots[i], previous = knots[i - 1];
           fractions.add(corner - Math.min(1 / (30 * op.duration), (corner - previous) / 2));
         }
-        const original = evaluateTransform(object, op.time), fwd = forwardVector(op.forward);
+        const original = worldTransform(snapshot.scene,object.id,op.time), fwd = forwardVector(op.forward);
         const times = [...fractions].sort((a, b) => a - b).filter((at, i, all) => i === 0 || at - all[i - 1] > 1e-9);
         const frames = times.map(at => {
-          const distance = at * length; let segment = 1; while (segment < points.length - 1 && distances[segment] <= distance + 1e-10) segment++;
+          let segment = 1; while (segment < points.length - 1 && knots[segment] <= at + 1e-10) segment++;
           const pose = structuredClone(original), direction = points[segment].clone().sub(points[segment - 1]);
-          pose.position = points[segment - 1].clone().lerp(points[segment], (distance - distances[segment - 1]) / (distances[segment] - distances[segment - 1])).toArray();
+          pose.position = points[segment - 1].clone().lerp(points[segment], (at-knots[segment-1])/(knots[segment]-knots[segment-1])).toArray();
           if (op.orientation === 'tangent') {
             if (Math.hypot(direction.x, direction.z) < 1e-8) throw new Error('Tangent facing needs a horizontal path direction; use orientation=keep for vertical movement.');
             const yaw = Math.atan2(direction.x, direction.z) - Math.atan2(fwd.x, fwd.z);
             pose.rotation = poseOf(new Matrix4().makeRotationY(yaw)).rotation;
           }
-          return { time: op.start + at * op.duration, transform: pose };
+          if(op.orientation==='look_at'){
+            const eye=new Vector3(...pose.position),target=new Vector3(...op.target!);
+            if(eye.distanceToSquared(target)<1e-8)throw new Error('The camera path cannot pass through its look-at target.');
+            pose.rotation=poseOf(new Matrix4().lookAt(eye,target,new Vector3(0,1,0))).rotation;
+          }
+          return { time: op.start + at * op.duration, transform: localTransform(snapshot.scene,object.id,pose,op.start+at*op.duration) };
         });
-        const track = recordedTrack(frames);
-        return checked({ updates: [{ id: op.id, transform: structuredClone(track.from), track }],
-          observations: { length, speed: length / op.duration, samples: frames.length, path: 'piecewise-linear, constant speed; points are world-space object origins', collisionChecked: false } });
+        const track = recordedTrack(frames),updated=structuredClone(object);setTransformMotion(updated,track,op.time);
+        return checked({ updates: [{ id: op.id, transform: updated.transform, track:updated.track,...(updated.animation?{animation:updated.animation}:{}) }],
+          observations: { length, speed: length / op.duration, samples: frames.length, path: op.pointTimes?'piecewise-linear with explicit scene-time waypoints; points are world-space origins':'piecewise-linear, constant speed; points are world-space object origins', collisionChecked: false } });
       }
     }
     const updates = [...poses].map(([id, pose]) => {
       const object = snapshot.object(id);
       if ('scope' in op && op.scope === 'static' && (object.track || object.animation)) throw new Error(`${id} is animated. Use scope=whole_motion to preserve and reposition its entire path.`);
-      const updated = transformSelection([object], [{ id, transform: pose }], op.time, true)[0];
+      const updated = transformSelection([object], [{ id, transform: localTransform(snapshot.scene,id,pose,op.time) }], op.time, true)[0];
       return { id, transform: updated.transform, track: updated.track, ...(updated.animation ? { animation: updated.animation } : {}) };
     });
     return checked({ updates, observations });

@@ -11,15 +11,16 @@ export async function exportPNG(renderer: ShotRenderer, time: number): Promise<B
 }
 
 /** Encode scene time deterministically; encoder speed does not change the exported motion. */
-export async function exportVideo(renderer: ShotRenderer, shot: Shot, fps: number, signal: AbortSignal, progress: (done: number, total: number) => void): Promise<Blob> {
+export async function exportVideo(renderer: {canvas:HTMLCanvasElement;render(time:number):HTMLCanvasElement|Promise<HTMLCanvasElement>}, shot: Pick<Shot,'start'|'duration'>, fps: number, signal: AbortSignal, progress: (done: number, total: number) => void, bitrate?:number,format:'webm'|'mp4'='webm'): Promise<Blob> {
   const issue = videoExportIssue(); if (issue) throw new Error(issue);
-  const {Output, WebMOutputFormat, BufferTarget, CanvasSource, QUALITY_HIGH, getFirstEncodableVideoCodec} = await import('mediabunny');
+  const {Output, WebMOutputFormat,Mp4OutputFormat, BufferTarget, CanvasSource, Quality, getFirstEncodableVideoCodec} = await import('mediabunny');
   signal.throwIfAborted();
   const canvas = renderer.canvas;
-  const codec = await getFirstEncodableVideoCodec(['vp9', 'vp8'], {width: canvas.width, height: canvas.height, frameRate: fps, quality: QUALITY_HIGH});
-  if (!codec) throw new Error('This browser cannot encode WebM at this resolution. Try 720p or another browser.');
-  const target = new BufferTarget(), output = new Output({format: new WebMOutputFormat(), target});
-  const source = new CanvasSource(canvas, {codec, quality: QUALITY_HIGH, keyFrameInterval: 2});
+  const quality=bitrate?new Quality({bitrate:Math.round(bitrate)}):new Quality('high');
+  const codec = await getFirstEncodableVideoCodec(format==='mp4'?['avc']:['vp9', 'vp8'], {width: canvas.width, height: canvas.height, frameRate: fps, quality});
+  if (!codec) throw new Error('This browser cannot encode '+format.toUpperCase()+' at this resolution. Try another browser.');
+  const target = new BufferTarget(), output = new Output({format: format==='mp4'?new Mp4OutputFormat():new WebMOutputFormat(), target});
+  const source = new CanvasSource(canvas, {codec, quality, keyFrameInterval: 2});
   output.addVideoTrack(source, {frameRate: fps});
   try {
     signal.throwIfAborted();
@@ -28,7 +29,7 @@ export async function exportVideo(renderer: ShotRenderer, shot: Shot, fps: numbe
     for (let frame = 0; frame < frames; frame++) {
       signal.throwIfAborted();
       const timestamp = frame / fps, duration = Math.min(1 / fps, shot.duration - timestamp);
-      renderer.render(shot.start + timestamp);
+      await renderer.render(shot.start + timestamp);
       await source.add(timestamp, duration);
       progress(frame + 1, frames);
       // Give the UI time to paint progress and accept Cancel, even with a fast encoder.
@@ -37,7 +38,7 @@ export async function exportVideo(renderer: ShotRenderer, shot: Shot, fps: numbe
     signal.throwIfAborted();
     source.close(); await output.finalize(); signal.throwIfAborted();
     if (!target.buffer) throw new Error('The video file could not be finalized.');
-    return new Blob([target.buffer], {type: 'video/webm'});
+    return new Blob([target.buffer], {type: 'video/'+format});
   } catch (error) {
     if (output.state !== 'finalized' && output.state !== 'canceled') await output.cancel();
     throw error;

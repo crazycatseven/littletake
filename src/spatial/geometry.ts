@@ -1,7 +1,9 @@
+import {humanProxyParts} from '../assets/human.ts';
+import { sceneWorldMatrices, worldTransform } from '../placement/hierarchy.ts';
 import { Box3, BoxGeometry, BufferGeometry, CapsuleGeometry, Color, ConeGeometry, CylinderGeometry, DoubleSide,
   Euler, Group, MathUtils, Matrix3, Matrix4, Mesh, MeshStandardMaterial, Quaternion, Raycaster, SphereGeometry, PlaneGeometry, Vector3 } from 'three';
-import { createAssetGroup, disposeAssetGroup, type AssetDefinition } from '../assets/model.ts';
-import { evaluateTransform, sceneEntity } from '../model.ts';
+import { createAssetGroup, disposeAssetGroup, poseAssetJoints, type AssetDefinition } from '../assets/model.ts';
+import { evaluateTransform, evaluateJointAngles, sceneEntity } from '../model.ts';
 import type { ProjectContent, SceneObject, Transform, Vec3 } from '../types.ts';
 import type { SpatialFrame } from './schema.ts';
 
@@ -17,12 +19,12 @@ export function primitiveGeometry(kind: string): BufferGeometry {
   }
 }
 export function createObjectGroup(object: SceneObject, assets: AssetDefinition[], material: MeshStandardMaterial,
-  accent: MeshStandardMaterial, geometry = primitiveGeometry): Group {
+  accent: MeshStandardMaterial, geometry = primitiveGeometry, time = 0): Group {
   const root = new Group(); root.userData.entityId = object.id;
   if (object.kind === 'asset') {
     const asset = assets.find(a => a.id === object.asset?.id);
     if (!asset) throw new Error(`Missing asset for ${object.id}.`);
-    const group = createAssetGroup(asset); root.add(group);
+    const group = createAssetGroup(asset);poseAssetJoints(group,asset,evaluateJointAngles(object,time)); root.add(group);
     root.userData.anchors = group.userData.evaluated.anchors;
     group.traverse(node => { if (node instanceof Mesh) (node.material as MeshStandardMaterial).color.multiply(new Color(object.color)); });
   } else {
@@ -32,12 +34,10 @@ export function createObjectGroup(object: SceneObject, assets: AssetDefinition[]
       mesh.position.set(x, y, z); mesh.scale.set(sx, sy, sz); mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); return mesh;
     };
     if (object.kind === 'human') {
-      add('capsule', 0, 1.12, 0, .41, .29, .27); add('sphere', 0, .82, 0, .39, .28, .29, true);
-      add('cylinder', 0, 1.45, 0, .11, .12, .11); add('sphere', 0, 1.63, 0, .32, .37, .32);
-      for (const side of [-1, 1]) {
-        add('capsule', side * .12, .43, 0, .14, .34, .15, true); add('cube', side * .12, .055, -.045, .155, .11, .28, true);
-        add('capsule', side * .315, 1.09, 0, .12, .28, .12).rotation.z = side * .1;
-        add('sphere', side * .344, .79, 0, .13, .15, .13);
+      const owned:MeshStandardMaterial[]=[];root.userData.ownedMaterials=owned;
+      for(const part of humanProxyParts){const mesh=add(part.kind,...part.position,...part.size,part.accent);mesh.userData.partId=part.id;
+        if(part.color){const skin=material.clone();skin.color.set(part.color);mesh.material=skin;owned.push(skin);}
+        if(part.rotation)mesh.rotation.set(...part.rotation.map(MathUtils.degToRad) as Vec3);
       }
     } else add(object.kind, 0, 0, 0, 1, 1, 1);
   }
@@ -104,19 +104,19 @@ export class SpatialScene {
     if (!this.roots.has(id)) {
       const object = this.object(id), material = new MeshStandardMaterial({ color: object.color }), accent = material.clone();
       accent.color.multiplyScalar(.72);
-      const root = createObjectGroup(object, this.project.assets ?? [], material, accent);
+      const root = createObjectGroup(object, this.project.assets ?? [], material, accent, primitiveGeometry, this.time);
       // Asset meshes own their own materials.
       if (object.kind === 'asset') { material.dispose(); accent.dispose(); }
-      this.roots.set(id, root); this.pose(id, evaluateTransform(object, this.time));
+      this.roots.set(id, root);const matrix=sceneWorldMatrices(this.scene,this.time).get(id)!;matrix.decompose(root.position,root.quaternion,root.scale);root.matrix.copy(matrix);root.matrixAutoUpdate=false;root.updateMatrixWorld(true);
     }
     return this.roots.get(id)!;
   }
-  pose(id: string, pose: Transform) { const root = this.root(id); root.position.fromArray(pose.position); root.rotation.set(...pose.rotation.map(MathUtils.degToRad) as Vec3, 'XYZ'); root.scale.fromArray(pose.scale); root.updateMatrixWorld(true); this.vertices.delete(id); }
+  pose(id: string, pose: Transform) { const root = this.root(id);root.matrixAutoUpdate=true; root.position.fromArray(pose.position); root.rotation.set(...pose.rotation.map(MathUtils.degToRad) as Vec3, 'XYZ'); root.scale.fromArray(pose.scale); root.updateMatrixWorld(true); this.vertices.delete(id); }
   frame(frame: SpatialFrame): Matrix4 {
     if (frame.kind === 'world') return new Matrix4();
     const entity = sceneEntity(this.scene, frame.id);
     if (!entity || (frame.kind === 'object') !== ('kind' in entity)) throw new Error('Frame entity has the wrong kind or is missing: ' + frame.id);
-    return matrixOf({ ...evaluateTransform(entity, this.time), scale: [1, 1, 1] });
+    return matrixOf({ ...worldTransform(this.scene,entity.id,this.time), scale: [1, 1, 1] });
   }
   bounds(id: string, frame = new Matrix4()): Box3 {
     if (!this.vertices.has(id)) this.vertices.set(id, geometryVertices(this.root(id)));

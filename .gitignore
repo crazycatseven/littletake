@@ -9,4 +9,5 @@ dist/
 .littletake/
 output/
 .playwright-mcp/
+.playwright-cli/
 .DS_Store

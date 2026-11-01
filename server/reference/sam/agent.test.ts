@@ -181,9 +181,9 @@ test('large reference tool diagnostics cross the production response limit witho
   const response = await handler(new Request('https://example.com/api/scene-edit', { method: 'POST', headers: { 'content-type': 'application/json', 'accept-encoding': 'gzip, br;q=1' }, body: JSON.stringify(input) }));
   assert.equal(response.status, 200); assert.equal(response.headers.get('content-encoding'), 'br'); assert.equal(response.headers.get('vary'), 'Accept-Encoding');
   const wire = Buffer.from(await response.arrayBuffer()), decoded = brotliDecompressSync(wire);
-  assert.ok(decoded.length > 4_500_000); assert.ok(wire.length < 4_000_000);
+  assert.ok(decoded.length < 4_500_000); assert.ok(wire.length < 4_000_000);
   const result = JSON.parse(decoded.toString());
   assert.equal(result.status, 'ready'); assert.equal(result.diagnostic.toolTurns.length, 2); assert.equal(result.diagnostic.toolCalls.length, 3);
-  assert.deepEqual(result.diagnostic.input.reference.source.frames, frames); assert.equal(modelCalls, 2);
+  assert.deepEqual(result.diagnostic.input.reference.source.frames.map((frame:any)=>({...frame,dataUrl:result.diagnostic.media.find((media:any)=>media.ref===frame.dataUrl.dataRef)?.dataUrl})), frames); assert.equal(modelCalls, 2);
   assert.equal(decoded.includes(Buffer.from('test-only-never-public')), false);
 });

@@ -1,8 +1,12 @@
-import { XRKeyframeReader, deleteXRKeyframe } from './xr/timeline';
+import { bindParentingTree } from './placement/tree';
+import { descendants, hierarchyRoots, localTransform, worldTransform, sceneEntities, effectivelyHidden } from './placement/hierarchy';
+import { XRKeyframeReader, deleteXRKeyframes } from './xr/timeline';
+import { XRRecording, type XRRecordAction } from './xr/recording';
+import { newId } from "./id.ts";
 import './style.css';
 import { Stage } from './stage';
 import { EditorSelection, type SelectionMode } from './placement/selection';
-import { transformSelection, type PoseUpdate, type TransformPhase, type TransformScope } from './placement/transforms';
+import { duplicateHierarchy, reparentScene, transformSelection, type PoseUpdate, type TransformPhase, type TransformScope } from './placement/transforms';
 import { PlacementPanel } from './placement/panel';
 import { openShotExport } from './shot-export/dialog';
 import { openLookFrames } from './look/dialog';
@@ -12,24 +16,29 @@ import { updateAssetInstances } from './assets/edit';
 import { instantiateAsset, saveObjectAsset, linkObjectAsset } from './assets/library';
 import { createPrefabDialog } from './assets/dialog';
 import { bindHierarchyAssets, type HierarchyAssetSource } from './assets/hierarchy';
-import type { AssetDefinition } from './assets/model';
+import { evaluateAsset, type AssetDefinition } from './assets/model';
 import { bindComponents, componentInspector } from './components/inspector';
 import { inputController } from './components/model';
 import { applyTransformModifiers } from './components/transform';
 import { PerformanceSession } from './performance/session';
 import { trackPoses, transformSchema } from './performance/motion';
-import { createObject, cloneDocument, evaluateComponents, evaluateFov, evaluateTransform, animationFor, ensureAnimation, parseDocument, serializeDocument, History, createEmptyScene, createCamera, createShot, addIndependentShot, shotCamera, MAX_CAMERAS, sceneEntity, validateDocument } from './model';
-import { emptyAnimation, evaluateProperty, frameAtTime, keepRecordedTake, movePropertyKeys, duplicatePropertyKeys, propertyPaths, putKey, putTransformKeys, putVectorKeys, removePropertyKeys, retimeTake, setKeyInterpolation, timeAtFrame, type PropertyPath, type VectorProperty } from './animation/model';
-import { groupPaths, keyButton, keyState, renderPropertyRows, type PropertyGroup, type SelectedPropertyKey } from './animation/panel';
+import { createObject, cloneDocument, evaluateComponents, evaluateFov, evaluateJointAngles, evaluateTransform, animationFor, ensureAnimation, parseDocument, serializeDocument, History, createEmptyScene, createCamera, createShot, addIndependentShot, shotCamera, MAX_CAMERAS, sceneEntity, validateDocument } from './model';
+import { emptyAnimation, evaluateProperty, frameAtTime, isJointProperty, jointProperty, keepRecordedTake, movePropertyKeys, duplicatePropertyKeys, propertyPaths, putKey, putTransformKeys, putVectorKeys, removePropertyKeys, retimeTake, setKeyInterpolation, timeAtFrame, type PropertyPath, type VectorProperty } from './animation/model';
+import { groupPaths, keyButton, keyState, propertyGroup, renderPropertyRows, scalarGroup, type PropertyGroup, type SelectedPropertyKey } from './animation/panel';
 import './animation/panel.css';
 import type { Axis, MotionTrack, PrimitiveKind, SceneDocument, SceneEntity, SceneObject, ProjectContent, Shot, ToolMode, Transform } from './types';
 import { ReferenceDialog } from './reference/dialog';
+import { shotAtTime } from './model';
+import { DEFAULT_SCENE_LOOK, lookFields, sceneLookSchema } from './scene-edit/look';
 import { SceneEditPanel } from './scene-edit/panel';
 import { projectContent, serializeContent, validateProjectContent } from './project/model';
 import { applyProjectOperations } from './scene-edit/operations';
+import { sketchedCameraMove, sketchedPath, withCameraMove } from './spatial/sketch';
 import './project/panel.css';
 import type { SceneSnapshot } from './scene-edit/operations';
-import { type ProjectDocument, ProjectStorage, createProject, parseProject, serializeProject, PROJECT_STORAGE_KEY, MAX_PROJECT_SIZE } from './project/storage';
+import { type ProjectDocument, ProjectStorage, createProject, parseProject, serializeProject, MAX_PROJECT_SIZE } from './project/storage';
+import { Workspace } from './project/workspace';
+import { MAX_ARCHIVE_BYTES } from './project/room';
 
 const icons: Record<string, string> = {
   move: '<path d="M12 3v18M3 12h18M8 7l4-4 4 4M8 17l4 4 4-4M7 8l-4 4 4 4M17 8l4 4-4 4"/>',
@@ -67,27 +76,27 @@ const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.qu
 const app = $('#app');
 app.innerHTML = `
 <header class="app-header">
-  <a class="brand" href="/" aria-label="LittleTake Studio"><span class="brand-mark">L<span></span></span><span>LittleTake</span></a>
+  <a class="brand" href="/" aria-label="LittleTake Studio"><span class="brand-mark">L</span><span>LittleTake</span></a>
   <div class="project-title"><input id="projectName" aria-label="Project name" maxlength="120"/><span id="saveStatus" class="save-status">Local draft</span></div>
   <div class="history-actions"><button class="icon-button" data-action="undo" aria-label="Undo" title="Undo · Ctrl Z">${icon('undo')}</button><button class="icon-button" data-action="redo" aria-label="Redo" title="Redo · Ctrl Shift Z">${icon('redo')}</button></div>
-  <div class="header-actions"><button data-action="reference">${icon('camera')}<span>Reference video</span></button><button class="primary-button" data-action="export">${icon('download')}<span>Export project</span></button><details class="studio-menu" id="sceneMenu"><summary aria-label="Scene menu" title="Scene menu">${icon('more')}</summary><div class="menu-content"><button data-action="open">${icon('folder')}Open scene / project</button><button data-action="export-scene">${icon('download')}Export current scene</button><button data-action="top-view">${icon('eye')}Layout snapshot</button><button data-action="new-project">${icon('plus')}New empty project</button><button data-action="save">${icon('save')}Save locally<kbd>⌘ / Ctrl S</kbd></button><button data-action="shortcuts">${icon('help')}Keyboard shortcuts</button></div></details></div>
+  <div class="header-actions"><button data-action="reference">${icon('camera')}<span>Video or sketch</span></button><button class="primary-button" data-action="export">${icon('download')}<span>Export project</span></button><details class="studio-menu" id="sceneMenu"><summary aria-label="Scene menu" title="Scene menu">${icon('more')}</summary><div class="menu-content"><button data-action="open">${icon('folder')}Open scene / project</button><button data-action="export-scene">${icon('download')}Export current scene</button><button data-action="top-view">${icon('eye')}Layout snapshot</button><button data-action="new-project">${icon('plus')}New project</button><button data-action="save">${icon('save')}Save locally<kbd>⌘ / Ctrl S</kbd></button><button data-action="shortcuts">${icon('help')}Keyboard shortcuts</button></div></details></div>
 </header>
 <div class="storage-warning" id="storageWarning" role="alert" hidden><span></span><button data-action="export-project">Download your changes</button><button data-action="recover-storage" hidden>Download saved data</button><button data-action="open">Open project</button><button data-action="reload">Reload</button></div>
 <main class="workspace">
   <aside class="library-panel">
-    <div class="scene-switcher"><label for="sceneSelect">SCENES</label><div><select id="sceneSelect" aria-label="Active scene"></select><button data-action="add-scene" aria-label="New scene" title="New empty scene">＋</button></div><input id="sceneName" aria-label="Scene name" maxlength="120" placeholder="No scene yet"/></div>
+    <div class="scene-switcher"><button data-action="open-scenes" title="Open Assets / Scenes">▱ Assets / Scenes</button><div><select id="sceneSelect" aria-label="Active scene"></select><button data-action="add-scene" aria-label="New scene" title="New empty scene">＋</button></div><input id="sceneName" aria-label="Scene name" maxlength="120" placeholder="No scene yet"/></div>
     <div class="library-tabs" role="tablist" aria-label="Library"><button id="objectsTab" role="tab" aria-controls="objectsPanel" aria-selected="true" data-library="objects">Objects<span id="objectCount"></span></button><button id="assetsTab" role="tab" aria-controls="assetPanel" aria-selected="false" data-library="assets">${icon('plus')}Add</button></div>
     <div id="objectsPanel" class="library-page" role="tabpanel" aria-labelledby="objectsTab"><input id="hierarchySearch" class="hierarchy-search" type="search" aria-label="Search objects" placeholder="Search objects…"/><div class="hierarchy-tools"><span id="selectionCount">0 selected</span><button data-action="hide-selection" title="Hide selected objects · H" aria-label="Hide selected objects">${icon('hidden')}</button><button data-action="show-selection" title="Show selected objects" aria-label="Show selected objects">${icon('eye')}</button></div><div id="outliner" class="outliner" aria-label="Scene objects"></div><button class="hierarchy-footer" id="visibilitySummary" data-action="show-all">All objects visible</button></div>
   </aside>
   <section class="stage-panel" aria-label="3D stage">
     <div class="viewport-heading"><div class="transform-tools" role="toolbar" aria-label="Transform tools"><button data-tool="translate" aria-label="Move tool" title="Move · G">${icon('move')}<span>Move</span></button><button data-tool="rotate" aria-label="Rotate tool" title="Rotate · R">${icon('rotate')}<span>Rotate</span></button><button data-tool="scale" aria-label="Scale tool" title="Scale · S">${icon('scale')}<span>Scale</span></button></div><div><button data-action="ground" title="Drop to the floor or surface below · double-click the green Y handle">↓ Drop to surface</button><button data-action="focus" title="Focus selection · F">${icon('focus')}Focus</button><button data-action="reset-view" aria-label="Reset scene view">Reset view</button></div></div>
-    <div id="viewport" class="viewport"></div><div id="performanceBar" hidden></div><div id="emptyStage" class="empty-stage" hidden><h2>A place for your next story.</h2><p>Describe a set to Muse, or add your first scene.</p><button data-action="build-with-muse" class="primary-button">Build with Muse ↗</button></div>
-    <section class="shot-panel" aria-label="Shot preview"><div class="shot-switcher"><select id="shotSelect" aria-label="Active shot"></select><button data-action="add-shot" aria-label="New shot" title="New shot">＋</button></div><div class="shot-heading"><h2>${icon('camera')}Shot preview</h2><button class="icon-button" data-action="expand-preview" aria-label="Expand shot preview" aria-expanded="false" title="Expand preview">${icon('expand')}</button></div><div id="previewDock"><div class="preview-frame" id="previewFrame"><div id="preview" class="preview"></div></div></div><div class="shot-footer"><span id="shotFrameStatus"><span class="live-dot"></span>Live · 16:9</span><button data-action="edit-shot" id="lensLabel">Edit shot</button></div></section>
+    <div id="viewport" class="viewport"></div><div id="performanceBar" hidden></div><div id="emptyStage" class="empty-stage" hidden><h2>No scene</h2><p>Add a scene or describe one to Muse.</p><button data-action="build-with-muse" class="primary-button">Build with Muse</button></div>
+    <section class="shot-panel" aria-label="Shot preview"><div class="shot-switcher"><select id="shotSelect" aria-label="Active shot"></select><button data-action="add-shot" aria-label="New shot" title="New shot">＋</button></div><div class="shot-heading"><h2>${icon('camera')}<span>Shot preview</span></h2><button class="icon-button" data-action="expand-preview" aria-label="Expand shot preview" aria-expanded="false" title="Expand preview">${icon('expand')}</button></div><div id="previewDock"><div class="preview-frame" id="previewFrame"><div id="preview" class="preview"></div></div></div><div class="shot-footer"><span id="shotFrameStatus"><span class="live-dot"></span>Live · 16:9</span><button data-action="edit-shot" id="lensLabel">Edit shot</button></div></section>
     <div class="viewport-caption"><span id="viewHint">Drag to orbit · Scroll to zoom</span></div>
     <div class="ai-preview-badge" id="aiPreviewBadge" role="status" hidden>Previewing Muse changes</div>
   </section>
   <aside class="properties-drawer" id="propertiesDrawer" aria-label="Scene assistant and inspector">
-    <div class="panel-tabs" role="tablist" aria-label="Scene tools"><button id="museTab" role="tab" data-panel="muse" aria-selected="true" aria-controls="sceneAI">✧ Muse</button><button id="inspectorTab" role="tab" data-panel="inspector" aria-selected="false" aria-controls="inspector">Inspector</button><span class="model-pill" id="museModel">Muse</span></div>
+    <div class="panel-tabs" role="tablist" aria-label="Scene tools"><button id="museTab" role="tab" data-panel="muse" aria-selected="true" aria-controls="sceneAI">Muse</button><button id="inspectorTab" role="tab" data-panel="inspector" aria-selected="false" aria-controls="inspector">Inspector</button><span class="model-pill" id="museModel">Muse</span></div>
     <section class="ai-edit-panel" id="sceneAI" role="tabpanel" aria-labelledby="museTab"></section>
     <section class="inspector-panel" id="inspector" role="tabpanel" aria-labelledby="inspectorTab" hidden></section>
   </aside>
@@ -98,15 +107,15 @@ app.innerHTML = `
   <div class="timeline-content" id="timelineContent"><div class="timeline-ruler-row"><div class="track-heading">SHOT / PROPERTY</div><div class="animation-ruler-window"><div id="timeRuler" class="time-ruler" role="slider" tabindex="0" aria-label="Timeline playhead" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"></div></div></div><div id="timelineRows" class="timeline-rows"></div></div>
 </section>
 <footer class="status-bar"><section id="assetPanel" aria-label="Asset manager"></section><span id="statusText" role="status">Ready</span><button data-action="shortcuts">${icon('help')}Shortcuts</button></footer>
-<dialog id="newProjectDialog"><div class="dialog-heading"><h2>Start an empty project?</h2></div><p>Your current project and chats will be downloaded first.</p><div class="change-actions"><button data-action="cancel-new-project">Cancel</button><button data-action="confirm-new-project" class="primary-button">Download &amp; start empty</button></div></dialog>
-<input id="openFile" type="file" accept=".json,application/json" hidden/>
+<input id="openFile" type="file" accept=".json,.zip,application/json,application/zip" hidden/>
 <dialog id="sceneSnapshotDialog" aria-labelledby="sceneSnapshotTitle"><div class="dialog-heading"><h2 id="sceneSnapshotTitle">Top view</h2><button data-action="close-snapshot" aria-label="Close top view">✕</button></div><img id="sceneSnapshotImage" class="scene-snapshot-image" alt="Top-down scene layout with object IDs"/><div class="snapshot-footer"><span id="sceneSnapshotInfo"></span><div><button data-action="refresh-snapshot">Refresh</button><button data-action="download-snapshot" class="primary-button">Download PNG</button></div></div></dialog>
 <dialog id="previewDialog" aria-labelledby="previewTitle"><div class="dialog-heading"><h2 id="previewTitle">Shot preview</h2><button data-action="close-preview" aria-label="Close shot preview">✕</button></div><div id="expandedPreview"></div><div class="preview-transport"><button class="play-button" data-action="play" aria-label="Play">${icon('play')}</button><span class="timecode" data-current-time></span><span class="timecode-separator">/</span><span class="timecode" data-end-time></span></div></dialog>
-<dialog id="shortcutsDialog"><div class="dialog-heading"><h2>Make yourself at home.</h2><button data-action="close-shortcuts" aria-label="Close shortcuts">✕</button></div><p class="muted">A few controls for your little stage.</p><dl class="shortcut-list"><dt>Orbit / pan / zoom</dt><dd>Left drag / Middle drag / Scroll</dd><dt>Fly around the scene</dt><dd>Hold right mouse + W A S D · Q / E up & down</dd><dt>Asset drawer</dt><dd>B · configurable in the bottom bar</dd><dt>Object controls</dt><dd>W/S forward/back · A/D turn · R record · Esc exit</dd><dt>Move / rotate / scale</dt><dd>G / R / S</dd><dt>Constrain an axis</dt><dd>X / Y / Z</dd><dt>Box select / add to selection</dt><dd>Shift drag empty space / Ctrl Shift drag</dd><dt>Multi-select in Hierarchy</dt><dd>Ctrl click / Shift click a range</dd><dt>Drop to surface</dt><dd>Double-click the green Y move handle</dd><dt>View orientation</dt><dd>Click an axis / drag the upper-right gizmo</dd><dt>Focus selection</dt><dd>F</dd><dt>Insert property key</dt><dd>Hover or focus a property · I</dd><dt>Play / pause</dt><dd>Space</dd><dt>Duplicate / delete</dt><dd>Ctrl D / Delete</dd><dt>Undo / redo</dt><dd>Ctrl Z / Ctrl Shift Z</dd><dt>Save locally</dt><dd>Ctrl S</dd></dl><p class="dialog-note">Use Key Transform for a whole pose, or key an individual property and expand its axes in the timeline.</p></dialog>
+<dialog id="shortcutsDialog"><div class="dialog-heading"><h2>Keyboard shortcuts</h2><button data-action="close-shortcuts" aria-label="Close shortcuts">✕</button></div><p class="muted">Editor controls.</p><dl class="shortcut-list"><dt>Orbit / pan / zoom</dt><dd>Left drag / Middle drag / Scroll</dd><dt>Fly around the scene</dt><dd>Hold right mouse + W A S D · Q / E up & down</dd><dt>Asset drawer</dt><dd>B · configurable in the bottom bar</dd><dt>Object controls</dt><dd>W/S forward/back · A/D turn · R record · Esc exit</dd><dt>Move / rotate / scale</dt><dd>G / R / S</dd><dt>Constrain an axis</dt><dd>X / Y / Z</dd><dt>Box select / add to selection</dt><dd>Shift drag empty space / Ctrl Shift drag</dd><dt>Multi-select in Hierarchy</dt><dd>Ctrl click / Shift click a range</dd><dt>Drop to surface</dt><dd>Double-click the green Y move handle</dd><dt>View orientation</dt><dd>Click an axis / drag the upper-right gizmo</dd><dt>Focus selection</dt><dd>F</dd><dt>Insert property key</dt><dd>Hover or focus a property · I</dd><dt>Play / pause</dt><dd>Space</dd><dt>Duplicate / delete</dt><dd>Ctrl D / Delete</dd><dt>Undo / redo</dt><dd>Ctrl Z / Ctrl Shift Z</dd><dt>Save locally</dt><dd>Ctrl S</dd></dl><p class="dialog-note">Use Key Transform for a whole pose, or key an individual property and expand its axes in the timeline.</p></dialog>
 `;
 
 const projectStorage = new ProjectStorage({ getItem: key => localStorage.getItem(key), setItem: (key, value) => localStorage.setItem(key, value) });
 let project = createProject(), recovered = false, storageError = '';
+let workspace: Workspace | undefined;
 try { const loaded = projectStorage.load(); project = loaded.project; recovered = loaded.recovered; }
 catch { storageError = 'The saved project could not be opened. Download saved data before opening a replacement.'; }
 const emptyView = createEmptyScene('empty-view', 'No scene');
@@ -126,9 +135,10 @@ let placementPanel: PlacementPanel | undefined;
 let assetsPanel: AssetPanel | undefined;
 let libraryAssets: AssetDefinition[] = [];
 let assetSaveBusy = false;
-let assetProjectToken = crypto.randomUUID();
+let assetProjectToken = newId();
 let assetEditor: AssetEditor | null = null;
 let performanceSession: PerformanceSession | null = null;
+let xrRecording: XRRecording | null = null;
 let storageAvailable = true;
 let timelineOpen = false;
 let timelineHeight = window.innerHeight <= 720 ? 180 : 220;
@@ -148,6 +158,7 @@ let sceneEditor: SceneEditPanel | undefined;
 let sceneSnapshot: SceneSnapshot | null = null;
 let liveFieldEdit=false; let pendingFieldDoc:ProjectContent|null=null; let fieldCommitTimer:ReturnType<typeof setTimeout>|undefined;
 function flushFieldEdit(){clearTimeout(fieldCommitTimer);if(pendingFieldDoc){history.commit(pendingFieldDoc);pendingFieldDoc=null;renderSelection();}}
+const collapsedHierarchy = new Set<string>();
 const entity = (id = selection.active): SceneEntity | undefined => sceneEntity(doc, id);
 const copyPose = (pose: Transform): Transform => structuredClone(pose);
 const num = (value: number) => Number(value.toFixed(3));
@@ -156,7 +167,7 @@ function nextId(prefix:string,items:{id:string}[]){let n=1;while(items.some(item
 function visibleScene(){return editPreview?.scenes.find(scene=>scene.id===previewSceneId)??(editPreview?emptyView:doc);}
 function activeShot(){return visibleScene().shots.find(shot=>shot.id===(editPreview?previewShotId:project.activeShotId));}
 function syncDocument(){
-  if(!project.scenes.some(scene=>scene.id===project.activeSceneId))project.activeSceneId=project.scenes[0]?.id??null;
+  if(!project.scenes.some(scene=>scene.id===project.activeSceneId)){project.activeSceneId=project.scenes[0]?.id??null;project.activeShotId=project.scenes[0]?.shots[0]?.id??null;}
   doc=project.scenes.find(scene=>scene.id===project.activeSceneId)??emptyView;
   if(project.activeShotId!==null&&!doc.shots.some(shot=>shot.id===project.activeShotId))project.activeShotId=doc.shots[0]?.id??null;
   const selectedShot=doc.shots.find(shot=>shot.id===selection.active);
@@ -171,15 +182,16 @@ function replaceContent(next:ProjectContent,focus?:{sceneId:string|null;shotId:s
   syncDocument();
 }
 function openProject(next:ProjectDocument){
-  pause();flushFieldEdit();sceneEditor?.session.cancel();projectStorage.acceptImport();
+  pause();flushFieldEdit();sceneEditor?.session.cancel();referenceDialog.contextChanged();
   storageError='';$('#storageWarning').hidden=true;$('.workspace').inert=false;$('#timelinePanel').inert=false;$('.app-header').inert=false;
-  project=next;assetProjectToken=crypto.randomUUID();selection.active=null;time=0;syncDocument();history=new History(projectContent(project));
+  project=next;assetProjectToken=newId();selection.active=null;time=0;syncDocument();history=new History(projectContent(project));
   sceneEditor?.session.replaceBook(next.conversations);if(sceneEditor)project.conversations=sceneEditor.session.book;
   renderAll();persist();
   synchronizeAssets(libraryAssets);void assetsPanel?.refresh();
 }
 function synchronizeAssets(assets:AssetDefinition[]):number {
   libraryAssets=assets;
+  if(!workspace?.canEdit)return 0;
   if(storageError||performanceSession)return 0;
   const result=updateAssetInstances(projectContent(project),assets);
   if(JSON.stringify(result.project.assets)===JSON.stringify(project.assets))return 0;
@@ -191,6 +203,20 @@ function switchScene(id:string){
   if(editPreview){previewSceneId=id;previewShotId=visibleScene().shots[0]?.id??null;selection.active=null;time=0;renderAll();return;}
   sceneEditor?.session.contextChanged();project.activeSceneId=id;project.activeShotId=project.scenes.find(scene=>scene.id===id)?.shots[0]?.id??null;selection.active=null;time=0;syncDocument();renderAll();persist();
 }
+function requestDeleteScene(id:string){
+  const scene=project.scenes.find(item=>item.id===id);if(!scene||editPreview||performanceSession||storageError)return;
+  pause();flushFieldEdit();const projectToken=assetProjectToken,dialog=document.createElement('dialog');
+  dialog.innerHTML='<div class="dialog-heading"><h2>Delete '+esc(scene.name)+'?</h2></div><p>This removes '+scene.objects.length+' objects, '+scene.cameras.length+' cameras and '+scene.shots.length+' shots from this project. Library assets are kept. Undo restores the scene.</p><div class="change-actions"><button data-cancel>Cancel</button><button data-delete>Delete Scene</button></div>';
+  dialog.querySelector<HTMLButtonElement>('[data-cancel]')!.onclick=()=>dialog.close();
+  dialog.querySelector<HTMLButtonElement>('[data-delete]')!.onclick=()=>{
+    if(assetProjectToken!==projectToken||!project.scenes.some(item=>item.id===id)){dialog.close();return;}
+    const active=project.activeSceneId===id;
+    replaceContent(applyProjectOperations(projectContent(project),[{type:'remove_scene',sceneId:id}],time));
+    if(active){selection.active=null;time=0;project.activeShotId=doc.shots[0]?.id??null;}
+    changed('Scene deleted · Undo restores it');persist();dialog.close();
+  };
+  dialog.onclose=()=>dialog.remove();document.body.appendChild(dialog);dialog.showModal();
+}
 function switchShot(id:string){
   const shot=visibleScene().shots.find(item=>item.id===id);if(!shot)return;
   pause();flushFieldEdit();
@@ -200,6 +226,7 @@ function switchShot(id:string){
   renderNavigation();renderInspector();renderSelection();renderTime();syncStage();if(!editPreview)persist();
 }
 function addScene(){
+  pause();flushFieldEdit();
   if(project.scenes.length>=24){status('This project supports up to 24 scenes');return;}
   const scene=createEmptyScene(nextId('scene',project.scenes),'Scene '+(project.scenes.length+1));
   project.scenes.push(scene);project.activeSceneId=scene.id;project.activeShotId=null;selection.active=null;time=0;syncDocument();changed('Empty scene added');
@@ -246,15 +273,7 @@ function renderNavigation(){
 function status(message: string) { $('#statusText').textContent = message; clearTimeout(statusTimer); statusTimer=setTimeout(()=>$('#statusText').textContent='Ready',5000); }
 function persist() {
   clearTimeout(saveTimer);
-  if (!storageError) {
-    try { projectStorage.save(project); $('#saveStatus').textContent='Saved on this device'; storageAvailable=true; }
-    catch (error) { storageError=error instanceof Error?error.message:'Local storage is unavailable. Download your project to keep your changes.'; storageAvailable=false;sceneEditor?.session.cancel('Saving is unavailable. Download your changes or reload before continuing.'); }
-  }
-  if (storageError) {
-    storageAvailable=false;$('#saveStatus').textContent='Project not saved';$('#storageWarning').hidden=false;$('#storageWarning > span').textContent=storageError;
-    $('[data-action="recover-storage"]').hidden=!projectStorage.savedText();
-    $('.workspace').inert=true;$('#timelinePanel').inert=true;$('.app-header').inert=true;
-  }
+  workspace?.save(project);
 }
 function changed(message?: string) { project.revision++;sceneEditor?.sceneChanged(); if(liveFieldEdit){pendingFieldDoc=structuredClone(projectContent(project));clearTimeout(fieldCommitTimer);fieldCommitTimer=setTimeout(flushFieldEdit,450);}else{flushFieldEdit();history.commit(projectContent(project));} renderAll(); if(!storageError)$('#saveStatus').textContent='Saving…'; clearTimeout(saveTimer); saveTimer=setTimeout(persist,350); if(message)status(message); }
 function pause() { const wasPlaying=playing; playing=false; renderTransport(); if(wasPlaying){renderInspector();syncStage();} }
@@ -262,7 +281,8 @@ function select(id: string | null) { selectIds(id ? [id] : [], 'replace'); }
 function selectIds(ids: string[], mode: SelectionMode, range = false) {
   if(performanceSession)return;flushFieldEdit();
   const previous=selection.active;
-  const objects=visibleScene().objects.map(item=>item.id),cameraId=ids.find(id=>visibleScene().cameras.some(camera=>camera.id===id));
+  for(const id of ids){let node=sceneEntity(visibleScene(),id);while(node?.parentId){collapsedHierarchy.delete(visibleScene().id+'|'+node.parentId);node=sceneEntity(visibleScene(),node.parentId);}}
+  const objects=sceneEntities(visibleScene()).map(item=>item.id),cameraId=ids.find(id=>visibleScene().cameras.some(camera=>camera.id===id));
   if(cameraId)selection.active=cameraId;
   else {
     selection.retain(objects);
@@ -292,6 +312,7 @@ function currentDraft(item:SceneEntity,path:PropertyPath) {
 function propertyValue(item:SceneEntity,path:PropertyPath):number {
   const draft=currentDraft(item,path);if(draft)return draft.value;
   if(path==='fov')return 'fov' in item?evaluateFov(item,time):45;
+  if(isJointProperty(path))return 'kind' in item?evaluateJointAngles(item,time)[path.slice(12)]??0:0;
   const [group,axis]=path.split('.') as [VectorProperty,'x'|'y'|'z'],index='xyz'.indexOf(axis);
   if(group==='pivot') {
     const pivot='kind' in item?evaluateComponents(item,time)?.find(component=>component.type==='pivot'):undefined;
@@ -308,11 +329,11 @@ function displayedPose(item:SceneEntity):Transform {
 }
 function sceneWithDrafts(scene:SceneDocument):SceneDocument {
   const overlay=(item:SceneEntity):SceneEntity=>{
-    const paths=['position','rotation','scale','pivot'].flatMap(group=>propertyPaths(group as VectorProperty)).concat('fov');
+    const paths=['position','rotation','scale','pivot'].flatMap(group=>propertyPaths(group as VectorProperty)).concat('fov', Object.keys(item.animation?.curves??{}).filter(isJointProperty));
     if(!paths.some(path=>currentDraft(item,path)))return item;
     const copy=structuredClone(item);copy.transform=displayedPose(item);copy.track=null;delete copy.animation;
     if('fov' in copy && 'fov' in item)copy.fov=propertyValue(item,'fov');
-    if('kind' in copy && 'kind' in item){copy.components=structuredClone(evaluateComponents(item,time));const pivot=copy.components?.find(component=>component.type==='pivot');if(pivot?.type==='pivot')pivot.offset=['x','y','z'].map(axis=>propertyValue(item,`pivot.${axis}` as PropertyPath)) as Transform['position'];}
+    if('kind' in copy && 'kind' in item){copy.components=structuredClone(evaluateComponents(item,time));const pivot=copy.components?.find(component=>component.type==='pivot');if(pivot?.type==='pivot')pivot.offset=['x','y','z'].map(axis=>propertyValue(item,`pivot.${axis}` as PropertyPath)) as Transform['position'];if(item.asset){copy.jointAngles=evaluateJointAngles(item,time);for(const path of paths)if(isJointProperty(path))copy.jointAngles[path.slice(12)]=propertyValue(item,path);}}
     return copy;
   };
   return {...scene,objects:scene.objects.map(item=>overlay(item) as SceneObject),cameras:scene.cameras.map(item=>overlay(item) as typeof item)};
@@ -325,7 +346,7 @@ function editProperty(item:SceneEntity,path:PropertyPath,value:number):boolean {
   const [group,axis]=path.split('.') as [VectorProperty,'x'|'y'|'z'];const index='xyz'.indexOf(axis);
   if(autoKey||existing) {
     const next=ensureAnimation(item);
-    if(autoKey && path!=='fov'){
+    if(autoKey && path!=='fov' && !isJointProperty(path)){
       const values=propertyValues(item,group) as Transform['position'];values[index]=value;putVectorKeys(next,group,time,values);
       groupPaths(group).forEach(key=>{if(currentDraft(item,key))unkeyed.delete(draftId(item,key));});
     }else{
@@ -336,19 +357,20 @@ function editProperty(item:SceneEntity,path:PropertyPath,value:number):boolean {
   }
   if(!keys.length){
     if(path==='fov'&&'fov' in item)item.fov=value;
+    else if(isJointProperty(path)&&'kind' in item)item.jointAngles={...item.jointAngles,[path.slice(12)]:value};
     else if(group==='pivot'&&'kind' in item){const pivot=item.components?.find(component=>component.type==='pivot');if(pivot?.type==='pivot')pivot.offset[index]=value;}
     else if(group!=='pivot')item.transform[group][index]=value;
     return true;
   }
   const pending=unkeyed.get(draftId(item,path));
   if(pending&&Math.abs(pending.time-time)>1e-6){status('An unkeyed change is waiting at another time · Review it first');return false;}
-  unkeyed.set(draftId(item,path),{time,value});status('Unkeyed change · Insert a key to keep it');return false;
+  unkeyed.set(draftId(item,path),{time,value});renderPendingChanges(item);status('Unkeyed change · Insert a key to keep it');return false;
 }
 function keyProperty(item:SceneEntity,group:PropertyGroup,toggle:boolean):void {
   const paths=groupPaths(group),animation=animationFor(item),remove=toggle&&keyState(animation,group,time)==='on-key'&&!paths.some(path=>currentDraft(item,path)),values=propertyValues(item,group);
   const target=ensureAnimation(item);
   if(remove)removePropertyKeys(target,paths,time);
-  else if(group==='fov')putKey(target,'fov',time,values[0]);
+  else if(scalarGroup(group))putKey(target,group,time,values[0]);
   else putVectorKeys(target,group,time,values as Transform['position']);
   paths.forEach(path=>{if(currentDraft(item,path))unkeyed.delete(draftId(item,path));});
   selectedPropertyKey=remove?null:{group,time};changed(remove?'Property key removed':'Property key added');
@@ -363,15 +385,23 @@ function keyTransform(item:SceneEntity):void {
 }
 const xrKeyframes = new XRKeyframeReader();
 function syncStage() { const item=entity(), visibleDoc=sceneWithDrafts(visibleScene()),session=performanceSession;
+  if(xrRecording && xrRecording.mode!=='armed')visibleDoc.objects=visibleDoc.objects.map(object=>object.id===xrRecording!.before.id?{...object,track:null,animation:undefined,transform:xrRecording!.preview(time)}:object);
   const component=inputController(session?.before.components);stage?.setControlled(session?{id:session.before.id,pose:session.preview(time),world:component?.type==='movement'&&component.space==='world'}:null);
   stage?.update(visibleDoc,Math.min(time,visibleDoc.duration),selection.ids,Boolean(editPreview) || !!session || playing, editPreview ? previewShotId : project.activeShotId,(editPreview??project).assets??[]); }
-function seek(value: number) { time=clamp(value,0,visibleScene().duration); renderTime(); syncStage(); if(!playing)renderInspector(); }
+function followTimelineShot(){
+  const shot=shotAtTime(visibleScene(),time),id=shot?.id??null;
+  if(id===(editPreview?previewShotId:project.activeShotId))return;
+  if(editPreview)previewShotId=id;else project.activeShotId=id;
+  renderNavigation();renderSelection();
+}
+function seek(value: number) { time=clamp(value,0,visibleScene().duration);followTimelineShot(); renderTime(); syncStage(); if(!playing)renderInspector(); }
 function renderTransport() { document.querySelectorAll<HTMLButtonElement>('[data-action="play"]').forEach(button=>{button.innerHTML=icon(playing?'pause':'play');button.setAttribute('aria-label',playing?'Pause':'Play');button.classList.toggle('is-playing',playing);}); }
 function renderTime() {
   const doc=visibleScene(), shot=activeShot();
   const camera=shotCamera(doc,shot?.id??null)??doc.cameras.find(item=>item.id===selection.active)??doc.cameras[0];
   $('#shotFrameStatus').textContent=shot?(time<shot.start||time>shot.start+shot.duration?'Outside shot range':camera?.name+' · 16:9'):camera?camera.name+' · Preview':'No camera';
   $<HTMLButtonElement>('[data-action="export-shot"]').disabled=!shot||!!editPreview||!!performanceSession||[...unkeyed.keys()].some(key=>key.startsWith(`${doc.id}|`));
+  $<HTMLButtonElement>('[data-action="look-frames"]').disabled=!shot||!!editPreview||!!performanceSession;
   document.querySelectorAll<HTMLElement>('[data-current-time]').forEach(node=>node.textContent=timecode(time)); document.querySelectorAll<HTMLElement>('[data-end-time]').forEach(node=>node.textContent=timecode(doc.duration));
   const fraction=time/doc.duration*100;
   document.querySelectorAll<HTMLElement>('.lane-playhead').forEach(node=>node.style.left=`${fraction}%`);
@@ -384,9 +414,9 @@ function renderTime() {
 function renderSelection() {
   document.querySelectorAll<HTMLElement>('[data-select]').forEach(node=>{ const selected=selection.ids.includes(node.dataset.select!);node.classList.toggle('selected',selected);node.classList.toggle('active-selection',node.dataset.select===selection.active);node.setAttribute('aria-pressed',String(selected)); });
   const selected=selectedObjects(),visible=selected.filter(item=>!item.hidden),disabled=!!editPreview||!!performanceSession||!!storageError;
-  $('#selectionCount').textContent=selected.length+' selected';
+  $('#selectionCount').textContent=selection.ids.length+' selected';
   $<HTMLButtonElement>('[data-action="hide-selection"]').disabled=disabled||!visible.length;
-  $<HTMLButtonElement>('[data-action="show-selection"]').disabled=disabled||!selected.some(item=>item.hidden);
+  $<HTMLButtonElement>('[data-action="show-selection"]').disabled=disabled||!selected.some(item=>effectivelyHidden(doc,item.id));
   $<HTMLButtonElement>('[data-action="ground"]').disabled=disabled||playing||!visible.length;
   placementPanel?.update(visible.map(item=>item.name),disabled||playing);
   document.querySelectorAll<HTMLElement>('[data-shot]').forEach(node=>{const active=node.dataset.shot===activeShot()?.id;node.classList.toggle('selected',active);node.setAttribute('aria-pressed',String(active));});
@@ -411,29 +441,45 @@ function setTimelineHeight(value: number) {
 }
 function saveTimelineHeight() {try{localStorage.setItem('littletake.timeline.height',String(timelineHeight));}catch{}}
 function renderOutliner() {
-  const scene=visibleScene();$('#objectCount').textContent=String(scene.objects.length);
-  const query=$<HTMLInputElement>('#hierarchySearch').value.trim().toLowerCase();
-  const rows=(items:SceneEntity[])=>items.filter(item=>item.name.toLowerCase().includes(query)).map(item=>{
-    const object='kind' in item,hidden=object&&item.hidden;
-    const row='<button class="object-row" data-select="'+esc(item.id)+'" '+(object?'draggable="true" data-prefab-object="'+esc(item.id)+'" ':'')+'aria-label="Select '+esc(item.name)+'">'+icon(object?item.kind:'camera')+'<span>'+esc(item.name)+'</span>'+(item.track?'<span class="motion-dot" title="Animated"></span>':'')+'</button>';
-    return object?'<div class="hierarchy-object '+(hidden?'is-hidden':'')+'">'+row+'<button class="visibility-toggle" draggable="false" data-visibility-id="'+esc(item.id)+'" aria-label="'+(hidden?'Show ':'Hide ')+esc(item.name)+'" title="'+(hidden?'Show':'Hide')+' object; applies to selected objects when selected">'+icon(hidden?'hidden':'eye')+'</button></div>':row;
-  }).join('');
-  $('#outliner').innerHTML=rows(scene.objects)+'<div class="outliner-heading">CAMERAS <button data-action="add-camera" aria-label="New camera">＋</button></div>'+rows(scene.cameras);
-  const hidden=scene.objects.filter(item=>item.hidden).length;
+  const scene=visibleScene(),nodes=sceneEntities(scene);$('#objectCount').textContent=String(scene.objects.length);
+  const query=$<HTMLInputElement>('#hierarchySearch').value.trim().toLowerCase(),shown=new Set<string>();
+  for(const item of nodes)if(!query||item.name.toLowerCase().includes(query)){let node:SceneEntity|undefined=item;while(node&&!shown.has(node.id)){shown.add(node.id);node=nodes.find(p=>p.id===node!.parentId);}}
+  const row=(item:SceneEntity,depth:number):string=>{
+    if(!shown.has(item.id))return '';
+    const object='kind' in item,hidden=effectivelyHidden(scene,item.id),children=nodes.filter(p=>p.parentId===item.id),closed=!query&&collapsedHierarchy.has(scene.id+'|'+item.id);
+    const select='<button class="object-row" data-tree-id="'+esc(item.id)+'" data-select="'+esc(item.id)+'" draggable="true" '+(object?'data-prefab-object="'+esc(item.id)+'" ':'')+'aria-label="Select '+esc(item.name)+'">'+icon(object?item.kind:'camera')+'<span>'+esc(item.name)+'</span>'+((item.track||item.animation)?'<span class="motion-dot" title="Animated"></span>':'')+'</button>';
+    return '<div class="hierarchy-object '+(hidden?'is-hidden':'')+'" data-tree-id="'+esc(item.id)+'" style="padding-left:'+depth*14+'px"><button class="hierarchy-toggle" data-tree-toggle="'+esc(item.id)+'" aria-label="'+(closed?'Expand ':'Collapse ')+esc(item.name)+' children" '+(children.length?'aria-expanded="'+!closed+'"':'disabled')+'>'+(closed?'▸':'▾')+'</button>'+select+(object?'<button class="visibility-toggle" draggable="false" data-visibility-id="'+esc(item.id)+'" aria-label="'+(hidden?'Show ':'Hide ')+esc(item.name)+'" title="'+(hidden?'Show':'Hide')+' object; applies to selected objects when selected">'+icon(hidden?'hidden':'eye')+'</button>':'')+'</div>'+(!closed?children.map(child=>row(child,depth+1)).join(''):'');
+  };
+  $('#outliner').innerHTML=scene.objects.filter(item=>!item.parentId).map(item=>row(item,0)).join('')+'<div class="outliner-heading">CAMERAS <button data-action="add-camera" aria-label="New camera">＋</button></div>'+scene.cameras.filter(item=>!item.parentId).map(item=>row(item,0)).join('')+'<div data-tree-root class="hierarchy-root-drop">Drop here to move to scene root</div>';
+  const hidden=scene.objects.filter(item=>effectivelyHidden(scene,item.id)).length;
   $('#visibilitySummary').textContent=hidden?'Show all · '+hidden+' hidden':'All objects visible';
   $<HTMLButtonElement>('#visibilitySummary').disabled=!hidden||!!editPreview||!!performanceSession;
   $('#hiddenCount').hidden=!hidden;$('#hiddenCount').textContent=hidden+' hidden · Excluded from export';
 }
+function changeParent(ids:string[],parentId:string|null){
+  if(!workspace?.canEdit||editPreview||performanceSession||storageError||playing)return;
+  if([...unkeyed.keys()].some(key=>key.startsWith(doc.id+'|')))throw new Error('Insert or discard unkeyed changes before changing the hierarchy.');
+  flushFieldEdit();pause();const next=reparentScene(doc,ids,parentId,time);
+  if(JSON.stringify(next)===JSON.stringify(doc))return;
+  Object.assign(doc,next);selection.set(ids);setSidePanel('inspector');if(parentId)collapsedHierarchy.delete(doc.id+'|'+parentId);
+  changed(parentId?'Parent changed · World pose preserved':'Moved to scene root · World pose preserved');
+}
+
 function selectedObjects(): SceneObject[] { const scene=visibleScene();return selection.ids.flatMap(id=>{const item=scene.objects.find(item=>item.id===id);return item?[item]:[];}); }
 function setHidden(ids: string[], hidden: boolean): void {
-  if(editPreview||performanceSession||storageError)return;
+  if(!workspace?.canEdit||editPreview||performanceSession||storageError)return;
   const items=doc.objects.filter(item=>ids.includes(item.id)&&!!item.hidden!==hidden);if(!items.length)return;
   pause();flushFieldEdit();(document.activeElement as HTMLElement)?.blur();
   for(const item of items){if(hidden)item.hidden=true;else delete item.hidden;}
   changed(`${items.length} object${items.length===1?'':'s'} ${hidden?'hidden':'shown'}`);
 }
+function showHierarchy(ids:string[]):void {
+  const nodes=sceneEntities(doc),shown=new Set(ids);
+  for(const id of ids){let item=nodes.find(item=>item.id===id);while(item?.parentId){shown.add(item.parentId);item=nodes.find(parent=>parent.id===item!.parentId);}}
+  setHidden([...shown],false);
+}
 function visibilityCard(items: SceneObject[]): string {
-  const hidden=items.filter(item=>item.hidden).length,all=hidden===items.length;
+  const hidden=items.filter(item=>effectivelyHidden(visibleScene(),item.id)).length,all=hidden===items.length;
   return '<div class="visibility-card"><div>'+(all?'Hidden':hidden?'Mixed visibility':'Visible')+'<small>'+(hidden?hidden+' hidden · excluded from preview and export':'Shown in scene, preview and export')+'</small></div><button data-action="'+(all?'show-selection':'hide-selection')+'">'+(all?'Show':'Hide')+'</button></div>';
 }
 function poseFields(label: string,group: keyof Transform,values: number[],disabled: boolean,item:SceneEntity) {
@@ -444,10 +490,29 @@ function componentAxisKey(item:SceneEntity,group:'pivot',index:number,disabled:b
   if(!showAxisKeys)return '';const axis='xyz'[index],path=`${group}.${axis}` as PropertyPath,key=animationFor(item)?.curves[path]?.some(value=>Math.abs(value.time-time)<1e-6);
   return `<button type="button" class="property-key ${key?'on-key':''}" data-key-path="${path}" aria-label="${key?'Remove':'Insert'} Pivot Offset ${axis.toUpperCase()} keyframe" ${disabled?'disabled':''}>${key?'◆':'◇'}</button>`;
 }
+function instanceJoints(item:SceneEntity) {
+  const asset='asset' in item&&item.asset?(editPreview??project).assets?.find(asset=>asset.id===item.asset!.id):undefined;
+  return asset?evaluateAsset(asset).parts.filter(part=>part.joint):[];
+}
+function jointLabel(part:ReturnType<typeof instanceJoints>[number]):string {
+  return part.name+(part.id===part.sourceId?'':` (${part.id.slice(part.sourceId.length+1)})`);
+}
+function jointFields(item:SceneEntity,locked:boolean):string {
+  const joints=instanceJoints(item);if(!joints.length)return '';
+  return '<div class="inspector-section"><div class="section-label">Joints <span class="input-unit">degrees</span></div>'+joints.map(part=>{
+    const path=jointProperty(part.id),label=jointLabel(part);
+    return `<div class="property-group"><div class="property-label-key"><label class="property-label" for="joint-${esc(part.id)}">${esc(label)}</label>${keyButton(animationFor(item),path,time,locked,label)}</div><input id="joint-${esc(part.id)}" type="number" aria-label="${esc(label)} angle" data-joint-path="${path}" min="${part.joint!.min}" max="${part.joint!.max}" step="1" value="${num(propertyValue(item,path))}" ${locked?'disabled':''}/></div>`;
+  }).join('')+'</div>';
+}
+function renderPendingChanges(item:SceneEntity):void {
+  $('#inspector').querySelectorAll('.pending-animation').forEach(node=>node.remove());
+  const pending=[...unkeyed.entries()].filter(([key,draft])=>key.startsWith(`${doc.id}|${item.id}|`)&&Math.abs(draft.time-time)<1e-6);
+  if(pending.length)$('#inspector').insertAdjacentHTML('beforeend',pending.map(([key])=>`<div class="pending-animation">Unkeyed ${esc(key.split('|')[2])} · <button data-discard-draft="${esc(key)}">Discard</button></div>`).join(''));
+}
 function renderInspector() {
   if(!performanceSession && !editPreview && document.activeElement instanceof HTMLInputElement && $('#inspector').contains(document.activeElement)) return;
   const inspectedDoc=visibleScene(),item=sceneEntity(inspectedDoc,selection.active);
-  $('#inspector').inert=Boolean(editPreview);
+  $('#inspector').inert=Boolean(editPreview)||!workspace?.canEdit;
   if(selection.ids.length>1) {
     const items=inspectedDoc.objects.filter(item=>selection.ids.includes(item.id)),center=stage?.selectionCenter()??[0,0,0];
     const fields=(label:string,group:string,values:number[])=>'<div class="property-group"><label class="property-label">'+label+'</label><div class="vector-inputs">'+values.map((value,i)=>'<label class="vector-field"><span>'+['X','Y','Z'][i]+'</span><input type="number" aria-label="'+label+' '+['X','Y','Z'][i]+'" data-placement="'+group+'" data-index="'+i+'" step="'+(group==='rotation'?5:.1)+'" value="'+num(value)+'" '+(playing?'disabled':'')+'/></label>').join('')+'</div></div>';
@@ -458,7 +523,7 @@ function renderInspector() {
     if(!visible)$('#inspector').querySelectorAll<HTMLInputElement|HTMLButtonElement>('[data-placement],[data-action="ground"]').forEach(node=>node.disabled=true);
     return;
   }
-  if(!item){$('#inspector').innerHTML='<div class="empty-inspector">'+icon('move')+'<h3>Nothing selected</h3><p>Select an object or camera to edit its properties.</p></div>';return;}
+  if(!item){$('#inspector').innerHTML=inspectedDoc===emptyView?'<div class="empty-inspector"><h3>No scene selected</h3><p>Open Assets / Scenes to create a scene.</p></div>':'<div class="inspector-title"><span class="entity-type">SCENE</span></div><h3>'+esc(inspectedDoc.name)+'</h3>'+lookFields(inspectedDoc.look??DEFAULT_SCENE_LOOK);return;}
   const pose=performanceSession?.preview(time)??displayedPose(item),locked=Boolean(editPreview)||!!performanceSession||playing||('kind' in item&&!!item.hidden),isCamera='fov' in item;
   const shot=isCamera&&activeShot()?.cameraId===item.id?activeShot():undefined,linked=inspectedDoc.shots.filter(shot=>shot.cameraId===item.id);
   const colors=['#b8ccce','#e8a28e','#f0d48d','#aebfa1','#9faed0','#e5d9c3','#b2a4bc','#555f66'];
@@ -468,11 +533,13 @@ function renderInspector() {
   const material='kind' in item?'<div class="inspector-section"><div class="section-label">MATERIAL</div><div class="color-palette">'+colors.map(color=>'<button class="color-swatch '+(item.color===color?'active':'')+'" style="--swatch:'+color+'" data-color="'+color+'" aria-label="Set color '+color+'"></button>').join('')+'<label class="custom-color" title="Custom color"><input type="color" aria-label="Custom object color" id="objectColor" value="'+item.color+'"/></label></div></div>':'';
   $('#inspector').innerHTML=title+links+('kind' in item?visibilityCard([item]):'')+transform+
     ('kind' in item?componentInspector({...item,components:evaluateComponents(item,time)?.map(component=>component.type==='pivot'?{...component,offset:['x','y','z'].map(axis=>propertyValue(item,`pivot.${axis}` as PropertyPath)) as Transform['position']}:component)},Boolean(editPreview)||playing||!!performanceSession||!!item.hidden,performanceSession?.mode==='control',false,group=>keyButton(animationFor(item),group,time,locked),(group,index)=>componentAxisKey(item,group,index,locked)):'')+
-    (isCamera?'<button class="add-motion camera-align" data-action="use-view">'+icon('eye')+'Use current scene view</button>':'')+
-    material+(shot?shotFields(shot,inspectedDoc):'');
-  const pending=[...unkeyed.entries()].filter(([key,draft])=>key.startsWith(`${doc.id}|${item.id}|`)&&Math.abs(draft.time-time)<1e-6);
-  if(pending.length)$('#inspector').insertAdjacentHTML('beforeend',pending.map(([key])=>`<div class="pending-animation">Unkeyed ${esc(key.split('|')[2])} · <button data-discard-draft="${esc(key)}">Discard</button></div>`).join(''));
-  if('kind' in item){$('#inspector').insertAdjacentHTML('beforeend','<button class="asset-save-button" data-action="save-asset">☆ Create Independent Prefab…</button>');bindComponents($('#inspector'),item,()=>{(document.activeElement as HTMLElement)?.blur();if(item.animation&&!item.components?.some(component=>component.type==='pivot'))for(const path of propertyPaths('pivot'))delete item.animation.curves[path];changed('Component settings saved');},()=>performanceSession?exitPerformance():beginPerformance(),true);}
+    (isCamera?'<button class="add-motion camera-align" data-action="use-view">'+icon('eye')+'Use current scene view</button><button class="add-motion" data-action="draw-path" title="Drag across the floor; the camera travels it over its shot and keeps the framed subject in view" '+(locked||playing||!!performanceSession||!!editPreview?'disabled':'')+'>'+icon('camera')+'Draw camera move on floor</button>':'')+
+    ('kind' in item?'<button class="add-motion" data-action="draw-path" title="Drag across the floor; the object walks the line from the playhead" '+(locked||playing||!!performanceSession||!!item.hidden||!!editPreview?'disabled':'')+'>'+icon('move')+'Draw path on floor</button>':'')+
+    jointFields(item,locked)+material+(shot?shotFields(shot,inspectedDoc):'');
+  const excludedParents=descendants(sceneEntities(inspectedDoc),item.id);
+  $('#entityName').insertAdjacentHTML('afterend','<label class="parent-field">Parent<select id="entityParent" aria-label="Parent object" '+(locked?'disabled':'')+'><option value="">Scene root</option>'+sceneEntities(inspectedDoc).filter(parent=>!excludedParents.has(parent.id)).map(parent=>'<option value="'+esc(parent.id)+'" '+(item.parentId===parent.id?'selected':'')+'>'+esc(parent.name)+'</option>').join('')+'</select></label>');
+  renderPendingChanges(item);
+  if('kind' in item){$('#inspector').insertAdjacentHTML('beforeend','<button class="asset-save-button" data-action="save-asset">Create Independent Prefab…</button>');bindComponents($('#inspector'),item,()=>{(document.activeElement as HTMLElement)?.blur();if(item.animation&&!item.components?.some(component=>component.type==='pivot'))for(const path of propertyPaths('pivot'))delete item.animation.curves[path];changed('Component settings saved');},()=>performanceSession?exitPerformance():beginPerformance(),true);}
   if('asset' in item&&item.asset)$('#entityName').insertAdjacentHTML('afterend',`<button class="asset-instance-edit" data-action="edit-asset">◇ Edit Prefab</button>`);
   if(performanceSession){const button=$('#inspector').querySelector<HTMLElement>('[data-component-action]');if(button&&performanceSession.mode!=='control')button.textContent=performanceSession.mode==='record'?'Recording…':'Review Recording';}
   if(performanceSession)$('#inspector').querySelectorAll<HTMLInputElement|HTMLButtonElement>('.entity-name,[data-action],[data-color],#objectColor').forEach(node=>node.disabled=true);
@@ -486,14 +553,16 @@ function renderTimeline() {
   }).join('');
   const item=sceneEntity(doc,selection.active),animation=item?animationFor(item):undefined;
   const groups:PropertyGroup[]=item?('fov' in item?['position','rotation','fov']:['position','rotation','scale',...(item.components?.some(component=>component.type==='pivot')?['pivot' as const]:[])]):[];
+  const joints=item?instanceJoints(item):[],jointNames=Object.fromEntries(joints.map(part=>[jointProperty(part.id),jointLabel(part)]));
+  groups.push(...joints.map(part=>jointProperty(part.id)));
   const pending=[...unkeyed.entries()].filter(([key])=>key.startsWith(`${doc.id}|`));
   const summary=item?esc(item.name):'Select an object or camera';
-  $('#timelineRows').innerHTML='<div class="timeline-group">SHOTS <span>One camera · a range of scene time</span><button data-action="add-shot" aria-label="Add shot">'+icon('plus')+'New shot</button></div>'+shots+'<div class="timeline-group">PROPERTIES <span>'+summary+'</span>'+(pending.length?'<button data-action="review-draft">'+pending.length+' unkeyed change · Review</button>':'')+'</div>'+renderPropertyRows(animation,groups,openProperties,selectedPropertyKey,doc.duration,fps(),showAllSamples);
+  $('#timelineRows').innerHTML='<div class="timeline-group">SHOTS <span>One camera · a range of scene time</span><button data-action="add-shot" aria-label="Add shot">'+icon('plus')+'New shot</button></div>'+shots+'<div class="timeline-group">PROPERTIES <span>'+summary+'</span>'+(pending.length?'<button data-action="review-draft">'+pending.length+' unkeyed change · Review</button>':'')+'</div>'+renderPropertyRows(animation,groups,openProperties,selectedPropertyKey,doc.duration,fps(),showAllSamples,jointNames);
   const selected=selectedPropertyKey,paths=selected?(selected.path?[selected.path]:groupPaths(selected.group)):[],key=selected?paths.flatMap(path=>animation?.curves[path]??[]).find(key=>Math.abs(key.time-selected.time)<1e-6):undefined;
   $<HTMLButtonElement>('#duplicateKey').disabled=!key;$<HTMLButtonElement>('#deleteKey').disabled=!key;
   const interpolation=$<HTMLSelectElement>('#animationInterpolation');interpolation.disabled=!key;if(key)interpolation.value=key.interpolation;
   const samples=$<HTMLButtonElement>('#samplesToggle');samples.hidden=!animation?.takes.length;samples.textContent=showAllSamples?'Show fewer samples':'Show all samples';
-  applyTimelineZoom();
+  applyTimelineZoom();renderTime();
 }
 function renderAll() {
   renderNavigation();
@@ -502,24 +571,14 @@ function renderAll() {
   renderOutliner();renderTimeline();syncStage();renderInspector();renderSelection();renderTransport();renderTime();assetsPanel?.update(project.assets);renderPerformance();
 }
 function duplicate() {
-  if(selection.ids.length>1){
-    const items=doc.objects.filter(item=>selection.ids.includes(item.id));
-    if(doc.objects.length+items.length>100){status('This scene supports up to 100 objects');return;}
-    pause();const copies:SceneObject[]=[];
-    for(const item of items){const copy=structuredClone(item);copy.id=nextId('object',[...doc.objects,...doc.cameras,...copies]);copy.name=item.name.slice(0,110)+' copy';copy.transform.position[0]=clamp(copy.transform.position[0]+1,-1000,1000);if(copy.track)for(const pose of trackPoses(copy.track))pose.position[0]=clamp(pose.position[0]+1,-1000,1000);if(copy.animation)for(const key of copy.animation.curves['position.x']??[])key.value=clamp(key.value+1,-1000,1000);copies.push(copy);}
-    doc.objects.push(...copies);selection.set(copies.map(item=>item.id));changed(`${copies.length} objects duplicated`);return;
-  }
-  const item=entity();if(!item)return;pause();if(!('kind' in item)){if(doc.cameras.length>=MAX_CAMERAS){status('Scene camera limit reached');return;}const copy=structuredClone(item);copy.id=nextId('camera',[...doc.objects,...doc.cameras,...doc.shots]);copy.name=item.name.slice(0,110)+' copy';doc.cameras.push(copy);project.activeShotId=null;selection.active=copy.id;changed('Camera duplicated');return;}
-  if(doc.objects.length>=100){status('This scene supports up to 100 objects');return;}
-  const next=structuredClone(item);next.id=nextObjectId();next.name=`${item.name.slice(0,110)} copy`;
-  next.transform.position[0]=clamp(next.transform.position[0]+1,-1000,1000);
-  if(next.track)for(const pose of trackPoses(next.track))pose.position[0]=clamp(pose.position[0]+1,-1000,1000);
-  if(next.animation)for(const key of next.animation.curves['position.x']??[])key.value=clamp(key.value+1,-1000,1000);
-  doc.objects.push(next);selection.active=next.id;changed('Object duplicated');
+  if(!workspace?.canEdit||!selection.ids.length||editPreview||performanceSession||storageError)return;
+  try{pause();flushFieldEdit();const result=duplicateHierarchy(doc,selection.ids,time);Object.assign(doc,result.scene);selection.set(result.ids);if(doc.cameras.some(camera=>result.ids.includes(camera.id)))project.activeShotId=null;changed('Selection and children duplicated');}catch(error){status((error as Error).message);}
 }
+
 function nextObjectIndex(){for(let index=1;;index++)if(!sceneEntity(doc,`object-${index}`))return index;}
 function nextObjectId(){return `object-${nextObjectIndex()}`;}
 function insertAsset(asset:AssetDefinition,pose:Transform){
+  if(!workspace?.canEdit)return;
   if(editPreview||performanceSession||storageError)return;
   ensureScene();if(doc.objects.length>=100){status('This scene supports up to 100 objects');return;}
   pause();flushFieldEdit();
@@ -533,7 +592,7 @@ function saveSelectionAsset(){
   const source=hierarchyAssetSource(item.id);if(source)void createObjectPrefab(source,assetsPanel?.currentFolder??'');
 }
 function hierarchyAssetSource(objectId:string):HierarchyAssetSource|null{
-  if(storageError||editPreview||performanceSession||assetEditor||assetSaveBusy||!project.activeSceneId||!doc.objects.some(item=>item.id===objectId))return null;
+  if(!workspace?.canEdit||storageError||editPreview||performanceSession||assetEditor||assetSaveBusy||!project.activeSceneId||!doc.objects.some(item=>item.id===objectId))return null;
   return {projectId:assetProjectToken,sceneId:project.activeSceneId,objectId};
 }
 async function createObjectPrefab(source:HierarchyAssetSource,folder:string){
@@ -541,7 +600,7 @@ async function createObjectPrefab(source:HierarchyAssetSource,folder:string){
   pause();flushFieldEdit();const item=doc.objects.find(item=>item.id===source.objectId)!;
   const original=JSON.stringify(item);assetSaveBusy=true;
   try{
-    const saved=await createPrefabDialog(saveObjectAsset(item,project.assets??[],`saved-${crypto.randomUUID()}`),folder);if(!saved)return;
+    const saved=await createPrefabDialog(saveObjectAsset(item,project.assets??[],`saved-${newId()}`),folder);if(!saved)return;
     const current=project.scenes.find(scene=>scene.id===source.sceneId)?.objects.find(item=>item.id===source.objectId);
     if(storageError||assetProjectToken!==source.projectId||JSON.stringify(current)!==original)throw new Error('Prefab created in My Assets. The original object changed during saving, so it was not relinked.');
     replaceContent(linkObjectAsset(projectContent(project),source.sceneId,source.objectId,saved.asset));selection.active=source.objectId;
@@ -551,8 +610,8 @@ async function createObjectPrefab(source:HierarchyAssetSource,folder:string){
   finally{assetSaveBusy=false;}
 }
 function beginPerformance(){
-  const item=entity();if(performanceSession||editPreview||!item||!('kind' in item)||item.hidden||!inputController(item.components))return;
-  pause();flushFieldEdit();sceneEditor?.sceneChanged();performanceSession=new PerformanceSession(item,time);assetsPanel?.setOpen(false);setSidePanel('inspector');renderAll();stage?.focusCanvas();status('Control active · R records · Esc keeps position and exits');
+  const item=entity();if(!workspace?.canEdit||performanceSession||editPreview||!item||!('kind' in item)||effectivelyHidden(doc,item.id)||!inputController(item.components))return;
+  pause();flushFieldEdit();sceneEditor?.sceneChanged();performanceSession=new PerformanceSession(item,time,doc);assetsPanel?.setOpen(false);setSidePanel('inspector');renderAll();stage?.focusCanvas();status('Control active · R records · Esc keeps position and exits');
 }
 function applyPlacement():boolean{
   if(!performanceSession)return false;
@@ -580,11 +639,11 @@ function keepPerformance(){
 function renderPerformance(){
   const session=performanceSession,active=!!session,bar=$('#performanceBar');bar.hidden=!active;
   $('.stage-panel').classList.toggle('performance-active',active);
-  $('#sceneAI').inert=active;$('#timelineContent').inert=active;$('.library-panel').inert=active;$('.app-header').inert=active;
+  $('#sceneAI').inert=active||!workspace?.canEdit;$('#timelineContent').inert=active;$('.library-panel').inert=active;$('.app-header').inert=active;
   $<HTMLInputElement>('#duration').disabled=active||!!editPreview||doc===emptyView;$<HTMLSelectElement>('#shotSelect').disabled=active;
   $<HTMLInputElement>('#animationFrame').disabled=active||!!editPreview;$<HTMLSelectElement>('#animationFps').disabled=active||!!editPreview;$<HTMLButtonElement>('#autoKey').disabled=active||!!editPreview;
   document.querySelectorAll<HTMLButtonElement>('[data-action="add-shot"],[data-action="rewind"],[data-action="top-view"]').forEach(b=>b.disabled=active||doc===emptyView);
-  document.querySelectorAll<HTMLButtonElement>('[data-action="play"]').forEach(b=>b.disabled=!!session&&session.mode!=='review');
+  document.querySelectorAll<HTMLButtonElement>('[data-action="play"]').forEach(b=>b.disabled=visibleScene()===emptyView||(!!session&&session.mode!=='review'));
   if(!session)return;
   bar.dataset.mode=session.mode;
   const header=`<div><strong>${session.mode==='record'?'● Recording':session.mode==='review'?'Review Take':'Positioning'} · ${esc(session.before.name)}</strong><small>${session.mode==='review'?session.draft!.duration.toFixed(1)+' s · Awaiting review':inputController(session.before.components)?.type==='hinge'?'W/S open/close · Camera stays fixed':'W/S move · A/D turn · Camera stays fixed'}</small></div>`;
@@ -593,22 +652,62 @@ function renderPerformance(){
     switch(button.dataset.performance){case 'record':startPerformanceRecord();break;case 'exit':exitPerformance();break;case 'discard-position':discardPosition();break;case 'stop':stopPerformanceRecord();break;case 'preview':togglePlay();button.textContent=playing?'Ⅱ Pause':'▷ Play Take';break;case 'retry':discardPerformance(true);break;case 'discard':discardPerformance();break;case 'keep':keepPerformance();break;}
   });
 }
-function remove(){if(!selection.ids.length)return;try{const operations=selection.ids.map(id=>({type:doc.objects.some(item=>item.id===id)?'remove_object' as const:'remove_camera' as const,sceneId:doc.id,id}));replaceContent(applyProjectOperations(projectContent(project),operations,time));changed('Selection removed');}catch(error){status((error as Error).message);}}
+function remove(){if(!selection.ids.length)return;try{const operations=hierarchyRoots(sceneEntities(doc),selection.ids).map(id=>({type:doc.objects.some(item=>item.id===id)?'remove_object' as const:'remove_camera' as const,sceneId:doc.id,id}));replaceContent(applyProjectOperations(projectContent(project),operations,time));changed('Selection removed');}catch(error){status((error as Error).message);}}
 function chooseTool(next:ToolMode){tool=next;stage?.setTool(tool);renderSelection();}
 function chooseAxis(next:Axis|null){axis=next;stage?.setAxis(axis);renderSelection();}
-function togglePlay(){if(playing)pause();else{const shot=activeShot(),take=performanceSession?.draft,start=take?.start??shot?.start??0,end=take?take.start+take.duration:shot?shot.start+shot.duration:doc.duration;if(time>=end-0.001||time<start)time=start;playing=true;lastFrame=performance.now();renderTransport();syncStage();}}
+function togglePlay(){if(playing)pause();else{const take=performanceSession?.draft,start=take?.start??0,end=take?take.start+take.duration:visibleScene().duration;if(time>=end-0.001||time<start)time=start;playing=true;followTimelineShot();lastFrame=performance.now();renderTransport();syncStage();}}
 function restore(next:ProjectContent|null){if(!next)return;pause();replaceContent(next);project.revision++;sceneEditor?.sceneChanged();renderAll();persist();}
 function exportScene(){if(!project.activeSceneId){status('Add a scene before exporting it');return;}const portable=doc.objects.some(o=>o.asset)?{...createProject(doc),assets:project.assets?.filter(a=>doc.objects.some(o=>o.asset?.id===a.id))}:null;const blob=new Blob([portable?serializeProject(portable):serializeDocument(doc)],{type:'application/json'}),url=URL.createObjectURL(blob),anchor=document.createElement('a');anchor.href=url;anchor.download=`${doc.name.replace(/[^a-z0-9-_ ]/gi,'').trim()||'LittleTake'}.json`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('Scene exported');}
-function downloadProject(saved=false){const text=saved?projectStorage.savedText():serializeProject(project);if(!text)return;const url=URL.createObjectURL(new Blob([text],{type:'application/json'})),anchor=document.createElement('a');anchor.href=url;anchor.download=saved?'LittleTake-recovery.json':`${project.name.replace(/[^a-z0-9-_ ]/gi,'').trim()||'LittleTake'}.project.json`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+function downloadProject(saved=false){if(!saved&&workspace?.room){void workspace.download().catch(error=>status((error as Error).message));return;}const text=saved?projectStorage.savedText():serializeProject(project);if(!text)return;const url=URL.createObjectURL(new Blob([text],{type:'application/json'})),anchor=document.createElement('a');anchor.href=url;anchor.download=saved?'LittleTake-recovery.json':`${project.name.replace(/[^a-z0-9-_ ]/gi,'').trim()||'LittleTake'}.project.json`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 
 syncDocument();
-const referenceDialog = new ReferenceDialog(next => {
-  pause(); flushFieldEdit(); const imported=cloneDocument(next);imported.id=nextId('scene',project.scenes);project.scenes.push(imported);project.activeSceneId=imported.id;project.activeShotId=imported.shots[0]?.id??null;selection.active=null;time=0;syncDocument();
-  changed('Reference scene loaded · every object and camera is editable'); persist(); stage?.resetView();
-}, async (file, video, cuts) => { await sceneEditor?.attachReference(file, video, cuts); });
+const referenceDialog = new ReferenceDialog(draft => {
+  pause(); flushFieldEdit(); const imported=cloneDocument(draft.scene);project.assets=[...(project.assets??[]).filter(asset=>!draft.assets?.some(next=>next.id===asset.id)),...(draft.assets??[])];imported.id=nextId('scene',project.scenes);project.scenes.push(imported);project.activeSceneId=imported.id;project.activeShotId=imported.shots[0]?.id??null;selection.active=null;time=0;syncDocument();
+  setTimelineOpen(true);changed('Reference scene loaded · colors, motion and shots are editable'); persist(); stage?.resetView();
+  void assetsPanel?.refresh();
+},(scene,time,shotId,assets,measureVisible,view='shot',frameBounds)=>stage.captureSnapshot(scene,time,view,shotId,assets,measureVisible,frameBounds),()=>workspace,async(file,video,cuts)=>{await sceneEditor?.attachReference(file,video,cuts);});
+
+function xrRecordAction(action:XRRecordAction):void {
+  if(!workspace?.canEdit)return;
+  try {
+    if(action==='record'){
+      const item=entity();
+      if(xrRecording||!item||!('kind' in item)||effectivelyHidden(doc,item.id)||playing||transformEdit||editPreview||performanceSession||storageError||unkeyed.size)return;
+      flushFieldEdit();pause();xrRecording=new XRRecording(item,time,doc.duration);
+      status('Recording armed · Hold trigger or grip on the selected object, move it, then release to review');
+    }else if(action==='discard'){
+      if(!xrRecording)return;time=xrRecording.start;xrRecording=null;status('Recording discarded · Original animation kept');
+    }else if(action==='preview')xrRecording?.togglePreview();
+    else if(action==='apply'){
+      if(!xrRecording||xrRecording.mode!=='review')return;
+      const item=entity(xrRecording.before.id);
+      if(!item||JSON.stringify(item)!==JSON.stringify(xrRecording.before))throw new Error('The object changed. Discard this take and record again.');
+      const next=xrRecording.apply();Object.assign(item,next);xrRecording=null;
+      selectedPropertyKey=null;changed('XR recording applied · Smoothed motion keys · Undo available');return;
+    }
+    if(xrRecording)time=xrRecording.time;renderTime();syncStage();
+  }catch(error){status(error instanceof Error?error.message:'Recording failed');}
+}
+function xrTransform(id:string,pose:Transform,phase:TransformPhase):boolean {
+  if(!workspace?.canEdit)return false;
+  const recording=xrRecording;
+  if(!recording)return editSelection([{id,transform:pose}],phase,'keyframe-pose');
+  if(id!==recording.before.id)return false;
+  try{
+    const now=performance.now();
+    if(phase==='start'){if(recording.mode!=='armed')return false;recording.begin(now);}
+    else if(phase==='change')recording.sample(localTransform(doc,id,pose,recording.sampleTime(now)),now);
+    else if(phase==='end'){recording.sample(localTransform(doc,id,pose,recording.sampleTime(now)),now);recording.stop();}
+    else recording.cancelGrip();
+    time=recording.time;renderTime();syncStage();
+    if(recording.mode==='review')status('Smoothed take ready · Preview, Apply or Discard');
+    return true;
+  }catch(error){recording.cancelGrip();time=recording.time;syncStage();status(error instanceof Error?error.message:'Recording failed');return false;}
+}
 
 function editSelection(updates:PoseUpdate[],phase:TransformPhase,wholeMotion:TransformScope):boolean {
-  if(editPreview||performanceSession||storageError)return false;
+  if(editPreview||performanceSession||storageError||!workspace?.canEdit)return false;
+  if(phase==='start'||phase==='change'){try{updates=updates.map(update=>({id:update.id,transform:localTransform(doc,update.id,update.transform,time)}));}catch(error){status((error as Error).message);return false;}}
   if(phase==='start'){
     flushFieldEdit();pause();
     const items=updates.map(update=>entity(update.id));if(items.some(item=>!item))return false;
@@ -646,30 +745,35 @@ try {
     onFrame:tick,
     canEnterXR:()=>!assetEditor&&!editPreview&&!performanceSession&&!storageError&&!unkeyed.size&&!document.querySelector('dialog[open]'),
     onXRChange:active=>{
+      if(!active && xrRecording){time=xrRecording.start;xrRecording=null;renderAll();}
       pause();flushFieldEdit();lastFrame=performance.now();
       if(active)sceneEditor?.session.cancel('VR opened. Retry after returning to the desktop editor.');
       app.classList.toggle('xr-presenting',active);
       app.querySelectorAll<HTMLElement>(':scope > header,:scope > main,:scope > .timeline-panel,:scope > footer').forEach(element=>element.inert=active);
       persist();
     },
-    onXRAction:action=>{if(action==='play')togglePlay();else{flushFieldEdit();restore(history.undo());}},
-    xrTimelineState:()=>({time,duration:visibleScene().duration,fps:fps(),selection:xrKeyframes.read(sceneEntity(visibleScene(),selection.active),visibleScene().duration)}),
-    onXRSeek:seek,
+    onXRAction:action=>{if(xrRecording)return;if(action==='play')togglePlay();else if(workspace?.canEdit){flushFieldEdit();restore(history.undo());}},
+    xrTimelineState:()=>({time,duration:visibleScene().duration,fps:fps(),selection:(()=>{const current=visibleScene(),item=xrRecording?.keyframeEntity()??sceneEntity(current,selection.active),scene=xrRecording&&item?{...current,objects:current.objects.map(object=>object.id===item.id?item as SceneObject:object)}:current,keys=item&&!effectivelyHidden(scene,item.id)?xrKeyframes.read(item,scene.duration):undefined;return keys?{...keys,frames:keys.frames.map(frame=>({...frame,transform:worldTransform(scene,keys.id,frame.time)}))}:undefined;})(),recording:xrRecording?.state()??{mode:'idle',canRecord:!!workspace?.canEdit&&!!entity()&&'kind' in entity()!&&!effectivelyHidden(doc,entity()!.id)&&!playing&&!transformEdit&&!unkeyed.size&&!storageError&&doc.duration-time>=.1}}),
+    onXRSeek:value=>{if(xrRecording){if(xrRecording.mode!=='review')return;xrRecording.previewing=false;xrRecording.time=value;}seek(value);},
+    onXRTransform:xrTransform,
+    onXRRecordAction:xrRecordAction,
     onXRAddKeyframe:()=>{
+      if(xrRecording||!workspace?.canEdit)return;
       const item=entity();
       if(!item||!('kind' in item)||item.hidden||playing||transformEdit||editPreview||performanceSession||storageError||assetEditor)return;
       try{flushFieldEdit();keyTransform(item);}catch(error){status(error instanceof Error?error.message:'Could not add keyframe');}
     },
-    onXRDeleteKeyframe:()=>{
+    onXRDeleteKeyframe:times=>{
+      if(xrRecording||!workspace?.canEdit)return;
       const item=entity();
       if(!item||!('kind' in item)||item.hidden||playing||transformEdit||editPreview||performanceSession||storageError||assetEditor)return;
       try{
-        flushFieldEdit();const next=deleteXRKeyframe(item,time);if(!next)return;
-        Object.assign(item,next);selectedPropertyKey=null;changed('Keyframe deleted');
+        flushFieldEdit();const next=deleteXRKeyframes(item,times?.length?times:[time]);if(!next)return;
+        Object.assign(item,next);selectedPropertyKey=null;changed(times?.length ? `${times.length} keyframes deleted` : 'Keyframe deleted');
       }catch(error){status(error instanceof Error?error.message:'Could not delete keyframe');}
     },
     onXRTimelineChange:active=>{if(active)pause();},
-    xrMenuState:()=>({playing,canUndo:history.canUndo&&!editPreview&&!performanceSession&&!assetEditor}),
+    xrMenuState:()=>({playing,canUndo:!!workspace?.canEdit&&history.canUndo&&!editPreview&&!performanceSession&&!assetEditor&&!xrRecording}),
   });
   const xrButton=document.createElement('button');xrButton.id='enterVR';xrButton.textContent='Checking VR…';xrButton.disabled=true;
   xrButton.title='Trigger selects · Grip empty space to navigate · Two grips rotate and scale the free view';
@@ -686,14 +790,22 @@ try {
   };
   stage.setTool(tool);
   placementPanel=new PlacementPanel($('#placementTools'),settings=>stage.setPrecision(settings),(axis,edge)=>stage.alignSelection(axis,edge));
-  assetsPanel=new AssetPanel($('#assetPanel'),stage,insertAsset,()=>!storageError&&!editPreview&&!performanceSession&&!assetEditor,asset=>openAssetEditor(asset),synchronizeAssets,(source,folder)=>void createObjectPrefab(source,folder));assetsPanel.update(project.assets);
+  assetsPanel=new AssetPanel($('#assetPanel'),stage,insertAsset,()=>!!workspace?.canEdit&&!storageError&&!editPreview&&!performanceSession&&!assetEditor,asset=>openAssetEditor(asset),synchronizeAssets,(source,folder)=>void createObjectPrefab(source,folder),{list:()=>project.scenes,active:()=>project.activeSceneId,open:id=>{switchScene(id);setSidePanel('inspector');},create:addScene,remove:requestDeleteScene});assetsPanel.update(project.assets);
   bindHierarchyAssets($('#outliner'),hierarchyAssetSource,source=>void createObjectPrefab(source,assetsPanel?.currentFolder??''),()=>{assetsPanel?.showFolder(assetsPanel.currentFolder);assetsPanel?.setOpen(true);});
+  bindParentingTree($('#outliner'),{
+    enabled:()=>!!workspace?.canEdit&&!editPreview&&!performanceSession&&!storageError&&!playing,
+    selected:()=>selection.ids,
+    allowed:(ids,parentId)=>!parentId||ids.every(id=>!descendants(sceneEntities(doc),id).has(parentId)),
+    drop:changeParent,error:status,
+  });
+  $('#outliner').addEventListener('click',event=>{const toggle=(event.target as HTMLElement).closest<HTMLElement>('[data-tree-toggle]');if(!toggle)return;event.stopPropagation();const key=doc.id+'|'+toggle.dataset.treeToggle;if(collapsedHierarchy.has(key))collapsedHierarchy.delete(key);else collapsedHierarchy.add(key);renderOutliner();renderSelection();});
+
 } catch(error) { $('#viewport').innerHTML=`<div class="webgl-error"><h2>This stage needs WebGL.</h2><p>Enable hardware acceleration in your browser, then reload.</p><small>${esc(error instanceof Error?error.message:'Renderer could not start.')}</small></div>`; }
 
 sceneEditor=new SceneEditPanel({
-  root:$('#sceneAI'), book:project.conversations, context:()=>({project:projectContent(project),sceneId:project.activeSceneId,shotId:project.activeShotId,revision:project.revision,time,selectedId:selection.active}), prepare:()=>{pause();flushFieldEdit();},
-  changed:()=>persist(),clearSelection:()=>select(null),
-  focus:context=>{const scene=project.scenes.find(scene=>scene.id===context.sceneId);if((context.sceneId!==null&&!scene)||(context.shotId!==null&&!scene?.shots.some(shot=>shot.id===context.shotId))){status('The original scene or shot no longer exists. Choose a context and send a new message.');return false;}pause();flushFieldEdit();project.activeSceneId=context.sceneId;project.activeShotId=context.shotId;selection.active=context.selectedId??null;syncDocument();time=clamp(context.time??0,0,doc.duration);renderAll();return true;},
+  root:$('#sceneAI'), book:project.conversations, context:()=>({project:projectContent(project),sceneId:project.activeSceneId,shotId:project.activeShotId,revision:project.revision,time,selectedId:selection.active,selectedIds:[...selection.ids]}), prepare:()=>{pause();flushFieldEdit();},
+  changed:()=>persist(),clearSelection:()=>select(null),removeSelection:id=>selectIds(selection.ids.filter(selected=>selected!==id),'replace'),
+  focus:context=>{const scene=project.scenes.find(scene=>scene.id===context.sceneId);if((context.sceneId!==null&&!scene)||(context.shotId!==null&&!scene?.shots.some(shot=>shot.id===context.shotId))){status('The original scene or shot no longer exists. Choose a context and send a new message.');return false;}pause();flushFieldEdit();project.activeSceneId=context.sceneId;project.activeShotId=context.shotId;selection.set(context.selectedIds??(context.selectedId?[context.selectedId]:[]));syncDocument();time=clamp(context.time??0,0,doc.duration);renderAll();return true;},
   capture:(content,sceneId,shotId,frame,view)=>{const scene=content.scenes.find(item=>item.id===sceneId);if(!stage||!scene)throw new Error('Choose an existing scene before capturing a view.');return stage.captureSnapshot(scene,frame,view,shotId,content.assets??[]);},
   preview:(next,focus)=>{if(!next&&!editPreview)return;editPreview=next;previewSceneId=focus?.sceneId??next?.scenes[0]?.id??null;const scene=next?.scenes.find(item=>item.id===previewSceneId);previewShotId=scene?.shots.find(item=>item.id===focus?.shotId)?.id??scene?.shots[0]?.id??null;$('#aiPreviewBadge').hidden=!next;if(!next&&!entity())selection.active=null;time=clamp(time,0,visibleScene().duration);pause();renderAll();},
   apply:(next,base,focus)=>{if(serializeContent(projectContent(project))!==base)return false;replaceContent(next,focus);changed('Muse changes applied · Undo to restore');return true;},
@@ -716,8 +828,8 @@ app.addEventListener('click',event=>{
   const target=(event.target as HTMLElement).closest<HTMLElement>('button');if(!target || target.hasAttribute('disabled'))return;
   if(target.dataset.discardDraft){unkeyed.delete(target.dataset.discardDraft);renderAll();status('Unkeyed change discarded');return;}
   if(target.dataset.keyGroup){const item=entity();if(item&&!editPreview&&!performanceSession){event.preventDefault();pause();try{keyProperty(item,target.dataset.keyGroup as PropertyGroup,true);}catch(error){status((error as Error).message);}}return;}
-  if(target.dataset.keyPath){const item=entity(),path=target.dataset.keyPath as PropertyPath;if(item&&!editPreview&&!performanceSession){event.preventDefault();pause();try{const value=propertyValue(item,path),animation=ensureAnimation(item),existing=animation.curves[path]?.some(key=>Math.abs(key.time-time)<1e-6);if(existing&&!currentDraft(item,path))removePropertyKeys(animation,[path],time);else{const orientation=path.startsWith('rotation.')?displayedPose(item).rotation:undefined;putKey(animation,path,time,value,orientation);unkeyed.delete(draftId(item,path));}selectedPropertyKey=existing?null:{group:path.split('.')[0] as PropertyGroup,path,time};changed('Axis key updated');}catch(error){status((error as Error).message);}}return;}
-  if(target.dataset.animationToggle){const group=target.dataset.animationToggle as PropertyGroup;if(group!=='fov'){openProperties.has(group)?openProperties.delete(group):openProperties.add(group);renderTimeline();renderTime();}return;}
+  if(target.dataset.keyPath){const item=entity(),path=target.dataset.keyPath as PropertyPath;if(item&&!editPreview&&!performanceSession){event.preventDefault();pause();try{const value=propertyValue(item,path),animation=ensureAnimation(item),existing=animation.curves[path]?.some(key=>Math.abs(key.time-time)<1e-6);if(existing&&!currentDraft(item,path))removePropertyKeys(animation,[path],time);else{const orientation=path.startsWith('rotation.')?displayedPose(item).rotation:undefined;putKey(animation,path,time,value,orientation);unkeyed.delete(draftId(item,path));}selectedPropertyKey=existing?null:{group:propertyGroup(path),path,time};changed('Axis key updated');}catch(error){status((error as Error).message);}}return;}
+  if(target.dataset.animationToggle){const group=target.dataset.animationToggle as PropertyGroup;if(!scalarGroup(group)){openProperties.has(group)?openProperties.delete(group):openProperties.add(group);renderTimeline();renderTime();}return;}
   if(performanceSession && !target.closest('#performanceBar,.control-component') && !['play','timeline'].includes(target.dataset.action??''))return;
   target.closest<HTMLDetailsElement>('details.studio-menu')?.removeAttribute('open');
   if(target.dataset.library){setLibraryTab(target.dataset.library as 'objects'|'assets');return;}
@@ -725,7 +837,7 @@ app.addEventListener('click',event=>{
   if(target.dataset.shot){switchShot(target.dataset.shot);return;}
   if(target.dataset.select){const range=event.shiftKey&&!!target.closest('#outliner');selectIds([target.dataset.select],range?(event.ctrlKey||event.metaKey?'append':'replace'):(event.ctrlKey||event.metaKey||event.shiftKey?'toggle':'replace'),range);setSidePanel('inspector');return;}
   if(editPreview && !['focus','reset-view','play','rewind','top-view','refresh-snapshot','timeline','expand-preview','close-preview','close-snapshot','download-snapshot'].includes(target.dataset.action??''))return;
-  if(target.dataset.visibilityId){const item=doc.objects.find(item=>item.id===target.dataset.visibilityId);if(item)setHidden(selection.ids.includes(item.id)?selection.ids:[item.id],!item.hidden);return;}
+  if(target.dataset.visibilityId){const item=doc.objects.find(item=>item.id===target.dataset.visibilityId);if(item){const ids=selection.ids.includes(item.id)?selection.ids:[item.id];if(effectivelyHidden(doc,item.id))showHierarchy(ids);else setHidden(ids,true);}return;}
   if(target.dataset.tool){chooseTool(target.dataset.tool as ToolMode);return;}
   if(target.dataset.axis){chooseAxis(axis===target.dataset.axis?null:target.dataset.axis as Axis);return;}
   if(target.dataset.add){ensureScene();if(doc.objects.length>=100){status('This scene supports up to 100 objects');return;}pause();const item=createObject(target.dataset.add as Exclude<PrimitiveKind,'asset'>,nextObjectIndex());doc.objects.push(item);selection.active=item.id;time=0;setLibraryTab('objects');changed(`${item.name} added`);return;}
@@ -735,30 +847,39 @@ app.addEventListener('click',event=>{
     case 'key-transform':{const item=entity();if(item){pause();try{keyTransform(item);}catch(error){status((error as Error).message);}}break;}
     case 'auto-key':autoKey=!autoKey;renderTime();break;
     case 'samples':showAllSamples=!showAllSamples;if(showAllSamples&&animationZoom<4){animationZoom=4;$<HTMLSelectElement>('#animationZoom').value='4';}renderTimeline();renderTime();break;
-    case 'review-draft':{const entry=[...unkeyed.entries()].find(([key])=>key.startsWith(`${doc.id}|`));if(entry){const [,id,path]=entry[0].split('|');select(id);openProperties.add(path.split('.')[0] as PropertyGroup);pause();seek(entry[1].time);renderTimeline();renderTime();}break;}
+    case 'review-draft':{const entry=[...unkeyed.entries()].find(([key])=>key.startsWith(`${doc.id}|`));if(entry){const [,id,path]=entry[0].split('|');select(id);openProperties.add(propertyGroup(path as PropertyPath));pause();seek(entry[1].time);renderTimeline();renderTime();}break;}
     case 'duplicate-key':case 'delete-key':{const item=entity(),key=selectedPropertyKey;if(item&&key){try{const animation=structuredClone(animationFor(item)??emptyAnimation()),paths=key.path?[key.path]:groupPaths(key.group);if(target.dataset.action==='delete-key'){removePropertyKeys(animation,paths,key.time);selectedPropertyKey=null;}else{const next=timeAtFrame(frameAtTime(key.time,fps())+1,fps());if(next>doc.duration)throw new Error('No next frame in the scene.');duplicatePropertyKeys(animation,paths,key.time,next);selectedPropertyKey={...key,time:next};time=next;}item.animation=animation;item.track=null;changed('Keyframe updated');}catch(error){status((error as Error).message);}}break;}
     case 'hide-selection':setHidden(selection.ids,true);break;
-    case 'show-selection':setHidden(selection.ids,false);break;
+    case 'show-selection':showHierarchy(selection.ids);break;
     case 'show-all':setHidden(doc.objects.map(item=>item.id),false);break;
     case 'export-shot':{const shot=activeShot();if(shot){pause();flushFieldEdit();try{openShotExport(stage.createShotRenderer(shot.cameraId),shot,time);}catch(error){status((error as Error).message);}}break;}
-    case 'look-frames':{const shot=activeShot();if(shot){pause();flushFieldEdit();try{openLookFrames(stage.createShotRenderer(shot.cameraId),shot,time);}catch(error){status((error as Error).message);}}break;}
+    case 'look-frames':{const shot=activeShot();if(shot&&workspace){pause();flushFieldEdit();try{openLookFrames(stage.createShotRenderer(shot.cameraId),shot,time,workspace);}catch(error){status((error as Error).message);}}break;}
     case 'edit-asset':{const item=entity();if(item&&'asset' in item&&item.asset){const asset=project.assets?.find(a=>a.id===item.asset!.id);if(asset)openAssetEditor(asset);}break;}
     case 'save-asset':saveSelectionAsset();break;
     case 'record-performance':beginPerformance();startPerformanceRecord();break;
     case 'focus':stage?.focusSelection();break;
     case 'ground':pause();stage?.dropSelection();break;
+    case 'draw-path':{const item=entity();if(!stage||!item)break;if(stage.drawingPath){stage.cancelPath();break;}pause();flushFieldEdit();const sceneId=doc.id,id=item.id,isCamera='fov' in item;
+      stage.drawPath(points=>{if(doc.id!==sceneId){status('Switch back to that scene to draw its path.');return;}
+        try{
+          if(isCamera){const camera=doc.cameras.find(c=>c.id===id);if(!camera)throw new Error('That camera is no longer in this scene.');const move=sketchedCameraMove(doc,camera,points,time,activeShot()??null);replaceContent(withCameraMove(projectContent(project),sceneId,id,move.track));changed(`Camera move set · ${move.length.toFixed(1)} m over ${move.duration.toFixed(1)} s from ${move.start.toFixed(1)} s · ${move.subject?'keeps '+move.subject.name+' in frame':'keeps its current aim'}`);return;}
+          const object=doc.objects.find(o=>o.id===id);if(!object)throw new Error('That object is no longer in this scene.');
+          const path=sketchedPath(doc,object,points,time);replaceContent(applyProjectOperations(projectContent(project),[path.operation],time));changed(`Path set · ${path.length.toFixed(1)} m in ${path.operation.duration.toFixed(1)} s from ${path.operation.start.toFixed(1)} s${path.fitted?' · sped up to finish with the scene':''}`);
+        }catch(error){status((error as Error).message);}
+      },()=>status('Path drawing cancelled'));break;}
     case 'reset-view':stage?.resetView();break;
-    case 'use-view':{const view=stage?.captureView(),item=entity();if(!view||!item||!('fov' in item))break;pause();let saved=false;for(const group of ['position','rotation'] as const)for(const [i,axis] of ['x','y','z'].entries())saved=editProperty(item,`${group}.${axis}` as PropertyPath,view.transform[group][i])||saved;saved=editProperty(item,'fov',clamp(view.fov,10,120))||saved;if(saved)changed('Framing aligned to scene view');else{renderAll();status('Framing previewed · Insert keys to keep it');}break;}
+    case 'use-view':{const view=stage?.captureView(),item=entity();if(!view||!item||!('fov' in item))break;try{view.transform=localTransform(doc,item.id,view.transform,time);}catch(error){status((error as Error).message);break;}pause();let saved=false;for(const group of ['position','rotation'] as const)for(const [i,axis] of ['x','y','z'].entries())saved=editProperty(item,`${group}.${axis}` as PropertyPath,view.transform[group][i])||saved;saved=editProperty(item,'fov',clamp(view.fov,10,120))||saved;if(saved)changed('Framing aligned to scene view');else{renderAll();status('Framing previewed · Insert keys to keep it');}break;}
     case 'undo':flushFieldEdit();restore(history.undo());status('Undo');break;
     case 'redo':flushFieldEdit();restore(history.redo());status('Redo');break;
     case 'duplicate':duplicate();break;
     case 'delete':remove();break;
     case 'play':togglePlay();break;
-    case 'rewind':pause();seek(activeShot()?.start??0);break;
-    case 'save':persist();status(storageAvailable?'Scene saved on this device':'Local storage unavailable · export the scene to keep it');break;
+    case 'rewind':pause();seek(0);break;
+    case 'save':persist();void workspace?.flush().then(()=>status('Project saved on this computer')).catch(error=>status((error as Error).message));break;
     case 'export':downloadProject();break;
     case 'export-scene':exportScene();break;
     case 'add-scene':addScene();break;
+    case 'open-scenes':assetsPanel?.showScenes();break;
     case 'add-camera':addCamera();break;
     case 'add-shot':addShot();break;
     case 'camera-shot':addShot();break;
@@ -766,9 +887,12 @@ app.addEventListener('click',event=>{
     case 'remove-shot':removeShot();break;
     case 'edit-shot':{const shot=activeShot();if(shot)switchShot(shot.id);else addShot();break;}
     case 'build-with-muse':setSidePanel('muse');$<HTMLTextAreaElement>('#sceneInstruction').focus();break;
-    case 'new-project':if(unkeyed.size)status('Insert or discard unkeyed changes before starting another project');else $<HTMLDialogElement>('#newProjectDialog').showModal();break;
-    case 'cancel-new-project':$<HTMLDialogElement>('#newProjectDialog').close();break;
-    case 'confirm-new-project':downloadProject();openProject(createProject(null));$<HTMLDialogElement>('#newProjectDialog').close();break;
+    case 'projects':void workspace?.showProjects();break;
+    case 'share-project':workspace?.showShare();break;
+    case 'project-results':void workspace?.showResults();break;
+    case 'save-copy':void workspace?.saveCopy().catch(error=>status((error as Error).message));break;
+    case 'retry-save':void workspace?.retry();break;
+    case 'new-project':void workspace?.newProject();break;
     case 'export-project':downloadProject();break;
     case 'recover-storage':downloadProject(true);break;
     case 'reload':location.reload();break;
@@ -794,6 +918,13 @@ const onPropertyInput = (event: Event)=>{
   if(assetEditor)return;
   if((event.target as HTMLElement).id==='hierarchySearch')return;
   const input=event.target as HTMLInputElement;if(!(input instanceof HTMLInputElement)||input.type==='file'||editPreview||performanceSession)return;
+  if(input.dataset.jointPath){
+    const item=entity(),value=Number(input.value),path=input.dataset.jointPath;
+    if(input.value!==''&&item&&'kind' in item&&!playing&&!item.hidden&&Number.isFinite(value)&&isJointProperty(path)){
+      const part=instanceJoints(item).find(part=>part.id===path.slice(12));if(!part?.joint)return;
+      if(editProperty(item,path,clamp(value,part.joint.min,part.joint.max)))changed('Joint angle updated');else{renderTimeline();syncStage();renderTime();}
+    }return;
+  }
   if(input.dataset.componentField==='offset'&&input.closest('#inspector')){
     if(event.type==='input'&&input.value!==''){const item=entity(),value=Number(input.value),index=Number(input.dataset.componentAxis);if(item&&'kind' in item&&Number.isFinite(value)){if(editProperty(item,`pivot.${'xyz'[index]}` as PropertyPath,clamp(value,-1000,1000)))changed('Component value updated');else{renderTimeline();syncStage();renderTime();}}}
     return;
@@ -804,6 +935,7 @@ const onPropertyInput = (event: Event)=>{
   if(input.dataset.placement){if(event.type!=='change'||!Number.isFinite(value))return;pause();input.blur();stage?.transformGroup(input.dataset.placement as 'position'|'rotation'|'scale',Number(input.dataset.index),value);return;}
   if(input.id==='projectName'){project.name=input.value.trim().slice(0,120)||'Untitled take';changed();return;}
   if(input.id==='sceneName'&&project.activeSceneId){doc.name=input.value.trim().slice(0,120)||'Untitled scene';changed();return;}
+  if(input.dataset.look&&project.activeSceneId){const look=structuredClone(doc.look??DEFAULT_SCENE_LOOK),key=input.dataset.look;if(key==='keyPosition')look.keyPosition[Number(input.dataset.index)]=value;else Object.assign(look,{[key]:input.type==='color'?input.value:value});const parsed=sceneLookSchema.safeParse(look);if(parsed.success){doc.look=parsed.data;changed();}else if(event.type==='change')status('Lighting value is outside the supported range.');return;}
   if(input.id==='entityName' && item){item.name=input.value.trim().slice(0,120)||'Untitled';changed();return;}
   if(input.id==='shotName'&&activeShot()){activeShot()!.name=input.value.trim().slice(0,120)||'Untitled shot';changed();return;}
   if(input.id==='objectColor' && item && 'color' in item){item.color=input.value;changed();return;}
@@ -820,6 +952,7 @@ app.addEventListener('change',event=>{
   if(select.id==='shotSelect'){switchShot(select.value);return;}
   if(select.id==='animationFps'){doc.fps=Number(select.value)===30?30:24;$<HTMLInputElement>('#animationFrame').value=String(frameAtTime(time,fps()));changed('Frame rate updated · Key times unchanged');return;}
   if(select.id==='animationZoom'){animationZoom=Number(select.value);applyTimelineZoom();return;}
+  if(select.id==='entityParent'){try{changeParent(selection.active?[selection.active]:[],select.value||null);}catch(error){status((error as Error).message);renderInspector();}return;}
   if(select.id==='animationInterpolation'&&selectedPropertyKey&&entity()){const item=entity()!,key=selectedPropertyKey,mode=select.value;if(mode!=='quaternion'){setKeyInterpolation(ensureAnimation(item),key.path?[key.path]:groupPaths(key.group),key.time,mode as 'linear'|'constant'|'smooth');changed('Interpolation updated');}return;}
   if(select.id==='shotCameraSelect'&&!editPreview){const shot=activeShot();if(shot){pause();shot.cameraId=select.value;selection.active=shot.cameraId;changed('Shot now uses the selected camera’s framing and motion');}}
 });
@@ -828,11 +961,12 @@ app.addEventListener('input',event=>{liveFieldEdit=true;try{onPropertyInput(even
 $<HTMLInputElement>('#openFile').addEventListener('change',async event=>{
   const input=event.target as HTMLInputElement,file=input.files?.[0];if(!file)return;
   try{
+    if(file.name.toLowerCase().endsWith('.zip')){if(file.size>MAX_ARCHIVE_BYTES)throw new Error('Project archives must be smaller than 250 MB.');await workspace?.importArchive(file);status('Project and saved results imported');return;}
     if(file.size>MAX_PROJECT_SIZE)throw new Error('Scene / project files must be smaller than 20 MB.');
     const text=await file.text(),value=JSON.parse(text),imported=value?.format==='LittleTake.project'?parseProject(text):null;
-    if(imported){openProject(imported);status('Project and conversations opened');}
-    else{const next=parseDocument(text);next.id=nextId('scene',project.scenes);project.scenes.push(next);project.activeSceneId=next.id;project.activeShotId=next.shots[0]?.id??null;syncDocument();changed('Scene added to this project');persist();}
-  }catch(error){status(error instanceof Error?error.message:'Unable to open this scene or project.');}finally{input.value='';}
+    if(imported){await workspace?.create(imported);status('Project and conversations imported');}
+    else{const next=parseDocument(text);if(!workspace?.canEdit)await workspace?.create(createProject(next));else{next.id=nextId('scene',project.scenes);project.scenes.push(next);project.activeSceneId=next.id;project.activeShotId=next.shots[0]?.id??null;syncDocument();changed('Scene added to this project');persist();}}
+  }catch(error){const message=error instanceof Error?error.message:'Unable to open this scene or project.';status(message);workspace?.reportError(message);}finally{input.value='';}
 });
 
 const timelineResizeHandle=$('#timelineResizeHandle');
@@ -899,7 +1033,7 @@ function finishTimelineDrag(cancel=false){
 $('#timelineContent').addEventListener('pointerup',()=>finishTimelineDrag());
 $('#timelineContent').addEventListener('pointercancel',()=>finishTimelineDrag(true));
 $('#timeRuler').addEventListener('keydown',event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();pause();seek(snapFrame(time+(event.key==='ArrowRight'?1/fps():-1/fps())));}else if(event.key==='Home'){event.preventDefault();pause();seek(0);}else if(event.key==='End'){event.preventDefault();pause();seek(doc.duration);}});
-$('#inspector').addEventListener('pointerover',event=>{const target=event.target as HTMLElement,input=target.closest<HTMLInputElement>('[data-pose],#cameraFov,[data-component-field="offset"]'),button=target.closest<HTMLElement>('[data-key-group]');hoveredProperty=input?(input.id==='cameraFov'?'fov':input.dataset.pose as PropertyGroup||'pivot'):button?.dataset.keyGroup as PropertyGroup??null;});
+$('#inspector').addEventListener('pointerover',event=>{const target=event.target as HTMLElement,input=target.closest<HTMLInputElement>('[data-pose],#cameraFov,[data-component-field="offset"],[data-joint-path]'),button=target.closest<HTMLElement>('[data-key-group]');hoveredProperty=input?(input.dataset.jointPath as PropertyGroup|| (input.id==='cameraFov'?'fov':input.dataset.pose as PropertyGroup||'pivot')):button?.dataset.keyGroup as PropertyGroup??null;});
 $('#inspector').addEventListener('pointerleave',()=>{hoveredProperty=null;});
 window.addEventListener('keydown',event=>{
   if(stage?.presentingXR)return;
@@ -907,9 +1041,9 @@ window.addEventListener('keydown',event=>{
   if(event.defaultPrevented||storageError||editPreview||event.isComposing)return;
   const target=event.target as HTMLElement;
   if(event.code==='KeyI'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!performanceSession&&!document.querySelector('dialog[open]')){
-    const input=target instanceof HTMLInputElement?target:null,group=input?(input.id==='cameraFov'?'fov':input.dataset.pose?input.dataset.pose as PropertyGroup:input.dataset.componentField==='offset'?'pivot':null):hoveredProperty,item=entity();
+    const input=target instanceof HTMLInputElement?target:null,group=input?(input.dataset.jointPath as PropertyGroup|| (input.id==='cameraFov'?'fov':input.dataset.pose?input.dataset.pose as PropertyGroup:input.dataset.componentField==='offset'?'pivot':null)):hoveredProperty,item=entity();
     if(group&&item){event.preventDefault();pause();try{
-      if(input&&showAxisKeys&&group!=='fov'){const index=Number(input.dataset.component??input.dataset.componentAxis),path=`${group}.${'xyz'[index]}` as PropertyPath,value=propertyValue(item,path),orientation=group==='rotation'?displayedPose(item).rotation:undefined;putKey(ensureAnimation(item),path,time,value,orientation);if(currentDraft(item,path))unkeyed.delete(draftId(item,path));selectedPropertyKey={group,path,time};changed('Axis key added');}
+      if(input&&showAxisKeys&&!scalarGroup(group)){const index=Number(input.dataset.component??input.dataset.componentAxis),path=`${group}.${'xyz'[index]}` as PropertyPath,value=propertyValue(item,path),orientation=group==='rotation'?displayedPose(item).rotation:undefined;putKey(ensureAnimation(item),path,time,value,orientation);if(currentDraft(item,path))unkeyed.delete(draftId(item,path));selectedPropertyKey={group,path,time};changed('Axis key added');}
       else keyProperty(item,group,false);
     }catch(error){status((error as Error).message);}return;}
   }
@@ -934,13 +1068,12 @@ window.addEventListener('keydown',event=>{
 window.addEventListener('keyup',event=>performanceSession?.keys.delete(event.code.startsWith('Key')?event.code.slice(3).toLowerCase():event.code==='Space'?' ':event.key.toLowerCase()));
 window.addEventListener('blur',()=>{performanceSession?.keys.clear();if(performanceSession?.mode==='record')stopPerformanceRecord();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){performanceSession?.keys.clear();if(performanceSession?.mode==='record')stopPerformanceRecord();}});
-function tick(now:number){const delta=Math.min((now-lastFrame)/1000,0.05);lastFrame=now;if(performanceSession&&performanceSession.mode!=='review'){const stopped=performanceSession.update(delta,doc.duration);time=performanceSession.time;renderTime();syncStage();$('#inspector').querySelectorAll<HTMLInputElement>('[data-pose]').forEach(input=>input.value=String(num(performanceSession!.pose[input.dataset.pose as keyof Transform][Number(input.dataset.component)])));if(stopped)renderAll();else if(performanceSession.mode==='record')$('#performanceClock').textContent=timecode(time);}
-if(playing){const shot=activeShot(),take=performanceSession?.draft,end=take?take.start+take.duration:shot?shot.start+shot.duration:doc.duration;time=Math.min(time+delta,end);if(time>=end){pause();renderInspector();if(performanceSession?.mode==='review')renderPerformance();}renderTime();syncStage();}}
-window.addEventListener('storage',event=>{if(event.key===PROJECT_STORAGE_KEY)persist();});
+function tick(now:number){const delta=Math.min((now-lastFrame)/1000,0.05);lastFrame=now;if(xrRecording?.previewing){xrRecording.advance(delta);time=xrRecording.time;renderTime();syncStage();}if(performanceSession&&performanceSession.mode!=='review'){let stopped:boolean;try{stopped=performanceSession.update(delta,doc.duration);}catch(error){performanceSession=null;pause();renderAll();status((error as Error).message);requestAnimationFrame(tick);return;}time=performanceSession.time;renderTime();syncStage();$('#inspector').querySelectorAll<HTMLInputElement>('[data-pose]').forEach(input=>input.value=String(num(performanceSession!.pose[input.dataset.pose as keyof Transform][Number(input.dataset.component)])));if(stopped)renderAll();else if(performanceSession.mode==='record')$('#performanceClock').textContent=timecode(time);}
+if(playing){const take=performanceSession?.draft,end=take?take.start+take.duration:visibleScene().duration;time=Math.min(time+delta,end);followTimelineShot();if(time>=end){pause();renderInspector();if(performanceSession?.mode==='review')renderPerformance();}renderTime();syncStage();}}
 window.addEventListener('pagehide',()=>{sceneEditor?.session.cancel('This response was interrupted. Retry when you are ready.');persist();});
 window.addEventListener('beforeunload',event=>{if(!storageAvailable||performanceSession||unkeyed.size){event.preventDefault();event.returnValue='';}});
 function openAssetEditor(asset:AssetDefinition) {
-  if(assetEditor||editPreview||storageError||performanceSession)return;
+  if(assetEditor||editPreview||storageError||performanceSession||!workspace?.canEdit)return;
   pause();flushFieldEdit();assetsPanel?.setOpen(false);sceneEditor?.session.cancel('Asset editing opened. The scene conversation is retained.');
   try{assetEditor=new AssetEditor({host:app,asset,onClose(){assetEditor=null;renderAll();void assetsPanel?.refresh();},onSaved(nextAsset){
     const count=synchronizeAssets([...libraryAssets.filter(a=>a.id!==nextAsset.id),nextAsset]);
@@ -948,4 +1081,43 @@ function openAssetEditor(asset:AssetDefinition) {
   }});}catch(error){status(error instanceof Error?error.message:'Could not open asset editor');}
 }
 window.addEventListener('focus',()=>{void assetsPanel?.refresh();});
-setTimelineHeight(timelineHeight);setTimelineOpen(timelineHeight>62);renderAll();persist();void assetsPanel?.refresh();status(recovered?'Local project restored':'Your first take · select a shape and make it move');
+$('.header-actions').insertAdjacentHTML('afterbegin','<button data-action="projects">'+icon('folder')+'<span>Projects</span></button><button data-action="project-results">Results</button><button data-action="share-project" title="Project code and editing access">Share</button><span id="projectMode" class="project-mode" hidden></span>');
+$('#storageWarning').insertAdjacentHTML('beforeend','<button data-action="retry-save">Retry save</button><button data-action="save-copy">Save as new project</button>');
+workspace = new Workspace({
+  project:()=>project,
+  open:openProject,
+  stop:()=>{pause();flushFieldEdit();sceneEditor?.session.cancel('The project session stopped. Completed work is kept.');referenceDialog.contextChanged();document.querySelectorAll<HTMLDialogElement>('.look-dialog[open]').forEach(dialog=>dialog.close());},
+  beforeSwitch:()=>{flushFieldEdit();if(unkeyed.size||performanceSession||assetEditor){status('Finish the current edit or recording before switching projects');return false;}persist();return true;},
+  result:(_output,data)=>{void data.text().then(text=>referenceDialog.restore(JSON.parse(text))).catch(error=>status((error as Error).message));},
+  recoverBrowserSave:()=>downloadProject(true),
+  state:(message,readOnly,problem)=>{
+    const wasReadOnly=document.body.dataset.projectReadonly==='true';
+    $('#saveStatus').textContent=message;storageAvailable=!workspace?.hasUnsaved;
+    document.body.dataset.projectReadonly=String(readOnly);
+    const badge=$('#projectMode');badge.hidden=!readOnly;badge.dataset.readonly=String(readOnly);badge.textContent='Viewing';
+    $('#storageWarning').hidden=!problem;$('#storageWarning > span').textContent=message;
+    $('#inspector').inert=readOnly;$('#sceneAI').inert=readOnly;
+    $<HTMLInputElement>('#projectName').disabled=readOnly;
+    $<HTMLInputElement>('#sceneName').readOnly=readOnly;
+    if(wasReadOnly&&!readOnly){document.querySelectorAll<HTMLButtonElement>('[data-viewer-disabled]').forEach(node=>{node.disabled=false;delete node.dataset.viewerDisabled;});renderAll();}
+    enforceViewing();
+  },
+});
+const viewingActions=new Set(['projects','project-results','share-project','save-copy','retry-save','export','export-project','export-scene','export-shot','recover-storage','open','reload','play','rewind','focus','reset-view','top-view','expand-preview','close-preview','shortcuts','close-shortcuts','close-snapshot','refresh-snapshot','download-snapshot','edit-shot','open-scenes','timeline','look-frames']);
+document.addEventListener('click',event=>{
+  if(workspace?.canEdit)return;
+  const action=(event.target as HTMLElement).closest<HTMLElement>('[data-action]')?.dataset.action;
+  if((action&&!viewingActions.has(action))||(event.target as HTMLElement).closest('[data-visibility-id],[data-add],[data-color],[data-key-group],[data-key-path]')){event.preventDefault();event.stopImmediatePropagation();status('Viewing only · use Share to start editing');}
+},true);
+document.addEventListener('pointerdown',event=>{if(!workspace?.canEdit&&(event.target as HTMLElement).closest('[data-key],[data-clip],[data-shot-clip],.timeline-key')){event.preventDefault();event.stopImmediatePropagation();}},true);
+document.addEventListener('keydown',event=>{if(!workspace?.canEdit&&!(event.target as HTMLElement).closest('input,textarea,[contenteditable=true]')&&['delete','backspace','g','r','s','i','d'].includes(event.key.toLowerCase())){event.preventDefault();event.stopImmediatePropagation();}},true);
+function enforceViewing(){
+  $('#inspector').inert=!workspace?.canEdit||!!editPreview;$('#sceneAI').inert=!workspace?.canEdit||!!performanceSession;
+  document.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLSelectElement>('[data-viewer-disabled]').forEach(node=>{node.disabled=false;delete node.dataset.viewerDisabled;});
+  if(workspace?.canEdit)return;
+  const nodes=Array.from(document.querySelectorAll<HTMLButtonElement>('[data-action]')).filter(node=>!viewingActions.has(node.dataset.action!));
+  for(const node of [...nodes,...document.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLSelectElement>('[data-visibility-id],[data-add],#autoKey,#animationFps,#duration,.transform-tools button,#placementTools button')])if(!node.disabled){node.disabled=true;node.dataset.viewerDisabled='true';}
+}
+new MutationObserver(enforceViewing).observe(app,{childList:true,subtree:true});
+setTimelineHeight(timelineHeight);setTimelineOpen(timelineHeight>62);renderAll();void assetsPanel?.refresh();
+void workspace.start(recovered&&!storageError?project:null,storageError);

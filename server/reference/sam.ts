@@ -59,15 +59,15 @@ async function outputText(response: Response): Promise<string> {
 }
 
 /** SAM 3.1 tracks every match of a short noun phrase through the clip and keeps object ids stable across frames. */
-export async function trackConcept(prompt: string, videoDataUrl: string, apiKey: string, transport: typeof fetch = fetch, signal?: AbortSignal): Promise<SamTracks> {
+export async function segmentConcept(prompt: string, media: { type: 'image' | 'video'; dataUrl: string }, apiKey: string, transport: typeof fetch = fetch, signal?: AbortSignal): Promise<string> {
   let response: Response;
   try {
     response = await transport('https://api.meta.ai/v1/responses', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', Accept: 'text/event-stream' },
       signal: AbortSignal.any([AbortSignal.timeout(150_000), ...(signal ? [signal] : [])]),
-      body: JSON.stringify({ model: 'sam-3.1', stream: true, input: [{ type: 'message', role: 'user', content: [
-        { type: 'input_text', text: prompt }, { type: 'input_video', video_url: videoDataUrl },
+      body: JSON.stringify({ model: 'sam-3.1', stream: true, metadata: { mask_encoding: 'one_bit', include_confidence: 'true' }, input: [{ type: 'message', role: 'user', content: [
+        { type: 'input_text', text: prompt }, media.type === 'video' ? { type: 'input_video', video_url: media.dataUrl } : { type: 'input_image', image_url: media.dataUrl },
       ] }] }),
     });
   } catch {
@@ -78,6 +78,10 @@ export async function trackConcept(prompt: string, videoDataUrl: string, apiKey:
   if (response.status === 402) throw new AIError('credits_required', 'SAM 3.1 needs API credits before it can track clips.', 503);
   if (response.status === 401 || response.status === 403) throw new AIError('provider_auth', 'SAM 3.1 is not authorized on this server.', 503);
   if (!response.ok) throw new AIError('provider_error', 'SAM 3.1 could not track this clip.');
-  try { return parseSamBoxes(await outputText(response)); }
+  try { return await outputText(response); }
   catch (error) { if (error instanceof AIError) throw error; throw new AIError('invalid_response', 'SAM 3.1 returned an unreadable response.'); }
+}
+
+export async function trackConcept(prompt: string, videoDataUrl: string, apiKey: string, transport: typeof fetch = fetch, signal?: AbortSignal): Promise<SamTracks> {
+  return parseSamBoxes(await segmentConcept(prompt, { type: 'video', dataUrl: videoDataUrl }, apiKey, transport, signal));
 }

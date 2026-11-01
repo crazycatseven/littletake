@@ -26,6 +26,14 @@ sam = [
   "triton>=3.5,<3.6; sys_platform == 'linux'",
 ]
 
+body = [
+  "braceexpand>=0.1.7",
+  "omegaconf>=2.3",
+  "pytorch-lightning>=2.4,<3",
+  "roma>=1.5",
+  "yacs>=0.1.8",
+]
+
 [tool.uv]
 package = false
 

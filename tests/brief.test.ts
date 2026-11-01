@@ -4,6 +4,7 @@ import { parseBriefInput, writeVideoBrief } from '../server/look/brief.ts';
 import { createBriefHandler } from '../server/look-api.ts';
 import type { AIProvider, StructuredRequest } from '../server/ai/provider.ts';
 import { sceneFromProposal } from '../server/reference/draft.ts';
+import { DEFAULT_SCENE_LOOK } from '../src/scene-edit/look.ts';
 import { briefInput, briefMarkdown, videoPackage, type VideoBrief } from '../src/look/brief.ts';
 import { crc32, zipFiles } from '../src/look/zip.ts';
 
@@ -11,11 +12,12 @@ const png = 'data:image/png;base64,' + Buffer.from('89504e470d0a1a0a0000000d4948
 const pose = (position: number[]) => ({ position, rotation: [0, 0, 0], scale: [1, 1, 1] });
 const scene = () => sceneFromProposal({
   name: 'Lobby', summary: 'A bellboy crosses the lobby.', assumptions: [],
+  look: DEFAULT_SCENE_LOOK, bindings: [],
   objects: [
-    { name: 'Bellboy', kind: 'human', transform: pose([-2, 0, 0]), motion: { start: 1, duration: 2, from: pose([-2, 0, 0]), to: pose([1, 0, -1]) } },
-    { name: 'Desk', kind: 'cube', transform: pose([1.5, .5, -2]), motion: null },
+    { name: 'Bellboy', kind: 'human', color: '#6b8259', transform: pose([-2, 0, 0]), motion: [{ time: 1, pose: pose([-2, 0, 0]) }, { time: 3, pose: pose([1, 0, -1]) }] },
+    { name: 'Desk', kind: 'cube', color: '#9a7545', transform: pose([1.5, .5, -2]), motion: null },
   ],
-  camera: { position: [0, 1.6, 6], target: [0, .9, 0], fov: 45, motion: null },
+  shots: [{ name: 'Lobby', start: 0, duration: 5, position: [0, 1.6, 6], target: [0, .9, 0], fov: 45, motion: null }],
 }, 5).scene;
 const brief = (extra: Partial<VideoBrief> = {}) => ({ prompt: 'A young bellboy in a purple uniform crosses a pastel hotel lobby from left to right.', camera: 'static, eye level', beats: [{ at: 3, action: 'He stops by the desk.' }, { at: 1, action: 'He starts walking.' }, { at: 9, action: 'Past the end.' }], negative: 'extra people, text', ...extra });
 const fake = (value: unknown, seen: StructuredRequest[] = []): AIProvider => ({ name: 'Meta', model: 'muse-spark-1.3', async generateObject(request) { seen.push(request); return value; } });

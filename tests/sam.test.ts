@@ -6,18 +6,20 @@ import { mp4VideoFrameCount } from '../server/reference/frames.ts';
 import { floorPoint, groundReferenceDraft } from '../server/reference/ground.ts';
 import { parseSamBoxes, trackConcept, type SamTracks } from '../server/reference/sam.ts';
 import { sceneFromProposal } from '../server/reference/draft.ts';
+import { DEFAULT_SCENE_LOOK } from '../src/scene-edit/look.ts';
 import { createReferenceHandler } from '../server/reference-api.ts';
 import { evaluateTransform } from '../src/model.ts';
-import type { ReferenceDraft, ReferenceInput } from '../src/reference/types.ts';
+import type { ReferenceDraft, VideoReferenceInput } from '../src/reference/types.ts';
 
 const W = 640, H = 360;
 const pose = (position: number[]) => ({ position, rotation: [0, 0, 0], scale: [1, 1, 1] });
 const proposal = (walker = [-2, 0, 0]) => ({
   name: 'Lobby walk', summary: 'A bellboy crosses the lobby.', assumptions: ['Depth is estimated.'],
-  objects: [{ name: 'Bellboy', kind: 'human', transform: pose(walker), motion: null }, { name: 'Desk', kind: 'cube', transform: pose([2, 0.5, -2]), motion: null }],
-  camera: { position: [0, 1.6, 6], target: [0, 0.9, 0], fov: 50, motion: null },
+  look: DEFAULT_SCENE_LOOK, bindings: [],
+  objects: [{ name: 'Bellboy', kind: 'human', color: '#6b8259', transform: pose(walker), motion: null }, { name: 'Desk', kind: 'cube', color: '#9a7545', transform: pose([2, 0.5, -2]), motion: null }],
+  shots: [{ name: 'Lobby', start: 0, duration: 5, position: [0, 1.6, 6], target: [0, 0.9, 0], fov: 50, motion: null }],
 });
-const input = (): ReferenceInput => ({ video: { dataUrl: 'data:video/mp4;base64,' + Buffer.from('not an mp4').toString('base64'), duration: 5, width: W, height: H }, direction: '' });
+const input = (): VideoReferenceInput => ({ video: { dataUrl: 'data:video/mp4;base64,' + Buffer.from('not an mp4').toString('base64'), duration: 5, width: W, height: H }, direction: '' });
 const draft = (walker?: number[]): ReferenceDraft => ({ ...sceneFromProposal(proposal(walker), 5), provider: 'Meta', model: 'test' });
 
 /** Ground truth: the bellboy walks from (-2, 0, 0) to (1, 0, -1) between 1 s and 3 s; boxes are its projection at 10 fps. */
@@ -120,14 +122,10 @@ test('tracks far from every draft person stay unmatched and failures leave the d
   assert.match(failed.assumptions.at(-1)!, /did not finish/);
 });
 
-test('reference API runs SAM beside Muse, grounds the draft, and cancels tracking when Muse fails', async () => {
-  const body = { video: { ...input().video, dataUrl: 'data:video/mp4;base64,' + Buffer.from([0, 0, 0, 16, ...Buffer.from('ftyp'), 0, 0, 0, 0]).toString('base64') }, direction: '' };
-  const post = () => new Request('https://littletake.vercel.app/api/reference', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const provider = (fail = false) => () => ({ name: 'Meta', model: 'test', async generateObject() { if (fail) throw new Error('boom'); return proposal(); } });
-  const ok = await createReferenceHandler({ MODEL_API_KEY: 'k' }, provider(), () => async () => walkTracks())(post());
-  const data = await ok.json();
-  assert.equal(ok.status, 200); assert.equal(data.tracks[0].label, 'Bellboy'); assert.ok(data.scene.objects[0].track);
-  let aborted = false;
-  const failing = await createReferenceHandler({ MODEL_API_KEY: 'k' }, provider(true), () => (_, signal) => new Promise((_, reject) => signal.addEventListener('abort', () => { aborted = true; reject(new Error('aborted')); })))(post());
-  assert.equal(failing.status, 500); assert.equal(aborted, true);
+test("reference API requires source observations before any model call", async () => {
+  let calls = 0;
+  const body = { video: { ...input().video, dataUrl: "data:video/mp4;base64," + Buffer.from([0, 0, 0, 16, ...Buffer.from("ftyp"), 0, 0, 0, 0]).toString("base64") }, direction: "" };
+  const request = new Request("https://littletake.vercel.app/api/reference", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const response = await createReferenceHandler({}, () => ({ name: "Test", model: "fixture", async generateObject() { calls++; return proposal(); } }))(request);
+  assert.equal(response.status, 400); assert.equal(calls, 0);
 });

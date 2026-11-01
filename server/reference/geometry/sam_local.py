@@ -136,5 +136,5 @@ def _segment(run: Path, prompts: list[str], threshold: float, min_free_gb: float
 
 
 def segment(run: Path, prompts: list[str], threshold: float, min_free_gb: float = 16) -> None:
-    with measurement_lock(run / "sam.lock"), measurement_lock(DATA / "sam-local.lock"):
+    with measurement_lock(run / "sam.lock"), measurement_lock(DATA / "local-model.lock"):
         _segment(run, prompts, threshold, min_free_gb)

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Box3, Euler, MathUtils, Vector3 } from 'three';
-import { createDocument, cloneDocument, evaluateTransform, History, serializeDocument } from '../src/model.ts';
+import { createDocument, cloneDocument, evaluateTransform, History, parseDocument, serializeDocument } from '../src/model.ts';
 import { applyProjectOperations, editPlanSchema, type SceneOperation, type SceneSnapshot } from '../src/scene-edit/operations.ts';
 import { topDownCamera } from '../src/scene-snapshot.ts';
 import { parseSceneEditInput, proposeSceneEdit } from '../server/scene-edit.ts';
@@ -46,6 +46,15 @@ test('retiming and removing motion preserve explicit motion semantics', () => {
   const track = structuredClone(before.objects[0].track!); track.start = 1; track.duration = 2;
   const next = applySceneOperations(before, [{ sceneId: 'scene-1', type: 'set_motion', id: 'object-1', track }], 0);
   assert.equal(next.objects[0].track!.start + next.objects[0].track!.duration, 3);
+  const peak = structuredClone(track.from); peak.position[1] += 1;
+  track.samples = [{ at: .35, transform: peak }, { at: .7, transform: track.to }];
+  const sampledPlan = editPlanSchema.parse({ summary: 'Rise, then settle.', requestedViews: [], operations: [{ sceneId: 'scene-1', type: 'set_motion', id: 'object-1', track }] });
+  const sampled = applySceneOperations(before, sampledPlan.operations, 0), reopened = parseDocument(serializeDocument(sampled));
+  for (const [time, expectedPose] of [[1.7, peak], [3, track.to]] as const) {
+    const actual = evaluateTransform(reopened.objects[0], time);
+    for (const key of ['position', 'rotation', 'scale'] as const) actual[key].forEach((value, i) => assert.ok(Math.abs(value - expectedPose[key][i]) < 1e-9));
+  }
+  assert.equal(editPlanSchema.safeParse({ ...sampledPlan, operations: [{ ...sampledPlan.operations[0], track: { ...track, samples: [...track.samples].reverse() } }] }).success, false);
 });
 
 test('camera aim uses world look-at orientation and preserves its other endpoint', () => {
@@ -72,6 +81,7 @@ test('scene edit input validates IDs, frame times and real inline PNG headers', 
   assert.equal(parseSceneEditInput({ ...input(), snapshots: [snapshot()] }).snapshots.length, 1);
   for (const value of [
     { ...input(), selectedId: 'missing' }, { ...input(), time: 7 },
+    { ...input(), selectedIds: ['missing', 'object-2'] }, { ...input(), selectedIds: ['object-2', 'object-2'] }, { ...input(), selectedIds: ['object-1'] },
     { ...input(), snapshots: [{ ...snapshot(), dataUrl: 'https://example.com/image.png' }] },
     { ...input(), snapshots: [{ ...snapshot(), width: 1024 }] },
     { ...input(), snapshots: [{ ...snapshot(), time: 1 }] },

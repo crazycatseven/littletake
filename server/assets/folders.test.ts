@@ -68,5 +68,5 @@ test('saving a primitive preserves its local origin instead of bottom-centering 
   const cube=createObject('cube',1);cube.transform.position=[5,3,2];cube.transform.rotation=[20,30,40];cube.transform.scale=[2,3,4];
   const saved=saveObjectAsset(cube,[],'saved-cube');assert.deepEqual(saved.parts[0].position,[0,0,0]);assert.deepEqual(saved.bounds.min,[-.5,-.5,-.5]);assert.deepEqual(saved.bounds.max,[.5,.5,.5]);
   assert.deepEqual(saved.template!.transform!.position,[0,0,0]);assert.deepEqual(saved.template!.transform!.rotation,cube.transform.rotation);
-  const human=saveObjectAsset(createObject('human',1),[],'saved-human');assert.ok(human.parts.some(part=>part.id==='body-top'));assert.ok(human.bounds.max[1]>1.8);
+  const human=saveObjectAsset(createObject('human',1),[],'saved-human');assert.ok(human.parts.some(part=>part.id==='body-top'));assert.ok(Math.abs(human.bounds.max[1]-1.8)<1e-6);assert.ok(Math.abs(human.bounds.min[1])<1e-6);
 });

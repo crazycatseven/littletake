@@ -1,3 +1,4 @@
+import { worldTransform, effectivelyHidden } from '../placement/hierarchy';
 import * as THREE from 'three';
 import { evaluateFov, evaluateTransform } from '../model';
 import type { SceneDocument, SceneObject } from '../types';
@@ -13,15 +14,15 @@ export function lookSubjects(doc: SceneDocument, cameraId: string, time: number,
 export function framedObjects(doc: SceneDocument, cameraId: string, time: number, aspect = 16 / 9, limit = 40): ({ object: SceneObject } & Omit<LookSubject, 'name'>)[] {
   const source = doc.cameras.find(item => item.id === cameraId);
   if (!source) return [];
-  const pose = evaluateTransform(source, time);
+  const pose = worldTransform(doc,source.id,time);
   const camera = new THREE.PerspectiveCamera(evaluateFov(source, time), aspect, .05, 500);
   camera.position.fromArray(pose.position);
   camera.rotation.set(...pose.rotation.map(THREE.MathUtils.degToRad) as [number, number, number], 'XYZ');
   camera.updateMatrixWorld(true);
   const found: ({ object: SceneObject; distance: number } & Omit<LookSubject, 'name'>)[] = [];
   for (const item of doc.objects) {
-    if (item.hidden || !item.name.trim()) continue;
-    const world = new THREE.Vector3().fromArray(evaluateTransform(item, time).position);
+    if (effectivelyHidden(doc,item.id) || !item.name.trim()) continue;
+    const world = new THREE.Vector3().fromArray(worldTransform(doc,item.id,time).position);
     const ndc = world.clone().project(camera);
     if (ndc.z < -1 || ndc.z > 1 || Math.abs(ndc.x) > 1.1 || Math.abs(ndc.y) > 1.1) continue;
     const distance = camera.position.distanceTo(world);

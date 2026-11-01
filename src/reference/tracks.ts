@@ -1,5 +1,17 @@
 import './tracks.css';
 import type { ReferenceTrack } from './types';
+import type { ReferenceAnalysis } from './analysis';
+
+/** Uses the same measured regions as reconstruction, so the review overlay spends no extra SAM calls. */
+export function measuredTracks(analysis: ReferenceAnalysis, bindings: Record<string, string[]> = {}): ReferenceTrack[] {
+  return analysis.entities.flatMap(entity => {
+    const boxes = analysis.frames.flatMap(frame => frame.subjects.filter(subject => subject.name === entity.name && subject.bodyRegionId).map(subject => {
+      const [left, top, right, bottom] = subject.box;
+      return [frame.time, left, top, right - left, bottom - top] as ReferenceTrack['boxes'][number];
+    })).sort((a, b) => a[0] - b[0]);
+    return boxes.length ? [{ label: entity.name, objectId: bindings[entity.name]?.[0], boxes }] : [];
+  });
+}
 
 const COLORS = ['#e8a33d', '#5fa8d3', '#c86b98', '#7fb069', '#d9644a', '#9b8ae6', '#4fb3a9', '#d4c24a'];
 

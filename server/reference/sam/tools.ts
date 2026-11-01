@@ -6,32 +6,38 @@ import { AIError } from '../../ai/provider.ts';
 import type { AIEnvironment } from '../../ai/index.ts';
 import { MAX_SAM_CALLS, observationKey, referenceContextSchema, type ReferenceContext, type ReferenceObservation, type ReferenceProgress } from '../../../src/reference/observations.ts';
 import { segmentImage, SAM_MODEL, type SamInput, type SamReceipt, type SamResult } from './service.ts';
+import { depthRegionsSchema, type LocalDepthService, type DepthResult } from '../geometry/depth.ts';
 
 const frameId = z.string().regex(/^[A-Za-z0-9_-]{1,80}$/);
 const readSchema = z.strictObject({ frameId });
 const segmentSchema = z.strictObject({ frameId, concept: z.string().trim().min(1).max(100), threshold: z.number().min(0).max(1).optional().default(.5) });
 const requestSchema = z.strictObject({ time: z.number().min(0).max(60), reason: z.string().trim().min(5).max(300) });
-const schemas = { read_reference_frame: readSchema, request_reference_frame: requestSchema, segment_reference: segmentSchema };
+const depthSchema = z.strictObject({ frameId, regions: depthRegionsSchema });
+const schemas = { read_reference_frame: readSchema, request_reference_frame: requestSchema, segment_reference: segmentSchema, estimate_reference_depth: depthSchema };
 const descriptions = {
   read_reference_frame: 'Inspect one ORIGINAL reference frame at its saved resolution before deciding what to segment. Use only an exact frameId from referenceFrames. Free of SAM inference; returns pixels and source timestamp, shot and quality metadata. This is not a rendered scene view.',
   request_reference_frame: 'Ask the browser for an additional timestamp from the original reference VIDEO when saved candidates miss an action, object or unobscured view. Give a concrete visual reason. Up to two timestamps in one batch per user turn. Planning resumes with the same project and cached observations after local extraction. Request missing frames before generating assets or planning edits. Does not run SAM.',
   segment_reference: 'Segment ONE short noun concept in an ORIGINAL reference frame. Choose the frame by visibility and task; prefer the unobscured complete object for layout, and separated moments for action. Returns measured 2D boxes, mask areas, model scores and a false-color mask overlay. Cached identical requests are reused; at most four new SAM calls per user turn, including failed attempts. Never retry an error automatically. IDs are image-local, not identities across frames; no 3D depth or metres are inferred.',
+  estimate_reference_depth: 'Use local VGGT for relative depth and camera information from ONE saved ORIGINAL frame when front/back order or perspective is ambiguous. Returns an aligned grayscale depth image, numerical grid, source-pixel camera intrinsics and optional region depth quantiles/camera-space surface centres. regions use normalized full-frame [left,top,right,bottom] boxes; reuse a SAM normalizedBox or choose a compact visible patch. Boxes can contain background. Cached pixels/model are reused across restarts; model is loaded on demand and VRAM released afterward. These are estimates, not metres, object pivots, ground-aligned scene coordinates or cross-frame distances. Never retry a failed request automatically.',
 };
 export const referenceToolDefinitions: ToolDefinition[] = Object.entries(schemas).map(([name, schema]) => ({ name, description: descriptions[name as keyof typeof schemas], parameters: z.toJSONSchema(schema, { target: 'draft-7' }) }));
-export const REFERENCE_TOOL_INSTRUCTIONS = `Original reference pixels are provided separately from rendered scene snapshots. referenceFrames lists exact frame IDs, actual decoded timestamps, original/resized dimensions, shot indices and candidate roles. A contact sheet is a selection aid. Sharpness is a heuristic, not a judgment that this frame contains the whole set. Select frames deliberately: an unobscured wide view for layout, early/late views of the SAME source shot for motion, and another visible view for an occluded object. Read a selected original frame when the contact sheet is insufficient. If important evidence is missing, request_reference_frame with a timestamp and visual reason BEFORE asset generation; request two moments together for motion. The browser resumes planning once with those exact decoded frames. Do not segment every frame or every object by default. Use one short noun per segment_reference call. Reuse cached observations. Keep source-shot projections separate; cuts do not establish a new physical location and image-local IDs do not establish object identity. Boxes and mask fractions constrain image composition, not absolute depth, metric size or hidden geometry. Use existing spatial tools for 3D scene edits and rendered views for visual checks. Be explicit when an object was not found or SAM failed. Do not claim to have segmented or measured anything without a successful tool result.`;
+export const REFERENCE_TOOL_INSTRUCTIONS = `Original reference pixels are provided separately from rendered scene snapshots. referenceFrames lists exact frame IDs, actual decoded timestamps, original/resized dimensions, shot indices and candidate roles. A contact sheet is a selection aid. Sharpness is a heuristic, not a judgment that this frame contains the whole set. Select frames deliberately: an unobscured wide view for layout, early/late views of the SAME source shot for motion, and another visible view for an occluded object. Read a selected original frame when the contact sheet is insufficient. If important evidence is missing, request_reference_frame with a timestamp and visual reason BEFORE asset generation; request two moments together for motion. The browser resumes planning once with those exact decoded frames. Do not segment every frame or every object by default. Use one short noun per segment_reference call. Reuse cached observations. Keep source-shot projections separate; cuts do not establish a new physical location and image-local IDs do not establish object identity. Boxes and mask fractions constrain image composition, not absolute depth, metric size or hidden geometry. When estimate_reference_depth is available, use it for ambiguous front/back relationships or perspective BEFORE guessing 3D placement. Reuse the same frame and normalized SAM boxes or compact visible patches. A depth box can mix foreground/background; compare quantiles and inspect original pixels. VGGT distances have unknown scale and independently inferred frames cannot be compared numerically. Camera +Y points DOWN and +Z points forward; camera-space surface centres are not LittleTake transforms or object pivots. Do not fabricate a ground plane, hidden shape or metres from them. Use existing spatial tools for 3D scene edits and rendered views for visual checks. Be explicit when an object was not found or a model failed. Do not claim to have segmented or measured anything without a successful tool result.`;
 const colors = ['#23b4ef', '#ffab37', '#df5ca9', '#43cc81', '#a580f5', '#f26952'];
 export type SamInference = (input: SamInput, options: { signal?: AbortSignal; onReceipt?(receipt: SamReceipt): void }) => Promise<SamResult>;
 export interface ReferenceCallEvidence { frameId: string; concept: string; threshold: number; startedAt: string; finishedAt?: string; status: string; receipt?: SamReceipt; result?: SamResult; error?: string }
+interface DepthCallEvidence { tool: 'estimate_reference_depth'; frameId: string; regions: z.output<typeof depthRegionsSchema>; startedAt: string; finishedAt?: string; status: string; result?: DepthResult; error?: string }
 
 /** Original-frame tools, request budget and replay cache. No scene mutation. */
 export class ReferenceTools {
   readonly context: ReferenceContext | undefined;
-  readonly evidence: ReferenceCallEvidence[] = [];
+  readonly evidence: (ReferenceCallEvidence | DepthCallEvidence)[] = [];
   readonly requestedFrames: { time: number; reason: string }[] = [];
   private observations = new Map<string, ReferenceObservation>();
   private pending = new Map<string, Promise<ReferenceObservation>>();
+  private depthPending = new Map<string, Promise<DepthResult>>();
+  private depthFailures = new Map<string, unknown>();
   private callsUsed: number;
-  constructor(raw?: ReferenceContext, private env: AIEnvironment = process.env, private inference: SamInference = (input, options) => segmentImage(input, env, options)) {
+  constructor(raw?: ReferenceContext, private env: AIEnvironment = process.env, private inference: SamInference = (input, options) => segmentImage(input, env, options), private depth?: Pick<LocalDepthService, 'available' | 'estimate'>) {
     this.context = raw ? referenceContextSchema.parse(raw) : undefined;
     this.callsUsed = this.context?.callsUsed ?? 0;
     if (!this.context) return;
@@ -44,6 +50,7 @@ export class ReferenceTools {
     for (const observation of this.context.observations) if (observation.provider === provider && observation.model === SAM_MODEL) this.observations.set(observationKey(observation.frameId, observation.concept, observation.threshold), observation);
   }
   get available() { return Boolean(this.context); }
+  definitions() { return referenceToolDefinitions.filter(tool => tool.name !== 'estimate_reference_depth' || this.depth?.available); }
   handles(name: string) { return Object.hasOwn(schemas, name); }
   private frame(id: string) {
     const frame = this.context?.source.frames.find(frame => frame.id === id);
@@ -61,13 +68,28 @@ export class ReferenceTools {
     }).join('');
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${Math.ceil(source.frames.length / 3) * tileHeight}"><rect width="100%" height="100%" fill="#171c25"/>${tiles}</svg>`;
     const png = new Resvg(svg).render().asPng();
-    return [{ type: 'text', text: JSON.stringify({ originalReference: { id: source.id, name: source.name, kind: source.kind, duration: source.duration, originalWidth: source.originalWidth, originalHeight: source.originalHeight, cuts: source.cuts, omittedShots: source.omittedShots }, referenceFrames: catalog, shotConvention: 'shot is a zero-based index. Report the one-based sourceShotNumber to users, matching the contact sheet.', contactSheetOrder: source.frames.map(frame => frame.id), cachedSegmentations: [...this.observations.values()].map(item => ({ frameId: item.frameId, concept: item.concept, threshold: item.threshold, count: item.instances.length })), remainingSamCalls: MAX_SAM_CALLS - this.callsUsed }) },
+    return [{ type: 'text', text: JSON.stringify({ originalReference: { id: source.id, name: source.name, kind: source.kind, duration: source.duration, originalWidth: source.originalWidth, originalHeight: source.originalHeight, cuts: source.cuts, omittedShots: source.omittedShots }, referenceFrames: catalog, localDepthAvailable: Boolean(this.depth?.available), shotConvention: 'shot is a zero-based index. Report the one-based sourceShotNumber to users, matching the contact sheet.', contactSheetOrder: source.frames.map(frame => frame.id), cachedSegmentations: [...this.observations.values()].map(item => ({ frameId: item.frameId, concept: item.concept, threshold: item.threshold, count: item.instances.length })), remainingSamCalls: MAX_SAM_CALLS - this.callsUsed }) },
       { type: 'image', dataUrl: 'data:image/png;base64,' + png.toString('base64') }];
   }
   progress(): ReferenceProgress | undefined {
     return this.context ? { sourceId: this.context.source.id, observations: [...this.observations.values()].slice(-8), callsUsed: this.callsUsed, framesRequested: Boolean(this.context.framesRequested || this.requestedFrames.length) } : undefined;
   }
   async execute(name: string, value: unknown, signal?: AbortSignal): Promise<{ result: unknown; image?: string }> {
+    if (name === 'estimate_reference_depth') {
+      const args = depthSchema.parse(value), frame = this.frame(args.frameId);
+      if (!this.depth?.available) throw new Error('Local VGGT is unavailable in this server. Do not claim measured depth.');
+      if (this.depthFailures.has(frame.id)) throw this.depthFailures.get(frame.id);
+      const key = JSON.stringify(args), reused = this.depthPending.has(key);
+      if (!reused) {
+        const evidence: DepthCallEvidence = { tool: name, frameId: frame.id, regions: args.regions, startedAt: new Date().toISOString(), status: 'requesting' };
+        this.evidence.push(evidence);
+        this.depthPending.set(key, this.depth.estimate({ sourceId: this.context!.source.id, frame, regions: args.regions }, signal).then(result => {
+          evidence.result = result; evidence.status = 'complete'; return result;
+        }, error => { this.depthFailures.set(frame.id, error); evidence.status = 'failed'; evidence.error = error instanceof Error ? error.message : 'Local VGGT failed.'; throw error; }).finally(() => { evidence.finishedAt = new Date().toISOString(); }));
+      }
+      const { depthImageDataUrl, ...result } = await this.depthPending.get(key)!;
+      return { result: { ...result, ok: true, applied: false, cached: reused || result.cached, sourceShotNumber: frame.shot + 1 }, image: depthImageDataUrl };
+    }
     if (name === 'request_reference_frame') {
       const args = requestSchema.parse(value), source = this.context?.source;
       if (!source || source.kind !== 'video' || args.time >= source.duration) throw new Error('Request a timestamp inside the current reference video.');

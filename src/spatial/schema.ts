@@ -28,8 +28,8 @@ export const spatialOperationSchema = z.discriminatedUnion('type', [
   z.strictObject({ ...movement, type: z.literal('attach_anchor'), id: identifier, anchor: z.string().min(1).max(64),
     targetId: identifier, targetAnchor: z.string().min(1).max(64), offset: vector(-1000, 1000), frame: spatialFrameSchema }),
   z.strictObject({ ...context, type: z.literal('follow_path'), id: identifier, points: z.array(vector(-1000, 1000)).min(2).max(120),
-    start: z.number().min(0).max(60), duration: z.number().min(.1).max(60), orientation: z.enum(['keep', 'tangent']),
-    forward, replaceMotion: z.boolean() }),
+    start: z.number().min(0).max(60), duration: z.number().min(.1).max(60), orientation: z.enum(['keep', 'tangent', 'look_at']),
+    target: vector(-1000, 1000).optional(), pointTimes: z.array(z.number().min(0).max(60)).min(2).max(120).optional(), forward, replaceMotion: z.boolean() }),
 ]);
 export type SpatialFrame = z.infer<typeof spatialFrameSchema>;
 export type SpatialQuery = z.infer<typeof spatialQuerySchema>;

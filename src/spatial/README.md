@@ -10,9 +10,15 @@
 | `align_objects` | `objectIds`, `referenceId`, `frame`, `axis: x/y/z`, `edge: min/center/max` |
 | `distribute_objects` | `objectIds`, `frame`, `axis`, `spacing: centers/gaps`；保留两端，计算等中心距或等边缘间距 |
 | `attach_anchor` | `id`, `anchor`, `targetId`, `targetAnchor`, `offset`, `frame`；一次性对齐两个锚点 |
-| `follow_path` | `id`, `points`, `start`, `duration`, `orientation: keep/tangent`, `forward`, `replaceMotion`；世界坐标中的物体原点路径，匀速折线，保留转折点并在转弯前补一个朝向关键点 |
+| `follow_path` | `id`, `points`, `start`, `duration`, `orientation: keep/tangent/look_at`, `forward`, `replaceMotion`；物体或相机的世界折线路径；默认匀速，可用 `pointTimes` 指定每个路径点的绝对场景时间；`look_at` 仅用于相机，需提供世界坐标 `target`，沿路径持续瞄准目标并保存采样朝向 |
+
+编辑器里选中物体后点 **Draw path on floor**，在地面上拖一笔即生成 `follow_path`（`sketch.ts`）：笔画先按 5 cm 容差简化、超过 120 点时等距重采样，物体保持当前原点高度并沿路径转向；从播放头开始，按物体移动组件的速度（默认 1.4 m/s）计时，场景剩余时间不够时加速到场景结束。已有运动会被明确替换，可撤销。Esc 取消。
+
+选中相机时按钮变为 **Draw camera move on floor**：相机保持当前高度，在它所属镜头的时间范围内匀速走完这条线（不属于当前镜头时从播放头到场景结束），并始终对准开始时画面中心附近的物体（人物对准胸口高度，物体移动时跟着转）；画面里没有物体时保持当前朝向的注视点。结果是采样运动，可撤销。
 
 每个操作包含 `sceneId` 和场景时间 `time`；除 `follow_path` 外还需指定 `scope: static/whole_motion`。`static` 拒绝已有动画；`whole_motion` 将同一个刚体变换应用到完整轨迹及中间采样，不改时间。替换已有轨迹必须明确设置 `replaceMotion=true`。所有关系计算一次，不建立持续依赖。
+
+`pointTimes` 的数量须与 `points` 相同，严格递增，首尾分别为 `start` 和 `start + duration`。各点之间按对应时段插值，例如将环绕前半段安排得更慢、最后再拉开揭示。未指定时仍按路径总长度匀速运动。
 
 坐标单位为米、旋转为度。`frame` 为 `{kind:"world"}`、`{kind:"object",id}` 或 `{kind:"camera",id}`（相机或镜头 ID），均使用刚性坐标轴，不继承参照物缩放。世界和物体坐标 +Z 为前；相机坐标 +Z 朝向观察者、-Z 深入画面，X/Y 为画面右/上。`offset` 沿指定坐标轴，长度为米。
 
@@ -44,4 +50,4 @@ Agent 的动画预览只返回起止姿态和中间关键点数量；完整轨�
 
 包围盒相交只是粗查，不证明网格穿插。底部射线只测采样位置，不证明物理稳定性。`follow_path` 不自动避障；改朝向会改变轮廓，后续间距操作应按最终姿态计算。视觉相似度、颜色与氛围由参考画面和专家评估。
 
-两条离线流程覆盖 HTTP 解算、旋转和缩放后的 prefab、真实支撑面、相机坐标、锚点、匀速路径、完整动画搬移、原子失败、保存重开、撤销，以及模拟 Muse 的资产读取和多轮工具调用。运行：`npx tsx --test src/spatial/workflow.test.ts`。测试不调用付费 API 或本地模型。
+两条离线流程覆盖 HTTP 解算、旋转和缩放后的 prefab、真实支撑面、相机坐标、锚点、匀速与指定时间路径、持续瞄准目标的 180° 相机环绕、完整动画搬移、原子失败、保存重开、撤销，以及模拟 Muse 的资产读取和多轮工具调用。运行：`npx tsx --test src/spatial/workflow.test.ts`。测试不调用付费 API 或本地模型。

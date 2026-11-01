@@ -1,16 +1,19 @@
+import { newId } from "../id.ts";
+import { projectFetch, projectDiagnosticId } from '../project/client';
 import { editPlanSchema } from './operations';
 import type { SceneEditInput, SceneEditResponse } from './types';
 import { saveDiagnostic, type DiagnosticIdentity, type RequestDiagnostic } from './diagnostic-store';
 import { referenceContextSchema } from '../reference/observations';
 
 export async function requestSceneEdit(input: SceneEditInput, signal: AbortSignal, identity?: DiagnosticIdentity): Promise<SceneEditResponse> {
-  const id = crypto.randomUUID();
+  const id = newId();
   const record: RequestDiagnostic = { id, turnId: id, conversationId: '', messageId: '', ...identity,
     startedAt: new Date().toISOString(), input: structuredClone(input), status: 'pending' };
+  record.conversationId = projectDiagnosticId(record.conversationId);
   // Persist the exact input before starting a paid request. A reload leaves an identifiable interrupted request.
   await saveDiagnostic(record);
   try {
-    const response = await fetch('/api/scene-edit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal });
+    const response = await projectFetch('/api/scene-edit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal });
     const text = await response.text();
     let data; try { data = JSON.parse(text); } catch { record.unreadableResponse = text; throw new Error('The edit server did not return a response. Try again.'); }
     if (data.diagnostic) record.server = data.diagnostic;

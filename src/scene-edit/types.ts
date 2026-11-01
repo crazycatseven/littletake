@@ -5,6 +5,7 @@ import type { ReferenceContext, ReferenceProgress } from '../reference/observati
 
 export interface SceneEditInput {
   project: ProjectContent; sceneId: string | null; shotId: string | null; prompt: string; selectedId: string | null; time: number;
+  selectedIds?: string[];
   snapshots: SceneSnapshot[];
   history?: ConversationHistory;
   reference?: ReferenceContext;

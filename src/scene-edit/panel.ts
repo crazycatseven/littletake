@@ -1,3 +1,4 @@
+import type {ReferenceVideo} from '../reference/types';
 import './panel.css';
 import { downloadDiagnostics } from './diagnostic-store';
 import { sceneEntity } from '../model';
@@ -9,7 +10,7 @@ import type { ReferenceContext } from '../reference/observations';
 import type { ReferenceInput } from '../reference/types';
 
 interface Options extends Omit<SessionOptions, 'changed'> {
-  root: HTMLElement; book: ConversationBook; changed(): void; clearSelection(): void;
+  root: HTMLElement; book: ConversationBook; changed(): void; clearSelection(): void; removeSelection(id: string): void;
 }
 const esc = (text: string) => text.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
@@ -34,8 +35,8 @@ export class SceneEditPanel {
       <div class="chat-reference" hidden></div>
       <input class="chat-reference-file" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm" hidden/>
       <dialog class="chat-reference-view"><button type="button" data-chat="close-reference">Close</button><p class="reference-view-caption"></p><img alt="Original reference frame"/></dialog>
-      <form class="chat-composer"><div class="selection-chip" hidden></div><textarea id="sceneInstruction" aria-label="Message Muse" maxlength="2000" rows="3" placeholder="Ask about the scene or describe a change…"></textarea><div class="composer-footer"><button type="button" data-chat="attach-reference" title="Attach an original image or reference clip for Muse">＋ Reference</button><span>Enter to send · Shift ↵</span><button type="submit" class="send-button" aria-label="Send message">↑</button><button type="button" data-chat="stop" hidden>■ Stop</button></div></form>
-      <div class="chat-footnote">Changes appear as a preview before you apply them.<br/><button type="button" data-chat="diagnostics">Download diagnostics</button><span class="diagnostic-status" role="status"></span></div>`;
+      <form class="chat-composer"><div class="selection-context" hidden></div><textarea id="sceneInstruction" aria-label="Message Muse" maxlength="2000" rows="3" placeholder="Describe an edit or ask about the scene…"></textarea><div class="composer-footer"><button type="button" data-chat="attach-reference" title="Attach an original image or reference clip for Muse">＋ Reference</button><span>Enter to send · Shift ↵</span><button type="submit" class="send-button" aria-label="Send message">↑</button><button type="button" data-chat="stop" hidden>■ Stop</button></div></form>
+      <div class="chat-footnote"><button type="button" data-chat="diagnostics">Download diagnostics</button><span class="diagnostic-status" role="status"></span></div>`;
     this.prompt = this.query('textarea'); this.messages = this.query('.chat-messages');
     this.session = new ConversationSession(options.book, { ...options,
       reference: async threadId => { if (this.referenceLoading?.threadId === threadId) await this.referenceLoading.promise; return loadReference(threadId); },
@@ -73,6 +74,7 @@ export class SceneEditPanel {
           .catch(error => { this.query('.diagnostic-status').textContent = ` ${error.message}`; }).finally(() => { target.disabled = false; });
       }
       if (chat === 'clear-selection') options.clearSelection();
+      if (target.dataset.removeSelection) options.removeSelection(target.dataset.removeSelection);
       if (review || before || after) this.session.review((review || before || after)!, !before);
       if (apply) this.session.apply(apply);
       if (discard) this.session.discard(discard);
@@ -96,7 +98,7 @@ export class SceneEditPanel {
     }).catch(() => { /* Sending a message reports connection errors without hiding saved history. */ });
   }
   private query<T extends HTMLElement = HTMLElement>(selector: string): T { return this.options.root.querySelector<T>(selector)!; }
-  async attachReference(file: File, video?: ReferenceInput['video'], cuts?: Promise<number[]>): Promise<void> {
+  async attachReference(file: File, video?: ReferenceVideo, cuts?: Promise<number[]>): Promise<void> {
     const threadId = this.session.active.id;
     this.referenceLoading?.controller.abort(); this.session.cancel('Reference changed. Your message is saved.'); this.referenceError = '';
     const controller = new AbortController();
@@ -150,7 +152,7 @@ export class SceneEditPanel {
   private renderMessage(message: ChatMessage): string {
     const evidence = this.session.evidenceMessageId === message.id && this.session.evidence.length
       ? `<div class="ai-view-evidence">${this.session.evidence.map(snapshot => `<img src="${esc(snapshot.dataUrl)}" alt="${snapshot.view === 'top_down' ? 'Top view' : 'Shot view'} shared with Muse at ${snapshot.time.toFixed(2)}s"/>`).join('')}</div>` : '';
-    const body = `<article class="chat-message ${message.role}"><div class="message-label" ${message.role === 'assistant' ? `title="${esc(message.model)}"` : ''}>${message.role === 'user' ? 'You' : '✧ Muse'}</div><p>${esc(message.text)}</p>${evidence}${message.role === 'assistant' ? this.editCard(message) : ''}</article>`;
+    const body = `<article class="chat-message ${message.role}"><div class="message-label" ${message.role === 'assistant' ? `title="${esc(message.model)}"` : ''}>${message.role === 'user' ? 'You' : 'Muse'}</div><p>${esc(message.text)}</p>${evidence}${message.role === 'assistant' ? this.editCard(message) : ''}</article>`;
     if (message.role !== 'user' || !['failed', 'stopped'].includes(message.status)) return body;
     return body + `<div class="chat-${message.status === 'failed' ? 'error' : 'stopped'}">${esc(message.detail || 'Response interrupted. Your message is saved.')}${message === this.session.active.messages.at(-1) ? `<button type="button" data-retry="${esc(message.id)}" ${this.session.busy ? 'disabled' : ''}>Retry response</button>` : ''}</div>`;
   }
@@ -158,7 +160,7 @@ export class SceneEditPanel {
     const thread = this.session.active, switched = this.renderedThread !== thread.id;
     this.query('.conversation-title').textContent = thread.title;
     if (this.prompt.value !== thread.draft) this.prompt.value = thread.draft;
-    const content = thread.messages.length ? thread.messages.map(message => this.renderMessage(message)).join('') : `<div class="empty-chat"><div class="empty-chat-mark">✧</div><h2>A fresh conversation.</h2><p>Build a set from an idea, or continue editing the current project.</p><div class="chat-suggestions"><button type="button" data-suggestion="Create a new small film set with a floor, two performers, a camera and a shot. Propose it for preview.">Build a new film set <span>↗</span></button><button type="button" data-suggestion="What could we improve about the framing?">Discuss the framing <span>↗</span></button></div></div>`;
+    const content = thread.messages.length ? thread.messages.map(message => this.renderMessage(message)).join('') : `<div class="empty-chat"><p>Build a scene or edit the current project.</p><div class="chat-suggestions"><button type="button" data-suggestion="Create a new small film set with a floor, two performers, a camera and a shot. Propose it for preview.">Create a scene</button><button type="button" data-suggestion="What could we improve about the framing?">Review framing</button></div></div>`;
     const html = content + (this.session.busy ? `<div class="chat-waiting"><i></i>${esc(this.session.activity)}</div>` : '');
     const last = thread.messages.at(-1);
     const newRequest = last?.role === 'user' && last.status === 'pending' && last.id !== this.renderedLastMessage;
@@ -174,12 +176,12 @@ export class SceneEditPanel {
     this.renderPicker(); this.refreshContext(); this.renderReference();
   }
   refreshContext() {
-    const { project, sceneId, shotId, selectedId } = this.options.context();
+    const { project, sceneId, shotId, selectedId, selectedIds } = this.options.context();
     const scene = project.scenes.find(item => item.id === sceneId), shot = scene?.shots.find(item => item.id === shotId);
     this.query('.scene-context-detail').textContent = scene ? `${scene.name}${shot ? " · " + shot.name : ""}` : "Empty project · ready to build";
-    const selected = scene ? sceneEntity(scene, selectedId) : undefined;
-    const chip = this.query('.selection-chip'); chip.hidden = !selected;
-    chip.innerHTML = selected ? `<span>◇</span>${esc(selected.name)}<button type="button" data-chat="clear-selection" aria-label="Remove selection context">×</button>` : '';
+    const selected = scene ? (selectedIds ?? (selectedId ? [selectedId] : [])).map(id => sceneEntity(scene, id)).filter(item => item !== undefined) : [];
+    const context = this.query('.selection-context'); context.hidden = !selected.length;
+    context.innerHTML = selected.length ? `<div class="selection-scope"><span>${selected.length} selected</span><button type="button" data-chat="clear-selection" aria-label="Clear selection">Clear</button></div><div class="selection-chips">${selected.map(item => `<span class="selection-chip" title="${esc(item.name)}"><span>◇</span>${esc(item.name)}<button type="button" data-remove-selection="${esc(item.id)}" aria-label="Remove ${esc(item.name)} from selection">×</button></span>`).join('')}</div>` : '';
   }
   sceneChanged() { this.session.sceneChanged(); }
 }

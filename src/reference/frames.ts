@@ -1,3 +1,5 @@
+import {newId} from '../id';
+import type {ReferenceVideo} from './types';
 import { detectCuts } from './cuts';
 import { readReferenceVideo } from './video';
 import type { ReferenceInput } from './types';
@@ -63,14 +65,14 @@ async function fitPayload(frames: ReferenceFrame[], signal: AbortSignal, allowan
   if (frames.reduce((sum, frame) => sum + frame.dataUrl.length, 0) > allowance || frames.some(frame => frame.dataUrl.length > 1_200_000)) throw new Error('Reference frames exceed the image allowance. Choose a smaller clip.');
 }
 
-export async function prepareReferenceFrames(file: File, signal: AbortSignal, knownVideo?: ReferenceInput['video'], knownCuts?: Promise<number[]>, requestedTimes?: number[]): Promise<ReferenceSource> {
-  const sourceId = crypto.randomUUID(), name = file.name.slice(0, 200);
+export async function prepareReferenceFrames(file: File, signal: AbortSignal, knownVideo?: ReferenceVideo, knownCuts?: Promise<number[]>, requestedTimes?: number[]): Promise<ReferenceSource> {
+  const sourceId = newId(), name = file.name.slice(0, 200);
   if (file.type.startsWith('image/')) {
     if (!file.size || file.size > 10_000_000) throw new Error('Choose a reference image up to 10 MB.');
     const image = await createImageBitmap(file);
     try {
       signal.throwIfAborted();
-      const frame: ReferenceFrame = { id: crypto.randomUUID(), time: 0, requestedTime: 0, shot: 0, role: 'image', quality: 0, ...encode(image, image.width, image.height, 960) };
+      const frame: ReferenceFrame = { id: newId(), time: 0, requestedTime: 0, shot: 0, role: 'image', quality: 0, ...encode(image, image.width, image.height, 960) };
       await fitPayload([frame], signal);
       return referenceSourceSchema.parse({ id: sourceId, name, kind: 'image', duration: 0, originalWidth: image.width, originalHeight: image.height, cuts: [], omittedShots: 0, frames: [frame] });
     } finally { image.close(); }
@@ -95,7 +97,7 @@ export async function prepareReferenceFrames(file: File, signal: AbortSignal, kn
       signal.throwIfAborted(); const candidate = plan.candidates[index++];
       if (!sample || frames.some(frame => Math.abs(frame.time - sample.timestamp) < .00001)) continue;
       context.drawImage(sample.canvas, 0, 0, 160, 90);
-      frames.push({ id: crypto.randomUUID(), ...candidate, time: sample.timestamp, role: requestedTimes ? 'requested' : 'coverage', quality: frameQuality(context.getImageData(0, 0, 160, 90).data, 160, 90),
+      frames.push({ id: newId(), ...candidate, time: sample.timestamp, role: requestedTimes ? 'requested' : 'coverage', quality: frameQuality(context.getImageData(0, 0, 160, 90).data, 160, 90),
         ...encode(sample.canvas, sample.canvas.width, sample.canvas.height, 960) });
     }
     const selected = requestedTimes ? frames : chooseCandidates(frames); await fitPayload(selected, signal, requestedTimes ? MAX_REFERENCE_IMAGE_CHARACTERS - 1_600_000 : 1_600_000);

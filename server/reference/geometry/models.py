@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-from files import local_checkpoint, model_manifest, read_json, require_frame, source_path, write_json
+from files import DATA, measurement_lock, local_checkpoint, model_manifest, read_json, require_frame, source_path, write_json
 
 
 def cuda_guard(min_free_gb: float):
@@ -21,6 +21,11 @@ def cuda_guard(min_free_gb: float):
 
 
 def depth(run: Path, device: str, min_free_gb: float, context_runs: list[Path] | None = None) -> None:
+    with measurement_lock(DATA / "local-model.lock", "A local geometry model is already running. No additional GPU model was loaded."):
+        _depth(run, device, min_free_gb, context_runs)
+
+
+def _depth(run: Path, device: str, min_free_gb: float, context_runs: list[Path] | None = None) -> None:
     import numpy as np
     from PIL import Image
     runs = [run, *(context_runs or [])]

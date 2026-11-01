@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { serializeContent } from '../project/model.ts';
 import { cloneDocument, createDocument, serializeDocument } from '../model.ts';
-import { createConversations, conversationHistory } from './conversations.ts';
+import { createConversations, conversationHistory, conversationsSchema } from './conversations.ts';
+import { EditorSelection } from '../placement/selection.ts';
 import { ConversationSession } from './session.ts';
 import type { SceneDocument } from '../types.ts';
 import type { SceneEditInput, SceneEditResponse } from './types.ts';
@@ -147,4 +148,44 @@ test('scene switching cancels late replies and refreshing a stale proposal resto
   requests[2].deferred.resolve(proposal); await refresh; session.apply(session.active.messages.at(-1)!.id);
   assert.equal(project.scenes[1].objects[1].transform.position[0], 2.4);
   assert.equal(project.scenes[0].objects[1].transform.position[0], 1.9);
+});
+
+test('multi-selection reaches Muse intact, survives saved history and retry, and previews both targets while preserving unselected objects', async () => {
+  let project = { name: 'Multi-selection', scenes: [createDocument()] }, revision = 0, calls = 0;
+  const selection = new EditorSelection(null); selection.set(['object-1', 'object-3']);
+  const original = structuredClone(project), book = createConversations();
+  const handler = createSceneEditHandler({}, () => new MetaProvider({ apiKey: 'test-only-never-public', model: 'test' }, async (_url, options) => {
+    calls++; const wire = JSON.parse(String(options?.body)), context = JSON.parse(wire.input.at(-1).content[0].text);
+    assert.deepEqual(context.selectedIds, ['object-1', 'object-3']); assert.equal(context.selectedId, 'object-3');
+    assert.match(context.selectionConvention, /complete selection/);
+    return Response.json({ status: 'completed', output_text: JSON.stringify({ summary: 'Change both selected objects to red.', requestedViews: [],
+      operations: context.selectedIds.map((id: string) => ({ type: 'set_color', sceneId: 'scene-1', id, color: '#ff0000' })) }) });
+  }));
+  let fail = true, preview: typeof project | null = null;
+  const session = new ConversationSession(book, {
+    context: () => ({ project, sceneId: 'scene-1', shotId: 'shot-1', selectedId: selection.active, selectedIds: [...selection.ids], time: 0, revision }),
+    prepare() {}, changed() {}, capture() { throw new Error('No rendered view requested'); },
+    focus(context) { selection.set(context.selectedIds ?? (context.selectedId ? [context.selectedId] : [])); return true; },
+    preview(value) { preview = value; }, apply(next) { project = next; revision++; return true; },
+    request: async input => {
+      assert.deepEqual(input.selectedIds, ['object-1', 'object-3']);
+      if (fail) throw new Error('Interrupted before inference');
+      const response = await handler(new Request('http://localhost/api/scene-edit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }));
+      assert.equal(response.status, 200); return response.json();
+    },
+  });
+  session.setDraft('Change the selected objects to red.'); await session.send();
+  const message = session.active.messages[0]; assert.equal(message.role, 'user');
+  if (message.role !== 'user') throw new Error();
+  assert.equal(message.status, 'failed');
+  const saved = conversationsSchema.parse(JSON.parse(JSON.stringify(book)));
+  assert.deepEqual(saved.threads[0].messages[0].role === 'user' && saved.threads[0].messages[0].context?.selectedIds, ['object-1', 'object-3']);
+  session.replaceBook(saved); selection.active = 'object-2'; fail = false; await session.send(message.id);
+  assert.deepEqual(selection.ids, ['object-1', 'object-3']); assert.equal(calls, 1); assert.deepEqual(project, original);
+  assert.ok(preview); session.apply(session.active.messages.at(-1)!.id);
+  assert.equal(project.scenes[0].objects[0].color, '#ff0000'); assert.equal(project.scenes[0].objects[2].color, '#ff0000');
+  assert.deepEqual(project.scenes[0].objects[1], original.scenes[0].objects[1]);
+  assert.deepEqual(project.scenes[0].objects[0].track, original.scenes[0].objects[0].track);
+  assert.deepEqual(project.scenes[0].cameras, original.scenes[0].cameras);
+  assert.match(conversationHistory(session.active.messages)[0].text, /selectedIds/);
 });

@@ -97,6 +97,26 @@ test('spatial API edits a rotated prefab set, preserves sampled motion, reloads 
   const saved = { ...createProject(current.scenes[0]), ...current }, restored = parseProject(serializeProject(saved));
   assert.deepEqual(restored.scenes, current.scenes); assert.deepEqual(restored.assets, current.assets);
   vectorNear(evaluateTransform(objectIn(restored, 'actor'), 4).position, evaluateTransform(moved, 4).position);
+  // A camera follows an actual half orbit while keeping the target framed,
+  // and retains every sampled orientation through the normal saved-project path.
+  const orbit: SpatialOperation={type:'follow_path',sceneId:'lobby',time:0,id:'camera',start:0,duration:4,
+    points:Array.from({length:19},(_,i)=>[3*Math.sin(i*Math.PI/18),2,3*Math.cos(i*Math.PI/18)] as Vec3),
+    orientation:'look_at',target:[0,1,0],forward:'-z',replaceMotion:true};
+  const orbitInput=structuredClone(current);orbitInput.scenes[0].shots.push({id:'orbit-shot',name:'Orbit',cameraId:'camera',start:0,duration:4});
+  const orbitProject=applyProjectOperations(orbitInput,[orbit],0),orbitCamera=orbitProject.scenes[0].cameras[0];
+  assert.equal(orbitProject.scenes[0].shots[0].cameraId,'camera');
+  for(let time=0;time<=4;time+=.125){
+    const pose=evaluateTransform(orbitCamera,time),direction=new Vector3(0,0,-1).applyEuler(new Euler(...pose.rotation.map(MathUtils.degToRad) as Vec3));
+    const target=new Vector3(0,1,0).sub(new Vector3(...pose.position)).normalize();assert.ok(direction.dot(target)>.99999);
+  }
+  const orbitReloaded=parseProject(serializeProject({...createProject(orbitProject.scenes[0]),...orbitProject}));
+  assert.deepEqual(orbitReloaded.scenes[0].cameras[0],orbitCamera);
+  const timedOrbit={...orbit,pointTimes:orbit.points.map((_,i)=>i<=9?i/9*3:3+(i-9)/9)};
+  const timed=applyProjectOperations(orbitInput,[timedOrbit],0);vectorNear(evaluateTransform(timed.scenes[0].cameras[0],3).position,[3,2,0]);
+  assert.deepEqual(parseProject(serializeProject({...createProject(timed.scenes[0]),...timed})).scenes[0].cameras[0],timed.scenes[0].cameras[0]);
+  assert.throws(()=>applyProjectOperations(orbitInput,[{...timedOrbit,pointTimes:[0,4]}],0),/pointTimes/);
+  assert.deepEqual(orbitProject.scenes[0].objects,current.scenes[0].objects);
+  assert.throws(()=>applyProjectOperations(current,[{...orbit,target:undefined}],0),/world-space target/);
   // Main's property curves retain their timing, take IDs and interpolation
   // when a spatial operation repositions the entire performance.
   const keyedProject = structuredClone(current), keyed = objectIn(keyedProject, 'actor');

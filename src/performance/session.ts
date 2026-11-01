@@ -2,7 +2,8 @@ import { evaluateTransform } from '../model.ts';
 import { updateComponents } from '../components/model.ts';
 import { recordedTrack, repositionTrack } from './motion.ts';
 import { transformAnimatedSelection } from '../animation/model.ts';
-import type { MotionTrack, SceneObject, Transform } from '../types.ts';
+import { localTransform, matrixTransform, sceneWorldMatrices } from '../placement/hierarchy.ts';
+import type { MotionTrack, SceneDocument, SceneObject, Transform } from '../types.ts';
 
 /** Live input stays outside the project until placement or a take is accepted. */
 export class PerformanceSession {
@@ -15,7 +16,8 @@ export class PerformanceSession {
   draft:MotionTrack|null=null;
   private frames:{time:number;transform:Transform}[]=[];
   private runtime:{velocity:number;yaw:number};
-  constructor(item:SceneObject,time:number){this.before=structuredClone(item);this.pose=evaluateTransform(item,time);this.origin=structuredClone(this.pose);this.time=time;this.runtime={velocity:0,yaw:this.pose.rotation[1]};}
+  constructor(item:SceneObject,time:number,private readonly scene?:SceneDocument){this.before=structuredClone(item);this.pose=evaluateTransform(item,time);this.origin=structuredClone(this.pose);this.time=time;this.runtime={velocity:0,yaw:this.worldPose(time).rotation[1]};}
+  private worldPose(time:number):Transform {return this.scene&&this.before.parentId?matrixTransform(sceneWorldMatrices(this.scene,time,{id:this.before.id,pose:this.pose}).get(this.before.id)!):structuredClone(this.pose);}
   placement():SceneObject {
     if(JSON.stringify(this.origin)===JSON.stringify(this.pose))return structuredClone(this.before);
     const item=structuredClone(this.before);
@@ -28,7 +30,9 @@ export class PerformanceSession {
   update(dt:number,duration:number):boolean {
     if(this.mode==='review')return false;
     const step=this.mode==='record'?Math.min(dt,duration-this.time):dt;
-    updateComponents(this.before.components,this.pose,this.keys,step,this.runtime);
+    const at=this.mode==='record'?Math.min(duration,this.time+step):this.time,pose=this.worldPose(at);
+    updateComponents(this.before.components,pose,this.keys,step,this.runtime);
+    this.pose=this.scene&&this.before.parentId?localTransform(this.scene,this.before.id,pose,at):pose;
     if(this.mode==='record'){
       this.time=Math.min(duration,this.time+step);
       if(this.time-this.frames.at(-1)!.time>=1/30)this.frames.push({time:this.time,transform:structuredClone(this.pose)});

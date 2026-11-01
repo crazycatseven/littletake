@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { constructionEdits, editConstruction, drivenProperties } from './toolkit/edits.ts';
-import { assetRecipeSchema, assetSchema, recipeBounds, validateAsset, validateRecipe, type AssetDefinition } from './model.ts';
+import { assetRecipeSchema, assetSchema, recipeBounds, validateAsset, validateJointAngles, evaluateAsset, validateRecipe, type AssetDefinition } from './model.ts';
+
 import { componentsSchema } from '../components/model.ts';
 import type { ProjectContent } from '../types.ts';
 
@@ -24,7 +25,7 @@ export function draftFromAsset(asset: AssetDefinition): AssetDraft { return asse
 export function editAsset(value: AssetDraft, edits: AssetEdit[]): AssetDraft {
   const draft = structuredClone(value);
   for (const edit of z.array(assetEditSchema).min(1).max(64).parse(edits)) {
-    if (edit.type==='set_construction'||edit.type==='set_parameter'||edit.type==='group_parts'||edit.type==='make_unique'||edit.type==='duplicate_subtree'||edit.type==='bake_construction') { editConstruction(draft, edit as Parameters<typeof editConstruction>[1]); continue; }
+    if (edit.type==='set_construction'||edit.type==='set_parameter'||edit.type==='group_parts'||edit.type==='reparent_part'||edit.type==='make_unique'||edit.type==='duplicate_subtree'||edit.type==='bake_construction') { editConstruction(draft, edit as Parameters<typeof editConstruction>[1]); continue; }
     if (edit.type === 'set_metadata') Object.assign(draft, edit.changes);
     else if (edit.type === 'set_components') {
       draft.template = { ...draft.template, track: draft.template?.track ?? null, components: edit.components };
@@ -62,7 +63,8 @@ export function updateAssetInstances(project: ProjectContent, assets: AssetDefin
     changed.add(asset.id); return validateAsset(asset);
   });
   for (const scene of next.scenes) for (const object of scene.objects) {
-    if (object.asset && changed.has(object.asset.id)) count++;
+    if (object.asset && changed.has(object.asset.id)){count++;if(object.jointAngles){const parts=evaluateAsset(next.assets!.find(asset=>asset.id===object.asset!.id)!).parts;object.jointAngles=Object.fromEntries(Object.entries(object.jointAngles).flatMap(([id,angle])=>{const joint=parts.find(part=>part.id===id)?.joint;return joint?[[id,Math.max(joint.min,Math.min(joint.max,angle))]]:[];}));}validateJointAngles(next.assets!.find(asset=>asset.id===object.asset!.id)!,object.jointAngles??{},object.animation);}
+
   }
   return { project: next, count };
 }

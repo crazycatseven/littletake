@@ -1,0 +1,649 @@
+{
+  "name": "Cream Hotel Entrance Double Doors with Sidelights",
+  "description": "Symmetrical 5m wide cream entrance ensemble: central double doors with glass uppers and brass handles, glass sidelights, transom with arch and emblem.",
+  "tags": [
+    "hotel entrance",
+    "double doors",
+    "sidelights",
+    "transom",
+    "cream frame"
+  ],
+  "parts": [
+    {
+      "id": "side_L",
+      "name": "Left side assembly",
+      "parentId": null,
+      "kind": "group",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        1,
+        1,
+        1
+      ],
+      "color": "#D9C49A",
+      "joint": null
+    },
+    {
+      "id": "outer_post_L",
+      "name": "Outer post left",
+      "parentId": "side_L",
+      "kind": "cube",
+      "position": [
+        -2.4,
+        1.5,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        0.2,
+        3,
+        0.24
+      ],
+      "color": "#D9C49A",
+      "joint": null
+    },
+    {
+      "id": "jamb_L",
+      "name": "Door jamb left",
+      "parentId": "side_L",
+      "kind": "cube",
+      "position": [
+        -0.96,
+        1.25,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        0.12,
+        2.5,
+        0.18
+      ],
+      "color": "#D9C49A",
+      "joint": null
+    },
+    {
+      "id": "sidelight_bottom_L",
+      "name": "Sidelight lower panel left",
+      "parentId": "side_L",
+      "kind": "cube",
+      "position": [
+        -1.68,
+        0.45,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        1.16,
+        0.9,
+        0.1
+      ],
+      "color": "#D9C49A",
+      "joint": null
+    },
+    {
+      "id": "sidelight_rail_L",
+      "name": "Sidelight mid rail left",
+      "parentId": "side_L",
+      "kind": "cube",
+      "position": [
+        -1.68,
+        0.93,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        1.16,
+        0.08,
+        0.12
+      ],
+      "color": "#D9C49A",
+      "joint": null
+    },
+    {
+      "id": "sidelight_glass_L",
+      "name": "Sidelight glass left",
+      "parentId": "side_L",
+      "kind": "cube",
+      "position": [
+        -1.68,
+        1.7,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        1.16,
+        1.46,
+        0.04
+      ],
+      "color": "#BFD4D1",
+      "joint": null
+    },
+    {
+      "id": "sidelight_mullV1_L",
+      "name": "Sidelight mullion V1 left",
+      "parentId": "side_L",
+      "kind": "cube",
+      "position": [
+        -1.96,
+        1.7,
+        0.02
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        0.06,
+        1.46,
+        0.06
+      ],
+      "color": "#D9C49A",
+      "joint": null
+    },
+    {
+      "id": "sidelight_mullV2_L",
+      "name": "Sidelight mullion V2 left",
+      "parentId": "side_L",
+      "kind": "cube",
+      "position": [
+        -1.4,
+        1.7,
+        0.02
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        0.06,
+        1.46,
+        0.06
+      ],
+      "color": "#D9C49A",
+      "joint": null
+    },
+    {
+      "id": "sidelight_mullH_L",
+      "name": "Sidelight mullion H left",
+      "parentId": "side_L",
+      "kind": "cube",
+      "position": [
+        -1.68,
+        1.7,
+        0.02
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        1.16,
+        0.06,
+        0.06
+      ],
+      "color": "#D9C49A",
+      "joint": null
+    },
+    {
+      "id": "transom_glass_side_L",
+      "name": "Transom glass side left",
+      "parentId": "side_L",
+      "kind": "cube",
+      "position": [
+        -1.68,
+        2.75,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        1.16,
+        0.38,
+        0.04
+      ],
+      "color": "#BFD4D1",
+      "joint": null
+    },
+    {
+      "id": "header_top",
+      "name": "Top header beam",
+      "parentId": null,
+      "kind": "cube",
+      "position": [
+        0,
+        3.05,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        5,
+        0.2,
+        0.3
+      ],
+      "color": "#D9C49A",
+      "joint": null
+    },
+    {
+      "id": "mid_beam",
+      "name": "Transom sill beam",
+      "parentId": null,
+      "kind": "cube",
+      "position": [
+        0,
+        2.5,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        5,
+        0.12,
+        0.2
+      ],
+      "color": "#D9C49A",
+      "joint": null
+    },
+    {
+      "id": "transom_post_L",
+      "name": "Transom post left",
+      "parentId": null,
+      "kind": "cube",
+      "position": [
+        -1.02,
+        2.75,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        0.1,
+        0.5,
+        0.14
+      ],
+      "color": "#D9C49A",
+      "joint": null
+    },
+    {
+      "id": "transom_glass_center",
+      "name": "Transom glass center",
+      "parentId": null,
+      "kind": "cube",
+      "position": [
+        0,
+        2.77,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        1.84,
+        0.36,
+        0.04
+      ],
+      "color": "#BFD4D1",
+      "joint": null
+    },
+    {
+      "id": "arch_trim_L",
+      "name": "Transom arch trim left",
+      "parentId": null,
+      "kind": "cube",
+      "position": [
+        -0.48,
+        2.92,
+        0.06
+      ],
+      "rotation": [
+        0,
+        0,
+        18
+      ],
+      "size": [
+        1.1,
+        0.09,
+        0.09
+      ],
+      "color": "#D9C49A",
+      "joint": null
+    },
+    {
+      "id": "emblem",
+      "name": "Circular emblem",
+      "parentId": null,
+      "kind": "cylinder",
+      "position": [
+        0,
+        2.77,
+        0.1
+      ],
+      "rotation": [
+        90,
+        0,
+        0
+      ],
+      "size": [
+        0.4,
+        0.08,
+        0.4
+      ],
+      "color": "#A66A2C",
+      "joint": null
+    },
+    {
+      "id": "door_L",
+      "name": "Left entrance door",
+      "parentId": null,
+      "kind": "group",
+      "position": [
+        -0.9,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        1,
+        1,
+        1
+      ],
+      "color": "#D9C49A",
+      "joint": {
+        "type": "hinge",
+        "pivot": [
+          0,
+          1.2,
+          0
+        ],
+        "axis": "y",
+        "min": -95,
+        "max": 95
+      }
+    },
+    {
+      "id": "doorL_bottom",
+      "name": "Door L lower panel",
+      "parentId": "door_L",
+      "kind": "cube",
+      "position": [
+        0.45,
+        0.5,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        0.84,
+        1,
+        0.07
+      ],
+      "color": "#D9C49A",
+      "joint": null
+    },
+    {
+      "id": "doorL_mid",
+      "name": "Door L mid rail",
+      "parentId": "door_L",
+      "kind": "cube",
+      "position": [
+        0.45,
+        1.04,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        0.88,
+        0.1,
+        0.08
+      ],
+      "color": "#D9C49A",
+      "joint": null
+    },
+    {
+      "id": "doorL_stileH",
+      "name": "Door L hinge stile",
+      "parentId": "door_L",
+      "kind": "cube",
+      "position": [
+        0.05,
+        1.7,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        0.1,
+        1.48,
+        0.08
+      ],
+      "color": "#D9C49A",
+      "joint": null
+    },
+    {
+      "id": "doorL_stileM",
+      "name": "Door L meeting stile",
+      "parentId": "door_L",
+      "kind": "cube",
+      "position": [
+        0.85,
+        1.7,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        0.1,
+        1.48,
+        0.08
+      ],
+      "color": "#D9C49A",
+      "joint": null
+    },
+    {
+      "id": "doorL_top",
+      "name": "Door L top rail",
+      "parentId": "door_L",
+      "kind": "cube",
+      "position": [
+        0.45,
+        2.32,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        0.88,
+        0.16,
+        0.08
+      ],
+      "color": "#D9C49A",
+      "joint": null
+    },
+    {
+      "id": "doorL_glass",
+      "name": "Door L glass upper",
+      "parentId": "door_L",
+      "kind": "cube",
+      "position": [
+        0.45,
+        1.7,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        0.7,
+        1.12,
+        0.03
+      ],
+      "color": "#BFD4D1",
+      "joint": null
+    },
+    {
+      "id": "doorL_handle",
+      "name": "Door L brass handle",
+      "parentId": "door_L",
+      "kind": "cylinder",
+      "position": [
+        0.72,
+        1.15,
+        0.12
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "size": [
+        0.035,
+        0.5,
+        0.035
+      ],
+      "color": "#B9973F",
+      "joint": null
+    }
+  ],
+  "construction": {
+    "parameters": [],
+    "bindings": [],
+    "anchors": [],
+    "constraints": [],
+    "modifiers": [
+      {
+        "id": "mirror_side",
+        "targetId": "side_L",
+        "enabled": true,
+        "type": "mirror",
+        "axes": [
+          "x"
+        ],
+        "referenceId": null
+      },
+      {
+        "id": "mirror_door",
+        "targetId": "door_L",
+        "enabled": true,
+        "type": "mirror",
+        "axes": [
+          "x"
+        ],
+        "referenceId": null
+      },
+      {
+        "id": "mirror_transom_post",
+        "targetId": "transom_post_L",
+        "enabled": true,
+        "type": "mirror",
+        "axes": [
+          "x"
+        ],
+        "referenceId": null
+      },
+      {
+        "id": "mirror_arch",
+        "targetId": "arch_trim_L",
+        "enabled": true,
+        "type": "mirror",
+        "axes": [
+          "x"
+        ],
+        "referenceId": null
+      }
+    ],
+    "excluded": [],
+    "offset": [
+      0,
+      0,
+      0
+    ]
+  },
+  "id": "asset-3dd55443-de3a-423c-baf5-0c75fdbec427",
+  "source": "generated",
+  "createdAt": "2026-10-28T07:15:53.364Z",
+  "bounds": {
+    "min": [
+      -2.5,
+      0,
+      -0.15
+    ],
+    "max": [
+      2.5,
+      3.15,
+      0.15
+    ],
+    "size": [
+      5,
+      3.15,
+      0.3
+    ]
+  }
+}

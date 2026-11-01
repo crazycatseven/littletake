@@ -1,6 +1,11 @@
+import { sceneWorldMatrices, matrixTransform, effectivelyHidden } from '../placement/hierarchy';
 import * as THREE from 'three';
-import { evaluateFov, evaluateTransform } from '../model';
+import { evaluateFov, evaluateJointAngles } from '../model';
+import { poseAssetJoints, type AssetDefinition } from '../assets/model';
+import { DEFAULT_SCENE_LOOK } from '../scene-edit/look';
+
 import type { SceneDocument, Transform } from '../types';
+import {renderCameraFrame} from '../scene-snapshot';
 
 /** An export owns its geometry, materials, camera and poses; the live editor keeps running independently. */
 export class ShotRenderer {
@@ -10,13 +15,15 @@ export class ShotRenderer {
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
   private roots = new Map<string, THREE.Object3D>();
+  private assets: AssetDefinition[];
   private geometries = new Map<THREE.BufferGeometry, THREE.BufferGeometry>();
   private materials = new Map<THREE.Material, THREE.Material>();
   private textures = new Map<THREE.Texture, THREE.Texture>();
   private disposed = false;
 
-  constructor(doc: SceneDocument, private cameraId: string, nodes: THREE.Object3D[], background: THREE.Scene['background'], fog: THREE.Scene['fog']) {
+  constructor(doc: SceneDocument, private cameraId: string, nodes: THREE.Object3D[], background: THREE.Scene['background'], fog: THREE.Scene['fog'], assets: AssetDefinition[] = []) {
     this.document = structuredClone(doc);
+    this.assets = structuredClone(assets);
     const camera = doc.cameras.find(item => item.id === cameraId);
     if (!camera) throw new Error('Choose a camera before exporting.');
     this.camera = new THREE.PerspectiveCamera(camera.fov, 16 / 9, .05, 500);
@@ -49,7 +56,7 @@ export class ShotRenderer {
     this.renderer = new THREE.WebGLRenderer({antialias: true, alpha: false, preserveDrawingBuffer: true, powerPreference: 'high-performance'});
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.12;
+    this.renderer.toneMappingExposure = (doc.look ?? DEFAULT_SCENE_LOOK).exposure;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.setPixelRatio(1);
@@ -65,17 +72,37 @@ export class ShotRenderer {
       root.rotation.set(...transform.rotation.map(THREE.MathUtils.degToRad) as [number, number, number], 'XYZ');
       if (scale) root.scale.fromArray(transform.scale);
     };
+    const world=sceneWorldMatrices(this.document,time);
     for (const item of this.document.objects) {
       const root = this.roots.get(item.id); if (!root) continue;
-      root.visible = !item.hidden;
-      if (root.visible) pose(root, evaluateTransform(item, time));
+      root.visible = !effectivelyHidden(this.document,item.id);
+      if (root.visible) { const matrix=world.get(item.id)!;matrix.decompose(root.position,root.quaternion,root.scale);root.matrix.copy(matrix);root.matrixAutoUpdate=false;root.updateMatrixWorld(true);
+        if (item.asset) {
+          const asset = this.assets.find(asset => asset.id === item.asset!.id);
+          if (!asset) throw new Error("Missing export asset: " + item.asset.id);
+          poseAssetJoints(root.children[0] as THREE.Group, asset, evaluateJointAngles(item, time));
+        }
+      }
     }
     const camera = this.document.cameras.find(item => item.id === this.cameraId)!;
-    pose(this.camera, evaluateTransform(camera, time), false);
+    pose(this.camera, matrixTransform(world.get(camera.id)!), false);
     const fov = evaluateFov(camera, time);
     if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
-    this.renderer.render(this.scene, this.camera);
+    renderCameraFrame(this.renderer,this.scene,this.camera,camera.frameBounds);
     return this.canvas;
+  }
+  /** Render visible target pixels with normal depth occlusion, for composition checks. */
+  renderObjectMask(id: string, time: number): HTMLCanvasElement {
+    const target=this.roots.get(id);if(!target)throw new Error('Choose an existing scene object for the mask.');
+    this.render(time);
+    const white=new THREE.MeshBasicMaterial({color:0xffffff}),black=new THREE.MeshBasicMaterial({color:0x000000});
+    const members=new Set<THREE.Object3D>();target.traverse(node=>members.add(node));
+    const saved=new Map<THREE.Mesh,THREE.Material|THREE.Material[]>(),background=this.scene.background,fog=this.scene.fog;
+    try{
+      this.scene.background=new THREE.Color(0x000000);this.scene.fog=null;
+      this.scene.traverse(node=>{if(node instanceof THREE.Mesh){saved.set(node,node.material);node.material=members.has(node)?white:black;}});
+      this.renderer.render(this.scene,this.camera);return this.canvas;
+    }finally{for(const [node,material]of saved)node.material=material;this.scene.background=background;this.scene.fog=fog;white.dispose();black.dispose();}
   }
   /** Normalised [left, top, right, bottom] screen boxes of visible objects fully in front of the camera, for the pose of the last render. */
   screenBoxes(): Map<string, [number, number, number, number]> {

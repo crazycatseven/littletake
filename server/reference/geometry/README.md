@@ -2,7 +2,7 @@
 
 当前流程：原始帧 → SAM 3.1（默认 Meta API，可选本地）→ 本地 VGGT 深度与相机 → 地面对齐与粗代理 → 同机位渲染检查。
 
-`SAM_PROVIDER=cloud|local` 选择提供方，未设置时为 `cloud`。HTTP 请求的 `provider` 和 Python 命令的 `--sam-provider` 可单次覆盖；Python 命令读取进程环境变量，Node 后端也读取 `.env.local`。云端网页后端与 Python 验证入口共用 `server/reference/sam/service.ts`，官方 `@meta-sam/parser` 解码输出；本地共用 `sam_local.py`。两者保持相同的来源帧与 mask 格式，提供方失败直接报错。VGGT 继续本地运行。主 Agent 已有 SAM 原始帧工具；VGGT 与粗代理反算尚未自动接入 Agent，造型和遮挡仍需优化。
+`SAM_PROVIDER=cloud|local` 选择提供方，未设置时为 `cloud`。HTTP 请求的 `provider` 和 Python 命令的 `--sam-provider` 可单次覆盖；Python 命令读取进程环境变量，Node 后端也读取 `.env.local`。云端网页后端与 Python 验证入口共用 `server/reference/sam/service.ts`，官方 `@meta-sam/parser` 解码输出；本地共用 `sam_local.py`。两者保持相同的来源帧与 mask 格式，提供方失败直接报错。VGGT 继续本地运行，主 Agent 可按需调用深度工具；粗代理反算尚未自动接入 Agent，造型和遮挡仍需优化。
 
 ## Agent 选帧与分割
 
@@ -70,6 +70,24 @@ uv run --no-sync --project server/reference/geometry python server/reference/geo
 
 ## 本地 VGGT
 
+`run.bat`（或 `npm run dev`）同时启用现有后端的 `/api/depth`，共用编辑器端口，无需另开模型服务端口。启动只检查依赖、源码和离线权重，不导入 PyTorch、不常驻 GPU 模型。关闭开发服务会取消仍在执行的 VGGT 请求及其 Python 进程树。
+
+本机准备完成后，Agent 的 `estimate_reference_depth` 接受原始 `frameId` 和可选 `regions=[{label,box}]`，其中 box 是完整来源帧的归一化 `[left,top,right,bottom]`，可直接使用 SAM 的 normalizedBox。返回原图对齐的灰度深度图、16×16 数值网格、来源像素单位的内参、外参和区域深度分位数/相机空间可见表面中心。区域框可能混入背景，单帧相对深度没有米制尺度，不同帧的独立估计不能直接比较，也不能直接把相机坐标填进场景 transform。
+
+`GET /api/depth` 查看就绪/忙碌状态；`POST /api/depth` 接受 `{sourceId,frame,regions}`，frame 沿用 `src/reference/observations.ts` 的原始帧结构，仅允许同源 JSON 请求。缺环境时编辑器仍可启动，并明确显示准备命令；此时或在 Vercel 上不向 Agent 宣告深度工具。没有云端或 CPU 自动替换。
+
+首次请求调用 `models.py` 的同一 VGGT 实现，结束后释放模型和显存。缓存按来源帧、实际像素、设备及固定模型版本隔离，保存于 `.littletake/geometry/runs/vggt-*`；重复请求与重启后只读取深度文件，不重新推理。每次请求、输出、进程日志和错误分别保存，完整工具结果也进入对话诊断。同一服务只处理一个深度任务，CLI 与本地 SAM/VGGT 共用模型锁；重复错误在同一 Agent 回合不会重新启动同一帧。
+
+Windows 在项目根目录运行 `setup.bat vggt`，然后用 `run.bat check` 检查环境和缓存。已有环境先按依赖版本和 `uv pip check` 检查，兼容时保留当前 CUDA 安装；需要安装时使用锁定的 Python 3.12 依赖并保留已安装的可选 SAM 依赖。准备文件不加载模型、不启动推理。重复安装优先复用已准备的源码和 checkpoint，缺失文件按清单中的 revision 补齐。
+
+`.env.local` 中 `VGGT_MODEL_REPO` 选择研究或商业权重，`VGGT_DEVICE=cuda|cpu` 选择深度设备，`LOCAL_MODEL_MIN_FREE_VRAM_GB` 设置本地推理的空闲显存要求（默认 16）。`run.bat geometry ...` 读取这些配置，再调用下面同一个 Python 入口；显式命令行参数优先。默认网页继续使用云端 SAM，`setup.bat sam` 不会自动切换提供方。
+
+```bat
+setup.bat vggt
+run.bat check
+run.bat geometry depth --run .littletake/geometry/runs/new-reference
+```
+
 只有显式执行 `prepare` 才下载 VGGT 源码与权重：
 
 ```powershell
@@ -120,6 +138,7 @@ API 实测在 `.littletake/geometry/runs/meta-sam-budapest-20261029/`：六个�
 
 ```powershell
 npx tsx --test server/reference/sam/workflow.test.ts
+npx tsx --test server/reference/geometry/workflow.test.ts
 uv run --no-sync --project server/reference/geometry python -m unittest discover -s server/reference/geometry -p test_geometry.py
 ```
 
