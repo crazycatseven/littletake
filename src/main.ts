@@ -10,6 +10,7 @@ import { EditorSelection, type SelectionMode } from './placement/selection';
 import { duplicateHierarchy, reparentScene, transformSelection, type PoseUpdate, type TransformPhase, type TransformScope } from './placement/transforms';
 import { PlacementPanel } from './placement/panel';
 import { openShotExport } from './shot-export/dialog';
+import { bindShotPreview } from './shot-preview/panel';
 import { openLookFrames } from './look/dialog';
 import { AssetPanel } from './assets/panel';
 import { AssetEditor } from './assets/editor';
@@ -100,7 +101,7 @@ app.innerHTML = `
   <section class="stage-panel" aria-label="3D stage">
     <div class="viewport-heading"><div class="transform-tools" role="toolbar" aria-label="Transform tools"><button data-tool="translate" aria-label="Move tool" title="Move · G">${icon('move')}<span>Move</span></button><button data-tool="rotate" aria-label="Rotate tool" title="Rotate · R">${icon('rotate')}<span>Rotate</span></button><button data-tool="scale" aria-label="Scale tool" title="Scale · S">${icon('scale')}<span>Scale</span></button></div><div><button data-action="ground" title="Drop to the floor or surface below · double-click the green Y handle">↓ Drop to surface</button><button data-action="focus" title="Focus selection · F">${icon('focus')}Focus</button><button data-action="reset-view" aria-label="Reset scene view">Reset view</button></div></div>
     <div id="viewport" class="viewport"></div><div id="performanceBar" hidden></div><div id="emptyStage" class="empty-stage" hidden><h2>No scene</h2><p>Add a scene or describe one to Muse.</p><button data-action="build-with-muse" class="primary-button">Build with Muse</button></div>
-    <section class="shot-panel" aria-label="Shot preview"><div class="shot-switcher"><select id="shotSelect" aria-label="Active shot"></select><button data-action="add-shot" aria-label="New shot" title="New shot">＋</button></div><div class="shot-heading"><h2>${icon('camera')}<span>Shot preview</span></h2><button class="icon-button" data-action="expand-preview" aria-label="Expand shot preview" aria-expanded="false" title="Expand preview">${icon('expand')}</button></div><div id="previewDock"><div class="preview-frame" id="previewFrame"><div id="preview" class="preview"></div></div></div><div class="shot-footer"><span id="shotFrameStatus"><span class="live-dot"></span>Live · 16:9</span><button data-action="edit-shot" id="lensLabel">Edit shot</button></div></section>
+    <section class="shot-panel" id="shotPanel" aria-label="Shot preview"><div class="shot-switcher shot-preview-header" data-preview-header><button class="shot-preview-grip" data-preview-drag aria-label="Move shot preview" title="Drag to move · Arrow keys to nudge · Double-click or Home to reset"><svg viewBox="0 0 16 20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="5" r="1.3"/><circle cx="11" cy="5" r="1.3"/><circle cx="5" cy="10" r="1.3"/><circle cx="11" cy="10" r="1.3"/><circle cx="5" cy="15" r="1.3"/><circle cx="11" cy="15" r="1.3"/></svg></button><select id="shotSelect" aria-label="Active shot"></select><button data-action="add-shot" aria-label="New shot" title="New shot">＋</button><button class="shot-preview-collapse" data-preview-collapse aria-label="Collapse shot preview" aria-expanded="true" aria-controls="shotPreviewBody" title="Collapse shot preview"><span aria-hidden="true">⌄</span></button></div><div id="shotPreviewBody" class="shot-preview-body"><div class="shot-heading"><h2>${icon('camera')}<span>Shot preview</span></h2><button class="icon-button" data-action="expand-preview" aria-label="Expand shot preview" aria-expanded="false" title="Expand preview">${icon('expand')}</button></div><div id="previewDock"><div class="preview-frame" id="previewFrame"><div id="preview" class="preview"></div></div></div><div class="shot-footer"><span id="shotFrameStatus"><span class="live-dot"></span>Live · 16:9</span><button data-action="edit-shot" id="lensLabel">Edit shot</button></div></div></section>
     <div class="viewport-caption"><span id="viewHint">Drag to orbit · Scroll to zoom</span></div>
     <div class="ai-preview-badge" id="aiPreviewBadge" role="status" hidden>Previewing Muse changes</div>
   </section>
@@ -114,11 +115,10 @@ app.innerHTML = `
   <div class="panel-resize-handle" id="bottomPanelResizeHandle" role="separator" aria-label="Resize bottom panel" aria-orientation="horizontal" aria-controls="bottomPanel" tabindex="0" title="Drag to resize · Double-click to reset"></div>
   <div class="bottom-panel-toolbar">
     <div class="bottom-panel-tabs" role="tablist" aria-label="Bottom panel"><button id="timelineTab" role="tab" data-bottom-tab="timeline" aria-selected="true" aria-controls="timelineContent">${icon('timeline')}Timeline</button><button id="assetLibraryTab" role="tab" data-bottom-tab="assets" aria-selected="false" aria-controls="assetPanel" tabindex="-1">${icon('folder')}Assets</button></div>
-    <div class="transport"><button data-action="rewind" class="icon-button" aria-label="Go to start">${icon('rewind')}</button><button data-action="play" id="playButton" class="play-button" aria-label="Play">${icon('play')}</button><span class="timecode" id="timecode" data-current-time>00:00.00</span><span class="timecode-separator">/</span><span class="timecode" id="endTimecode" data-end-time>00:05.00</span></div>
-    <div class="timeline-tools" id="timelineTools"><div class="animation-toolbar"><button data-action="auto-key" id="autoKey" aria-pressed="false">● Auto Key Off</button><label>Frame <input type="number" id="animationFrame" aria-label="Current frame" min="0" step="1"/></label><select id="animationFps" aria-label="Timeline frame rate"><option value="24">24 fps</option><option value="30">30 fps</option></select><select id="animationInterpolation" aria-label="Keyframe interpolation" disabled><option value="linear">Linear</option><option value="constant">Hold</option><option value="smooth">Smooth</option><option value="quaternion">Quaternion</option></select><button data-action="duplicate-key" id="duplicateKey" disabled>Duplicate</button><button data-action="delete-key" id="deleteKey" disabled>Delete</button><button data-action="samples" id="samplesToggle" hidden>Show all samples</button></div><label class="duration-control">Duration <input type="number" id="duration" aria-label="Scene duration" min="1" max="60" step="1"/> s</label></div>
+
     <button id="bottomPanelToggle" class="icon-button" data-action="bottom-panel" aria-label="Collapse bottom panel" aria-expanded="true" aria-controls="bottomPanelBody" title="Collapse bottom panel"><span aria-hidden="true">⌄</span></button>
   </div>
-  <div class="bottom-panel-body" id="bottomPanelBody"><div class="timeline-content" id="timelineContent" role="tabpanel" aria-labelledby="timelineTab"><div class="timeline-ruler-row"><div class="track-heading">SHOT / PROPERTY</div><div class="animation-ruler-window"><div id="timeRuler" class="time-ruler" role="slider" tabindex="0" aria-label="Timeline playhead" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"></div></div></div><div id="timelineRows" class="timeline-rows"></div></div><section id="assetPanel" role="tabpanel" aria-labelledby="assetLibraryTab" hidden></section></div>
+  <div class="bottom-panel-body" id="bottomPanelBody"><div class="timeline-content" id="timelineContent" role="tabpanel" aria-labelledby="timelineTab"><div class="timeline-toolbar" role="toolbar" aria-label="Timeline controls"><div class="transport"><button data-action="rewind" class="icon-button" aria-label="Go to start">${icon('rewind')}</button><button data-action="play" id="playButton" class="play-button" aria-label="Play">${icon('play')}</button><span class="timecode" id="timecode" data-current-time>00:00.00</span><span class="timecode-separator">/</span><span class="timecode" id="endTimecode" data-end-time>00:05.00</span></div><div class="timeline-tools"><div class="animation-toolbar"><button data-action="auto-key" id="autoKey" aria-pressed="false">● Auto Key Off</button><label>Frame <input type="number" id="animationFrame" aria-label="Current frame" min="0" step="1"/></label><select id="animationFps" aria-label="Timeline frame rate"><option value="24">24 fps</option><option value="30">30 fps</option></select><select id="animationInterpolation" aria-label="Keyframe interpolation" disabled><option value="linear">Linear</option><option value="constant">Hold</option><option value="smooth">Smooth</option><option value="quaternion">Quaternion</option></select><button data-action="duplicate-key" id="duplicateKey" disabled>Duplicate</button><button data-action="delete-key" id="deleteKey" disabled>Delete</button><button data-action="samples" id="samplesToggle" hidden>Show all samples</button></div><label class="duration-control">Duration <input type="number" id="duration" aria-label="Scene duration" min="1" max="60" step="1"/> s</label></div></div><div id="timelineTracks" class="timeline-tracks"><div class="timeline-ruler-row"><div class="track-heading">SHOT / PROPERTY</div><div class="animation-ruler-window"><div id="timeRuler" class="time-ruler" role="slider" tabindex="0" aria-label="Timeline playhead" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"></div></div></div><div id="timelineRows" class="timeline-rows"></div></div></div><section id="assetPanel" role="tabpanel" aria-labelledby="assetLibraryTab" hidden></section></div>
 </section>
 <footer class="status-bar"><span id="statusText" role="status">Ready</span><button data-action="shortcuts">${icon('help')}Shortcuts</button></footer>
 <input id="openFile" type="file" accept=".json,.zip,application/json,application/zip" hidden/>
@@ -503,7 +503,7 @@ function setBottomPanelTab(tab: 'timeline'|'assets') {
   const previous=$('#'+(bottomPanelTab==='timeline'?'timelineContent':'assetPanel'));
   if(tab!==bottomPanelTab&&previous.contains(document.activeElement))$<HTMLButtonElement>(`[data-bottom-tab="${tab}"]`).focus({preventScroll:true});
   bottomPanelTab=tab;
-  $('#timelineContent').hidden=tab!=='timeline';$('#timelineTools').hidden=tab!=='timeline';$('#assetPanel').hidden=tab!=='assets';
+  $('#timelineContent').hidden=tab!=='timeline';$('#assetPanel').hidden=tab!=='assets';
   document.querySelectorAll<HTMLButtonElement>('[data-bottom-tab]').forEach(button=>{const active=button.dataset.bottomTab===tab;button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;});
   setBottomPanelOpen(true);
   if(tab==='assets'&&wasOpen)void assetsPanel?.refresh();
@@ -749,7 +749,7 @@ function renderPerformance(){
   const session=performanceSession,active=!!session,bar=$('#performanceBar');bar.hidden=!active;
   $<HTMLButtonElement>('#assetLibraryTab').disabled=active;
   $('.stage-panel').classList.toggle('performance-active',active);
-  $('#sceneAI').inert=(active&&!session?.scriptRevision)||!workspace?.canEdit;$('#timelineContent').inert=active;$('.library-panel').inert=active;$('.app-header').inert=active;
+  $('#sceneAI').inert=(active&&!session?.scriptRevision)||!workspace?.canEdit;$('#timelineTracks').inert=active;$('.library-panel').inert=active;$('.app-header').inert=active;
   $<HTMLInputElement>('#duration').disabled=active||!!editPreview||doc===emptyView;$<HTMLSelectElement>('#shotSelect').disabled=active;
   $<HTMLInputElement>('#animationFrame').disabled=active||!!editPreview;$<HTMLSelectElement>('#animationFps').disabled=active||!!editPreview;$<HTMLButtonElement>('#autoKey').disabled=active||!!editPreview;
   document.querySelectorAll<HTMLButtonElement>('[data-action="add-shot"],[data-action="rewind"],[data-action="top-view"]').forEach(b=>b.disabled=active||doc===emptyView);
@@ -864,6 +864,8 @@ function editSelection(updates:PoseUpdate[],phase:TransformPhase,wholeMotion:Tra
     syncStage();renderInspector();return true;
   } catch(error) {for(const before of beforeStep){const item=entity(before.id);if(item){delete item.animation;Object.assign(item,before);}}unkeyed.clear();for(const [key,value] of draftsBeforeStep)unkeyed.set(key,value);status(error instanceof Error?error.message:'The transform was cancelled.');return false; }
 }
+
+bindShotPreview($('#shotPanel'));
 
 try {
   $('.viewport-heading .transform-tools').insertAdjacentHTML('afterend','<div id="placementTools"></div>');
@@ -1161,7 +1163,7 @@ let timelineDrag: {element:HTMLElement;id:string;kind:'shot'|'motion';mode:strin
 let propertyDrag: {element:HTMLElement;group:PropertyGroup;path?:PropertyPath;from:number;to:number;initialX:number;laneWidth:number;moved:boolean;take?:string;mode?:string;start?:number;end?:number}|null=null;
 let scrubbing=false;
 function scrubAt(clientX:number){const rect=$('#timeRuler').getBoundingClientRect();pause();seek(snapFrame((clientX-rect.left)/rect.width*doc.duration));}
-$('#timelineContent').addEventListener('pointerdown',event=>{
+$('#timelineTracks').addEventListener('pointerdown',event=>{
   if(event.button!==0||performanceSession)return;const target=event.target as HTMLElement;
   if(target.closest('#timeRuler')){scrubbing=true;$('#timeRuler').focus({preventScroll:true});$('#timeRuler').setPointerCapture(event.pointerId);scrubAt(event.clientX);event.preventDefault();return;}
   if(editPreview)return;
@@ -1177,7 +1179,7 @@ $('#timelineContent').addEventListener('pointerdown',event=>{
   sceneEditor?.sceneChanged();pause();if(shot)switchShot(shot.id);else select(item!.id);
   timelineDrag={element:clip,id:shot?.id??item!.id,kind:shot?'shot':'motion',mode:target.dataset.trim||'move',initialX:event.clientX,laneWidth:clip.parentElement!.getBoundingClientRect().width,initialRange:{start:range.start,duration:range.duration},before:structuredClone(projectContent(project)),moved:false};clip.setPointerCapture(event.pointerId);clip.classList.add('dragging');event.preventDefault();
 });
-$('#timelineContent').addEventListener('pointermove',event=>{
+$('#timelineTracks').addEventListener('pointermove',event=>{
   if(scrubbing){scrubAt(event.clientX);return;}
   if(propertyDrag){const drag=propertyDrag,delta=(event.clientX-drag.initialX)/drag.laneWidth*doc.duration;if(Math.abs(event.clientX-drag.initialX)>3)drag.moved=true;if(!drag.moved)return;if(drag.take){const start=drag.start!,end=drag.end!,length=end-start;if(drag.mode==='left'){drag.from=Math.min(end-.1,snapFrame(start+delta));drag.to=end;}else if(drag.mode==='right'){drag.from=start;drag.to=Math.max(start+.1,snapFrame(end+delta));}else{drag.from=clamp(snapFrame(start+delta),0,doc.duration-length);drag.to=drag.from+length;}drag.element.style.left=`${drag.from/doc.duration*100}%`;drag.element.style.width=`${(drag.to-drag.from)/doc.duration*100}%`;}else{drag.to=snapFrame(drag.from+delta);drag.element.style.left=`${drag.to/doc.duration*100}%`;}return;}
   if(!timelineDrag)return;
@@ -1194,8 +1196,8 @@ function finishTimelineDrag(cancel=false){
   if(propertyDrag){const drag=propertyDrag;propertyDrag=null;const item=entity();if(!cancel&&drag.moved&&item){try{const next=structuredClone(animationFor(item)??emptyAnimation());if(drag.take)retimeTake(next,drag.take,drag.from,drag.to,doc.duration);else{movePropertyKeys(next,drag.path?[drag.path]:groupPaths(drag.group),drag.from,drag.to);selectedPropertyKey={group:drag.group,path:drag.path,time:drag.to};time=drag.to;}item.animation=next;item.track=null;changed(drag.take?'Recording timing updated':'Keyframe moved');}catch(error){status((error as Error).message);renderAll();}}else renderAll();return;}
   if(!timelineDrag)return;const drag=timelineDrag;timelineDrag=null;if(cancel){replaceContent(drag.before);renderAll();}else if(drag.moved)changed(drag.kind==='shot'?'Shot range updated · scene motion unchanged':'Motion timing updated');else{renderAll();}
 }
-$('#timelineContent').addEventListener('pointerup',()=>finishTimelineDrag());
-$('#timelineContent').addEventListener('pointercancel',()=>finishTimelineDrag(true));
+$('#timelineTracks').addEventListener('pointerup',()=>finishTimelineDrag());
+$('#timelineTracks').addEventListener('pointercancel',()=>finishTimelineDrag(true));
 $('#timeRuler').addEventListener('keydown',event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();pause();seek(snapFrame(time+(event.key==='ArrowRight'?1/fps():-1/fps())));}else if(event.key==='Home'){event.preventDefault();pause();seek(0);}else if(event.key==='End'){event.preventDefault();pause();seek(doc.duration);}});
 $('#inspector').addEventListener('pointerover',event=>{const target=event.target as HTMLElement,input=target.closest<HTMLInputElement>('[data-pose],#cameraFov,[data-component-field="offset"],[data-joint-path]'),button=target.closest<HTMLElement>('[data-key-group]');hoveredProperty=input?(input.dataset.jointPath as PropertyGroup|| (input.id==='cameraFov'?'fov':input.dataset.pose as PropertyGroup||'pivot')):button?.dataset.keyGroup as PropertyGroup??null;});
 $('#inspector').addEventListener('pointerleave',()=>{hoveredProperty=null;});

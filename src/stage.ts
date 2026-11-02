@@ -105,6 +105,7 @@ export class Stage {
   private readonly removeListeners: Array<() => void> = [];
   private readonly resizeObserver: ResizeObserver;
   private resizePending = true;
+  private previewVisible = false;
   private viewportResize: { width: number; height: number; renderHeight: number } | null = null;
   private readonly sun: THREE.DirectionalLight;
   private readonly ambient = new THREE.HemisphereLight('#f6f5ee', '#c6c2b9', 2.1);
@@ -1240,8 +1241,9 @@ export class Stage {
       this.perspectiveCamera.clearViewOffset();
       this.orthographicCamera.clearViewOffset();
     }
-    const hostWidth = Math.max(1, preview.clientWidth);
-    const hostHeight = preview.clientHeight || hostWidth * 9 / 16;
+    const hostWidth = preview.clientWidth, hostHeight = preview.clientHeight;
+    this.previewVisible = hostWidth > 0 && hostHeight > 0;
+    if (!this.previewVisible) return;
     const previewWidth = Math.max(1, Math.min(hostWidth, hostHeight * 16 / 9));
     const previewHeight = previewWidth * 9 / 16;
     this.previewRenderer.getSize(size);
@@ -1293,7 +1295,7 @@ export class Stage {
         this.groundMaterial.color = ground;
       }
     }
-    renderCameraFrame(this.previewRenderer,this.scene,this.shotCamera,this.currentDoc?.cameras.find(camera=>camera.id===this.previewCameraId)?.frameBounds);
+    if (this.previewVisible) renderCameraFrame(this.previewRenderer,this.scene,this.shotCamera,this.currentDoc?.cameras.find(camera=>camera.id===this.previewCameraId)?.frameBounds);
   };
 
   private listen(target: EventTarget, type: string, listener: EventListener, options?: boolean | AddEventListenerOptions): void {

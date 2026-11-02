@@ -218,12 +218,13 @@ kbd { margin-left: auto; color: var(--muted); font-family: inherit; font-size: 1
 .bottom-panel.expanded { flex-basis: var(--bottom-panel-height, 280px); }
 .bottom-panel.resizing { user-select: none; }
 .bottom-panel-toolbar { display: flex; align-items: center; flex: 0 0 33px; min-width: 0; gap: 14px; padding: 0 10px; background: var(--paper); }
+.timeline-toolbar { display: flex; align-items: center; flex: 0 0 34px; min-width: 0; gap: 18px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--paper); }
 .bottom-panel-tabs { display: flex; align-self: stretch; flex: none; gap: 4px; }
 .bottom-panel-tabs button { position: relative; border-radius: 0; padding: 0 8px; color: var(--muted); font-size: 11px; }
 .bottom-panel-tabs button svg { width: 13px; height: 13px; }
 .bottom-panel-tabs button[aria-selected="true"] { color: var(--accent); }
 .bottom-panel-tabs button[aria-selected="true"]::after { content: ''; position: absolute; bottom: 0; left: 6px; right: 6px; height: 2px; background: var(--accent); }
-.timeline-tools { display: flex; align-items: center; flex: 1; min-width: 0; gap: 18px; height: 100%; overflow-x: auto; scrollbar-width: thin; }
+.timeline-tools { display: flex; align-items: center; flex: 1; min-width: 0; gap: 18px; overflow-x: auto; scrollbar-width: thin; }
 .timeline-tools .animation-toolbar, .timeline-tools .duration-control { flex: none; }
 #bottomPanelToggle { margin-left: auto; }
 .bottom-panel-body { display: flex; flex: 1; min-height: 0; overflow: hidden; border-top: 1px solid var(--line); }
@@ -232,9 +233,9 @@ kbd { margin-left: auto; color: var(--muted); font-family: inherit; font-size: 1
 @media (prefers-reduced-motion: reduce) { .bottom-panel-body > [role="tabpanel"] { animation: none; } }
 .transport { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; }
 .transport > .icon-button { color: var(--text-secondary); }
-.bottom-panel-toolbar .icon-button, .bottom-panel-toolbar .play-button { width: 24px; height: 24px; padding: 4px; border-radius: var(--radius-control); }
-.bottom-panel-toolbar .timecode { font-size: 10px; }
-.bottom-panel-toolbar .duration-control { margin-left: auto; }
+.bottom-panel-toolbar .icon-button, .timeline-toolbar .icon-button, .timeline-toolbar .play-button { width: 24px; height: 24px; padding: 4px; border-radius: var(--radius-control); }
+.timeline-toolbar .timecode { font-size: 10px; }
+.timeline-toolbar .duration-control { margin-left: auto; }
 .play-button { width: 34px; height: 33px; margin-right: 4px; border: 1px solid var(--primary); border-radius: var(--radius-panel); background: var(--primary); color: var(--primary-ink); }
 .play-button svg { width: 14px; height: 14px; fill: currentColor; stroke-width: 0; }
 .play-button:hover:not(:disabled) { background: var(--primary); }
@@ -242,7 +243,7 @@ kbd { margin-left: auto; color: var(--muted); font-family: inherit; font-size: 1
 .timecode { color: var(--text-secondary); font-family: ui-monospace, Consolas, monospace; font-size: 12px; font-variant-numeric: tabular-nums; }
 [data-end-time] { color: var(--muted); }
 .timecode-separator { color: var(--muted); font-size: 11px; }
-.timeline-content { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: hidden; }
+.timeline-content, .timeline-tracks { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: hidden; }
 .duration-control { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
 .duration-control input { width: 42px; height: 22px; border-color: var(--line); padding: 3px 5px; background: var(--field); color: var(--muted); text-align: center; }
 .timeline-ruler-row { display: grid; grid-template-columns: var(--track-label-width) minmax(0, 1fr); flex: 0 0 28px; margin-right: 8px; border-bottom: 1px solid var(--line); background: var(--surface-raised); }
@@ -323,7 +324,7 @@ dialog::backdrop { background: var(--backdrop); backdrop-filter: none; }
   .transform-tools button { width: 30px; padding: 6px; }
   .transform-tools button > span { display: none; }
   .shot-panel { width: 210px; background: var(--paper); }
-  .bottom-panel-toolbar { gap: 8px; }
+  .bottom-panel-toolbar, .timeline-toolbar { gap: 8px; }
 }
 @media (max-height: 720px) { .app-header { flex-basis: 60px; background: var(--shell); } .shot-panel { top: 180px; width: 190px; background: var(--paper); } }
 
