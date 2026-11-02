@@ -65,6 +65,12 @@ export function budgetProvider(provider: AIProvider, limit = 12): AIProvider {
 }
 
 const MAX_ROUND_CALLS = 8;
+/** Muse often writes "no base asset" as "null" or "". Both mean JSON null, never an asset ID. */
+function withoutBase(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || !('baseAssetId' in raw)) return raw;
+  const base = (raw as { baseAssetId?: unknown }).baseAssetId;
+  return typeof base === 'string' && ['', 'null', 'none', 'undefined'].includes(base.trim().toLowerCase()) ? { ...raw, baseAssetId: null } : raw;
+}
 export class AssetTools {
   private searches = new Map<string, Awaited<ReturnType<AssetLibrary['search']>>>();
   private readAssets = new Map<string, AssetDefinition>();
@@ -116,9 +122,8 @@ export class AssetTools {
         response={result:{scenePreviewId,sceneId:scene.id,applied:false,frameBounds:this.frameBounds??[0,0,1,1],renderer:'CPU geometry preview; final WebGL video verifies lighting and motion. Only the measured original image region counts as visible; matte bars contain no scene evidence.',frames:preview.frames,instruction:'To finalize exactly this inspected candidate, return scenePreviewId with operations=[]. Do not retype or revise its operations in the final reply; inspect any revision first.'},image:'data:image/png;base64,'+Buffer.from(preview.image).toString('base64')};break;
       }
       case 'generate_asset': {
-        const args = schemas.generate_asset.parse(raw);
+        const args = schemas.generate_asset.parse(withoutBase(raw));
         if (!this.searches.has(args.searchId)) throw new Error('Search the library and use its returned searchId before generating.');
-        if(args.baseAssetId==='null')throw new Error('For a new asset omit baseAssetId or use JSON null. The string "null" is not an asset ID. No expert generation started.');
         const base=args.baseAssetId?this.readAssets.get(args.baseAssetId):undefined;
         if(args.baseAssetId&&!base)throw new Error('Read the base asset before delegating its variant.');
         const frame=args.referenceFrameId?this.referenceTools?.context?.source.frames.find(frame=>frame.id===args.referenceFrameId):undefined;
@@ -131,7 +136,7 @@ export class AssetTools {
         response = { result: { id: job.id, status: job.status, brief: job.brief, asset: migrateAssetValue(job.asset), summary: migrateAssetValue(job.summary), error: job.error } }; break;
       }
       case 'resume_asset_job': {
-        const args=schemas.resume_asset_job.parse(raw),job=await this.library.readJob(args.jobId) as AssetJob;
+        const args=schemas.resume_asset_job.parse(withoutBase(raw)),job=await this.library.readJob(args.jobId) as AssetJob;
         if(job.status==='ready'&&job.asset){response=await expose(await this.library.read(job.asset.id,this.project.assets));break;}
         if(this.diagnostic?.toolCalls?.some(call=>call.name==='generate_asset'&&call.error?.includes(job.id)))throw new Error('Do not resume a job that failed in this same turn. Its correction is preserved.');
         const base=job.baseAsset?validateAsset(job.baseAsset):args.baseAssetId?this.readAssets.get(args.baseAssetId):undefined;
