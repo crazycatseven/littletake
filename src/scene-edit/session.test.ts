@@ -189,3 +189,24 @@ test('multi-selection reaches Muse intact, survives saved history and retry, and
   assert.deepEqual(project.scenes[0].cameras, original.scenes[0].cameras);
   assert.match(conversationHistory(session.active.messages)[0].text, /selectedIds/);
 });
+
+test('a scene built from an empty project opens on the first shot it created', async () => {
+  let focus: { sceneId: string | null; shotId: string | null } | undefined, project = { name: 'Test', scenes: [] as SceneDocument[] };
+  const book = createConversations();
+  const pose = { position: [0, 1.6, 6], rotation: [0, 0, 0], scale: [1, 1, 1] };
+  const response: SceneEditResponse = { status: 'ready', provider: 'Meta', model: 'test-model', plan: { summary: 'Built a set.', requestedViews: [], operations: [
+    { type: 'add_scene', sceneId: 'battle', name: 'Battle', duration: 10 },
+    { type: 'add_camera', sceneId: 'battle', camera: { id: 'wide', name: 'Wide', fov: 45, transform: pose, track: null } },
+    { type: 'add_shot', sceneId: 'battle', shot: { id: 'shot-wide', name: 'Wide', cameraId: 'wide', start: 0, duration: 10 } },
+  ] } } as SceneEditResponse;
+  const session = new ConversationSession(book, {
+    context: () => ({ project, sceneId: null, shotId: null, revision: 0, time: 0, selectedId: null }), prepare() {}, changed() {},
+    preview() {}, capture: () => ({ view: 'shot', time: 0, width: 1, height: 1, dataUrl: 'data:image/png;base64,mock', bounds: null } as SceneSnapshot),
+    apply: (next, _base, at) => { project = next as typeof project; focus = at; return true; },
+    request: async () => response,
+  });
+  session.setDraft('Build a dragon battle'); await session.send();
+  const message = session.active.messages.at(-1)!;
+  session.review(message.id); session.apply(message.id);
+  assert.deepEqual(focus, { sceneId: 'battle', shotId: 'shot-wide' });
+});
