@@ -168,7 +168,10 @@ export class AssetTools {
       default: throw new Error('Unknown asset tool.');
     }
     return response;
-    })();if(name!=='render_scene')this.cache.set(key,task);return task;
+    })();
+    // Reuse in-flight and successful results only; a failed call (for example instantiating before read_asset) must be retryable with the same arguments.
+    if(name!=='render_scene'){this.cache.set(key,task);task.catch(()=>{if(this.cache.get(key)===task)this.cache.delete(key);});}
+    return task;
   }
 
   assertSceneInspected(scene:ProjectContent['scenes'][number],operations:SceneOperation[],applyTime:number){
@@ -220,13 +223,16 @@ export class AssetTools {
         }
         catch (error) {
           trace.error = error instanceof Error ? error.message : 'Tool failed.'; trace.finishedAt = new Date().toISOString(); result = { ok: false, error: trace.error };
+          // A different validation error is new information Muse can act on; only repeats count as a stalled round.
+          const errorKey = JSON.stringify([call.name, 'error', trace.error]);
+          if (!this.seenResults.has(errorKey)) { this.seenResults.add(errorKey); progressed = true; }
           if ((error instanceof AIError && !this.referenceTools?.handles(call.name)) || request.signal?.aborted) throw error;
         }
         trace.finishedAt = new Date().toISOString(); input.push({ type: 'function_call_output', call_id: call.id, output: JSON.stringify(result) });
       }
       if (this.referenceTools?.requestedFrames.length) return { referenceFramesRequired: true };
       this.stalledRounds = progressed ? 0 : this.stalledRounds + 1;
-      if (this.stalledRounds >= 2) throw new AIError('tool_loop', 'Muse stopped after two tool rounds without a new successful result. Saved observations and ready assets are retained; no scene changes were applied.');
+      if (this.stalledRounds >= 2) throw new AIError('tool_loop', 'Muse stopped after two tool rounds that only repeated earlier results or errors. Saved observations and ready assets are retained; no scene changes were applied.');
       if (images.length) input.push({ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Tool images in call order. Reference tools show original pixels, mask overlays or grayscale depth (near dark, far light; unreliable samples black); asset tools show isolated reusable assets. No scene edits have been applied.' }, ...images] });
     }
   }

@@ -5,6 +5,7 @@ import { recordedTrack } from '../performance/motion.ts';
 import { validateProjectContent } from '../project/model.ts';
 import type { MotionTrack, ProjectContent, SceneCamera, SceneDocument, SceneObject, Shot, Transform, Vec3 } from '../types.ts';
 import type { SpatialOperation } from './schema.ts';
+import { eulerDegrees } from '../rotation.ts';
 
 /** Strokes are drawn on the floor; points closer than this many metres are noise. */
 export const SKETCH_STEP = .08;
@@ -120,8 +121,8 @@ export function sketchedCameraMove(scene: SceneDocument, camera: SceneCamera, st
     const eye = points[segment - 1].clone().lerp(points[segment], Math.min(1, Math.max(0, (distance - distances[segment - 1]) / span)));
     const when = start + at * duration, target = subject ? aimPoint(scene,subject, when) : fixed;
     if (eye.distanceToSquared(target) < 1e-6) throw new Error('The path passes through the subject the camera is aiming at.');
-    const rotation = new Euler().setFromRotationMatrix(new Matrix4().lookAt(eye, target, new Vector3(0, 1, 0)), 'XYZ');
-    frames.push({ time: when, transform: localTransform(scene,camera.id,{ position: eye.toArray() as Vec3, rotation: [rotation.x, rotation.y, rotation.z].map(MathUtils.radToDeg) as Vec3, scale: [...pose.scale] as Vec3 },when) });
+    const rotation = eulerDegrees(new Matrix4().lookAt(eye, target, new Vector3(0, 1, 0)));
+    frames.push({ time: when, transform: localTransform(scene,camera.id,{ position: eye.toArray() as Vec3, rotation, scale: [...pose.scale] as Vec3 },when) });
   }
   return { track: recordedTrack(frames), length, subject, start, duration };
 }

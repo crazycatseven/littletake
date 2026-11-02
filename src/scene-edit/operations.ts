@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Euler, MathUtils, Matrix4, Vector3 } from 'three';
+import { Matrix4, Vector3 } from 'three';
 import { createEmptyScene, ensureAnimation, evaluateTransform, sceneEntity, setTransformMotion } from '../model.ts';
 import { validateProjectContent } from '../project/model.ts';
 import type { ProjectContent, SceneEntity, Transform, Vec3 } from '../types.ts';
@@ -14,6 +14,7 @@ import { reparentScene } from '../placement/transforms.ts';
 import { descendants, sceneEntities, localTransform, worldTransform } from '../placement/hierarchy.ts';
 import { jointProperty, putKey, replacePropertyKeys, setKeyInterpolation, type PropertyPath } from '../animation/model.ts';
 import { scriptOperationSchema, isScriptOperation, applyScriptOperation } from '../scripts/operations.ts';
+import { eulerDegrees } from '../rotation.ts';
 
 const vector = (min: number, max: number) => z.array(z.number().min(min).max(max)).length(3) as unknown as z.ZodType<Vec3>;
 const position = vector(-1000, 1000);
@@ -84,8 +85,7 @@ export type EditPlan = z.infer<typeof editPlanSchema>;
 export function aimedCameraTransform(position:Vec3,target:Vec3):Transform{
   const eye=new Vector3(...position),look=new Vector3(...target);
   if(eye.distanceToSquared(look)<1e-8)throw new Error('Camera position and target must differ.');
-  const euler=new Euler().setFromRotationMatrix(new Matrix4().lookAt(eye,look,new Vector3(0,1,0)),'XYZ');
-  return {position:[...position],rotation:[euler.x,euler.y,euler.z].map(value=>value===0?0:MathUtils.radToDeg(value)) as Vec3,scale:[1,1,1]};
+  return {position:[...position],rotation:eulerDegrees(new Matrix4().lookAt(eye,look,new Vector3(0,1,0))),scale:[1,1,1]};
 }
 
 function poseTarget(item: SceneEntity, target: z.infer<typeof pose>) {

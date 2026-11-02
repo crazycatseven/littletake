@@ -23,6 +23,7 @@ import { PathEditor } from './motion-paths/editor';
 import type { MotionPath } from './motion-paths/model';
 import type { ProjectCoverFrame } from './project/room';
 import { COVER_WIDTH, COVER_HEIGHT } from './project/cover';
+import { eulerDegrees } from './rotation.ts';
 
 const STROKE_LIMIT = 4096;
 
@@ -781,11 +782,11 @@ export class Stage {
 
   private readPose(object: THREE.Object3D): Transform {
     // Persist the same Euler convention used by the scene model, in degrees.
-    const rotation = new THREE.Euler().setFromQuaternion(object.quaternion, 'XYZ');
+    const rotation = eulerDegrees(object.quaternion);
     const clean = (value: number): number => Math.abs(value) < 0.000001 ? 0 : value;
     return {
       position: [object.position.x, object.position.y, object.position.z].map(clean) as [number, number, number],
-      rotation: [rotation.x / DEG, rotation.y / DEG, rotation.z / DEG].map(clean) as [number, number, number],
+      rotation: rotation.map(clean) as [number, number, number],
       scale: [object.scale.x, object.scale.y, object.scale.z].map(clean) as [number, number, number],
     };
   }

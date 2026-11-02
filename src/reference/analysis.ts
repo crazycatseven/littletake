@@ -17,6 +17,8 @@ export const analysisSchema=z.strictObject({
   assumptions:z.array(z.string().max(500)).max(12),
 });
 export type ReferenceAnalysis=z.input<typeof analysisSchema>;
+/** What Muse may return. frameBounds is measured by the app, and strict structured outputs require every property. */
+export const observationSchema=analysisSchema.omit({frameBounds:true});
 export const detectedRegionSchema=z.strictObject({id:z.string().max(32),kind:z.enum(['person','face']),box,confidence:z.number().min(0).max(1)});
 export type DetectedRegion=z.infer<typeof detectedRegionSchema>;
 export const faceLandmarkSchema=z.strictObject({box,confidence:z.number().min(0).max(1),points:z.array(z.tuple([z.number().min(-.5).max(1.5),z.number().min(-.5).max(1.5)])).length(5)});

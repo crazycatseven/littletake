@@ -1,6 +1,7 @@
 import { Euler, MathUtils, Matrix4, Quaternion, Vector3 } from 'three';
 import { z } from 'zod';
 import type { MotionTrack, Transform, Vec3 } from '../types.ts';
+import { eulerDegrees } from '../rotation.ts';
 
 const vector = (min: number, max: number) => z.tuple([z.number().min(min).max(max), z.number().min(min).max(max), z.number().min(min).max(max)]);
 export const transformSchema = z.strictObject({ position: vector(-1000, 1000), rotation: vector(-360000, 360000), scale: vector(.01, 100) });
@@ -16,8 +17,7 @@ export function repositionTrack(track: MotionTrack, from: Transform, to: Transfo
   for (const pose of trackPoses(track)) {
     const position = new Vector3(), rotation = new Quaternion(), scale = new Vector3();
     delta.clone().multiply(matrix(pose)).decompose(position, rotation, scale);
-    const euler = new Euler().setFromQuaternion(rotation, 'XYZ');
-    pose.position = position.toArray() as Vec3; pose.rotation = [euler.x, euler.y, euler.z].map(MathUtils.radToDeg) as Vec3; pose.scale = scale.toArray() as Vec3;
+    pose.position = position.toArray() as Vec3; pose.rotation = eulerDegrees(rotation); pose.scale = scale.toArray() as Vec3;
   }
 }
 

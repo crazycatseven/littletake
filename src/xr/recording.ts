@@ -3,6 +3,7 @@ import { animationFor, evaluateTransform } from '../model';
 import { emptyAnimation, keepRecordedTake } from '../animation/model';
 import { transformSchema } from '../performance/motion';
 import type { SceneObject, Transform } from '../types';
+import { eulerDegrees } from '../rotation';
 
 export type XRRecordAction = 'record' | 'preview' | 'apply' | 'discard';
 export interface XRRecordingState {
@@ -15,8 +16,7 @@ export interface XRRecordingState {
 export interface PoseSample { time: number; transform: Transform }
 const quaternion = (pose: Transform) => new Quaternion().setFromEuler(new Euler(...pose.rotation.map(MathUtils.degToRad) as [number, number, number]));
 function rotation(q: Quaternion): Transform['rotation'] {
-  const e = new Euler().setFromQuaternion(q);
-  return [e.x, e.y, e.z].map(MathUtils.radToDeg) as Transform['rotation'];
+  return eulerDegrees(q);
 }
 export function interpolatePose(a: Transform, b: Transform, t: number): Transform {
   return { position: new Vector3(...a.position).lerp(new Vector3(...b.position), t).toArray(),

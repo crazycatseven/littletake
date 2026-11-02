@@ -7,6 +7,7 @@ import { transformSelection } from '../placement/transforms.ts';
 import type { ProjectContent, SceneObject, Transform, Vec3 } from '../types.ts';
 import { bottomPoints, boxData, poseOf, SpatialScene, upwardSurface } from './geometry.ts';
 import { spatialOperationSchema, spatialQuerySchema, type SpatialOperation, type SpatialQuery } from './schema.ts';
+import { eulerDegrees } from '../rotation.ts';
 
 const axisIndex = { x: 0, y: 1, z: 2 } as const;
 const forwardVector = (axis: '+z' | '-z' | '+x' | '-x') => new Vector3(axis.endsWith('x') ? (axis[0] === '+' ? 1 : -1) : 0, 0, axis.endsWith('z') ? (axis[0] === '+' ? 1 : -1) : 0);
@@ -105,7 +106,7 @@ export function solveSpatial(project: ProjectContent, value: SpatialOperation): 
         if (direction.lengthSq() < 1e-10 || current.lengthSq() < 1e-10) throw new Error('Cannot determine a horizontal facing direction.');
         const angle = Math.atan2(direction.x, direction.z) - Math.atan2(current.x, current.z);
         quaternion.premultiply(new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), angle));
-        const euler = new Euler().setFromQuaternion(quaternion, 'XYZ'); pose.rotation = [euler.x, euler.y, euler.z].map(MathUtils.radToDeg) as Vec3;
+        pose.rotation = eulerDegrees(quaternion);
         poses.set(op.id, pose); observations.yawDeltaDegrees = MathUtils.radToDeg(angle); break;
       }
       case 'align_objects': {
