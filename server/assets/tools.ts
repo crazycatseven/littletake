@@ -85,7 +85,8 @@ export class AssetTools {
   private scenePreviews=new Map<string,{sceneId:string;operations:string;applyTime:number;shots:Set<string>;plan:SceneOperation[]}>();
   private selectedScenePreviewId?:string;
   constructor(private library: AssetLibrary, private project: ProjectContent, private provider: AIProvider, private diagnostic?: SceneEditDiagnostic,private onAsset?:(asset:AssetDefinition)=>void,private frameBounds?:ImageBounds,private referenceTools?:ReferenceTools) {}
-  private reusableAsset(id:string){return this.readAssets.get(id)??this.project.assets?.find(asset=>asset.id===id&&this.project.scenes.some(scene=>scene.objects.some(object=>object.asset?.id===id)));}
+  // Assets supplied with the project (placed ones, or a reference run's approved assets) come with their metadata; only library candidates need read_asset first.
+  private reusableAsset(id:string){return this.readAssets.get(id)??this.project.assets?.find(asset=>asset.id===id);}
 
   private async execute(name: string, raw: unknown, signal?: AbortSignal): Promise<{ result: unknown; image?: string }> {
     if (this.referenceTools?.handles(name)) return this.referenceTools.execute(name, raw, signal);

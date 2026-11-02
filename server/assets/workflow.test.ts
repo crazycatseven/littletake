@@ -202,3 +202,19 @@ test('an empty or "null" baseAssetId starts a new asset instead of failing the c
     assert.equal(expertBase, null);
   }
 });
+
+test("a reference run's approved assets can be placed without reading them again", async () => {
+  const library = new AssetLibrary(await mkdtemp(path.join(tmpdir(), 'littletake-assets-'))), diagnostic = newDiagnostic();
+  const approved = { ...structuredClone(builtinAssets[0]), id: 'asset-approved-desk', name: 'Approved desk' };
+  const source = { ...input(), project: { name: 'Reference', scenes: [createEmptyScene()], assets: [approved] } };
+  let directorCalls = 0;
+  const transport = (async (_url: unknown, init: RequestInit) => {
+    const body = JSON.parse(init.body as string), outputs = body.input.filter((x: any) => x.type === 'function_call_output').map((x: any) => JSON.parse(x.output));
+    directorCalls++;
+    if (directorCalls === 1) return Response.json({ status: 'completed', output: [{ type: 'function_call', call_id: 'call_1', name: 'instantiate_asset', arguments: JSON.stringify({ assetId: approved.id, sceneId: 'scene-1', name: 'Desk', transform }), status: 'completed' }] });
+    return Response.json(json({ summary: 'Placed the desk.', requestedViews: [], objectCounts: [], operations: outputs.filter((item: any) => item.placementId).map((item: any) => item.operation) }));
+  }) as typeof fetch;
+  const response = await proposeSceneEdit(source as any, new MetaProvider({ apiKey: 'test', model: 'test' }, transport), undefined, diagnostic, library);
+  assert.equal(response.status, 'ready');
+  assert.deepEqual(diagnostic.toolCalls!.map(call => [call.name, Boolean(call.error)]), [['instantiate_asset', false]]);
+});
