@@ -117,7 +117,7 @@ app.innerHTML = `
 <input id="openFile" type="file" accept=".json,.zip,application/json,application/zip" hidden/>
 <dialog id="sceneSnapshotDialog" aria-labelledby="sceneSnapshotTitle"><div class="dialog-heading"><h2 id="sceneSnapshotTitle">Top view</h2><button data-action="close-snapshot" aria-label="Close top view">✕</button></div><img id="sceneSnapshotImage" class="scene-snapshot-image" alt="Top-down scene layout with object IDs"/><div class="snapshot-footer"><span id="sceneSnapshotInfo"></span><div><button data-action="refresh-snapshot">Refresh</button><button data-action="download-snapshot" class="primary-button">Download PNG</button></div></div></dialog>
 <dialog id="previewDialog" aria-labelledby="previewTitle"><div class="dialog-heading"><h2 id="previewTitle">Shot preview</h2><button data-action="close-preview" aria-label="Close shot preview">✕</button></div><div id="expandedPreview"></div><div class="preview-transport"><button class="play-button" data-action="play" aria-label="Play">${icon('play')}</button><span class="timecode" data-current-time></span><span class="timecode-separator">/</span><span class="timecode" data-end-time></span></div></dialog>
-<dialog id="shortcutsDialog"><div class="dialog-heading"><h2>Keyboard shortcuts</h2><button data-action="close-shortcuts" aria-label="Close shortcuts">✕</button></div><p class="muted">Editor controls.</p><dl class="shortcut-list"><dt>Orbit / pan / zoom</dt><dd>Left drag / Middle drag / Scroll</dd><dt>Fly around the scene</dt><dd>Hold right mouse + W A S D · Q / E up & down</dd><dt>Asset drawer</dt><dd>B · configurable in the bottom bar</dd><dt>Object controls</dt><dd>W/S forward/back · A/D turn · R record · Esc exit</dd><dt>Move / rotate / scale</dt><dd>G / R / S</dd><dt>Constrain an axis</dt><dd>X / Y / Z</dd><dt>Box select / add to selection</dt><dd>Shift drag empty space / Ctrl Shift drag</dd><dt>Multi-select in Hierarchy</dt><dd>Ctrl click / Shift click a range</dd><dt>Drop to surface</dt><dd>Double-click the green Y move handle</dd><dt>View orientation</dt><dd>Click an axis / drag the upper-right gizmo</dd><dt>Focus selection</dt><dd>F</dd><dt>Insert property key</dt><dd>Hover or focus a property · I</dd><dt>Play / pause</dt><dd>Space</dd><dt>Duplicate / delete</dt><dd>Ctrl D / Delete</dd><dt>Undo / redo</dt><dd>Ctrl Z / Ctrl Shift Z</dd><dt>Save locally</dt><dd>Ctrl S</dd></dl><p class="dialog-note">Use Key Transform for a whole pose, or key an individual property and expand its axes in the timeline.</p></dialog>
+<dialog id="shortcutsDialog"><div class="dialog-heading"><h2>Keyboard shortcuts</h2><button data-action="close-shortcuts" aria-label="Close shortcuts">✕</button></div><p class="muted">Editor controls.</p><dl class="shortcut-list"><dt>Orbit / pan / zoom</dt><dd>Left drag / Middle drag / Scroll</dd><dt>Fly around the scene</dt><dd>Hold right mouse + W A S D · Q / E down / up · Scroll to adjust speed · Shift to boost</dd><dt>Asset drawer</dt><dd>B · configurable in the bottom bar</dd><dt>Object controls</dt><dd>W/S forward/back · A/D turn · R record · Esc exit</dd><dt>Move / rotate / scale</dt><dd>G / R / S</dd><dt>Constrain an axis</dt><dd>X / Y / Z</dd><dt>Box select / add to selection</dt><dd>Shift drag empty space / Ctrl Shift drag</dd><dt>Multi-select in Hierarchy</dt><dd>Ctrl click / Shift click a range</dd><dt>Drop to surface</dt><dd>Double-click the green Y move handle</dd><dt>View orientation</dt><dd>Click an axis / drag the upper-right gizmo</dd><dt>Focus selection</dt><dd>F</dd><dt>Insert property key</dt><dd>Hover or focus a property · I</dd><dt>Play / pause</dt><dd>Space</dd><dt>Duplicate / delete</dt><dd>Ctrl D / Delete</dd><dt>Undo / redo</dt><dd>Ctrl Z / Ctrl Shift Z</dd><dt>Save locally</dt><dd>Ctrl S</dd></dl><p class="dialog-note">Use Key Transform for a whole pose, or key an individual property and expand its axes in the timeline.</p></dialog>
 `;
 
 let project = createProject(null), storageError = '';
@@ -1053,16 +1053,17 @@ let timelineResize:{y:number;height:number;savedHeight:number;open:boolean}|null
 timelineResizeHandle.onpointerdown=event=>{
   if(event.button!==0)return;
   timelineResize={y:event.clientY,height:$('#timelinePanel').getBoundingClientRect().height,savedHeight:timelineHeight,open:timelineOpen};
+  stage.beginViewportResize($('#viewport').clientHeight+timelineResize.height-62);
   timelineResizeHandle.focus({preventScroll:true});timelineResizeHandle.setPointerCapture(event.pointerId);$('#timelinePanel').classList.add('resizing');event.preventDefault();
 };
 timelineResizeHandle.onpointermove=event=>{
   if(!timelineResize||Math.abs(event.clientY-timelineResize.y)<2)return;
   setTimelineHeight(timelineResize.height+timelineResize.y-event.clientY);setTimelineOpen(timelineHeight>62);
 };
-timelineResizeHandle.onpointerup=()=>{if(!timelineResize)return;timelineResize=null;$('#timelinePanel').classList.remove('resizing');saveTimelineHeight();};
+timelineResizeHandle.onpointerup=()=>{if(!timelineResize)return;timelineResize=null;stage.endViewportResize();$('#timelinePanel').classList.remove('resizing');saveTimelineHeight();};
 timelineResizeHandle.onlostpointercapture=timelineResizeHandle.onpointercancel=()=>{
   if(timelineResize){setTimelineHeight(timelineResize.savedHeight);setTimelineOpen(timelineResize.open);}
-  timelineResize=null;$('#timelinePanel').classList.remove('resizing');
+  timelineResize=null;stage.endViewportResize();$('#timelinePanel').classList.remove('resizing');
 };
 timelineResizeHandle.ondblclick=()=>{setTimelineHeight(window.innerHeight<=720?180:220);setTimelineOpen(true);saveTimelineHeight();};
 timelineResizeHandle.onkeydown=event=>{

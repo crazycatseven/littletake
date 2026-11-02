@@ -104,6 +104,8 @@ export class Stage {
   private readonly fixedMaterials: THREE.Material[] = [];
   private readonly removeListeners: Array<() => void> = [];
   private readonly resizeObserver: ResizeObserver;
+  private resizePending = true;
+  private viewportResize: { width: number; height: number; renderHeight: number } | null = null;
   private readonly sun: THREE.DirectionalLight;
   private readonly ambient = new THREE.HemisphereLight('#f6f5ee', '#c6c2b9', 2.1);
   private readonly groundMaterial = new THREE.MeshStandardMaterial({ color: '#eceae4', roughness: .98, metalness: 0 });
@@ -127,6 +129,7 @@ export class Stage {
   private axis: Axis | null = null;
   private pointerStart: PointerStart | null = null;
   private flyPointer: number | null = null;
+  private flySpeed = 3.5;
   private sketch: { pointerId: number | null; points: THREE.Vector3[]; line: THREE.Line; done: (points: Vec3[]) => void; cancel: () => void; keydown: (event: KeyboardEvent) => void } | null = null;
   private lastPointer = new THREE.Vector2();
   private xrControls?: XRControls;
@@ -148,7 +151,7 @@ export class Stage {
     this.previewRenderer = this.createRenderer();
     const canvas = this.renderer.domElement;
     canvas.tabIndex = 0;
-    canvas.setAttribute('aria-label', '3D scene editor. Drag empty space to orbit. Hold right mouse and use WASD to fly.');
+    canvas.setAttribute('aria-label', '3D scene editor. Drag empty space to orbit. Hold right mouse and use WASD to fly, scroll to adjust speed.');
     canvas.style.cssText = 'display:block;width:100%;height:100%;outline:none;touch-action:none;';
     options.viewport.appendChild(canvas);
     const previewCanvas = this.previewRenderer.domElement;
@@ -211,6 +214,7 @@ export class Stage {
     this.listen(canvas, 'pointermove', this.onPointerMove as EventListener, true);
     this.listen(window, 'pointerup', this.onPointerUp as EventListener);
     this.listen(window, 'pointercancel', this.onPointerCancel as EventListener);
+    this.listen(window, 'wheel', this.onFlyWheel as EventListener, { capture: true, passive: false });
     this.listen(canvas, 'contextmenu', (event) => event.preventDefault());
     this.listen(canvas, 'dblclick', this.onDoubleClick as EventListener);
     this.listen(canvas, 'keydown', this.onKeyDown as EventListener);
@@ -525,7 +529,7 @@ export class Stage {
     } finally { this.update(previous.doc, previous.time, previous.selected, previous.playing, previous.shotId,previous.assets); }
   }
 
-  get canCaptureProjectCover(): boolean { return !this.disposed && !!this.currentDoc && !this.playing && !this.dragging && !this.controlled && !this.sketch && !this.presentingXR && this.flyPointer === null; }
+  get canCaptureProjectCover(): boolean { return !this.disposed && !!this.currentDoc && !this.playing && !this.dragging && !this.viewportResize && !this.controlled && !this.sketch && !this.presentingXR && this.flyPointer === null; }
 
   captureProjectPreview({ scene: doc, shotId, assets }: ProjectCoverFrame): string | null {
     if (!doc || !doc.objects.some(item => !effectivelyHidden(doc, item.id))) return null;
@@ -1009,7 +1013,7 @@ export class Stage {
       this.orbit.enabled = false;
       this.gizmo.enabled = false;
       this.renderer.domElement.setPointerCapture(event.pointerId);
-      this.options.onStatus('Fly camera · WASD to move · Q / E down / up · Shift for speed · Release right mouse to finish');
+      this.updateFlyStatus();
       return;
     }
     if (event.button !== 0 || this.flyPointer !== null) return;
@@ -1118,6 +1122,7 @@ export class Stage {
     const key = event.key.toLowerCase();
     if (this.flyPointer !== null && ['w', 'a', 's', 'd', 'q', 'e', 'shift'].includes(key)) {
       this.keys.add(key);
+      if (key === 'shift' && !event.repeat) this.updateFlyStatus();
       event.preventDefault();
       event.stopPropagation();
     } else if (key === 'f' && !event.ctrlKey && !event.metaKey && !event.altKey) {
@@ -1137,7 +1142,22 @@ export class Stage {
       event.stopPropagation();
     }
     this.keys.delete(key);
+    if (key === 'shift' && this.flyPointer !== null) this.updateFlyStatus();
   };
+
+  private onFlyWheel = (event: WheelEvent): void => {
+    if (this.flyPointer === null || event.ctrlKey || event.metaKey) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const pixels = event.deltaY * (event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? this.options.viewport.clientHeight : 1);
+    this.flySpeed = THREE.MathUtils.clamp(this.flySpeed * Math.pow(1.25, -pixels / 100), .1, 200);
+    this.updateFlyStatus();
+  };
+
+  private updateFlyStatus(): void {
+    const speed = this.flySpeed * (this.keys.has('shift') ? 12 / 3.5 : 1);
+    this.options.onStatus(`Fly · ${speed.toFixed(1)} m/s · WASD move · Q / E down / up · Scroll speed · Shift boost · Release right mouse to finish`);
+  }
 
   private clearNavigation(): void {
     const pointer = this.flyPointer;
@@ -1173,33 +1193,62 @@ export class Stage {
     if (this.keys.has('e')) this.velocity.y += 1;
     if (this.keys.has('q')) this.velocity.y -= 1;
     if (this.velocity.lengthSq() > 0) {
-      this.velocity.normalize().multiplyScalar(delta * (this.keys.has('shift') ? 12 : 3.5));
+      this.velocity.normalize().multiplyScalar(delta * this.flySpeed * (this.keys.has('shift') ? 12 / 3.5 : 1));
       this.editorCamera.position.add(this.velocity);
       this.orbit.target.add(this.velocity);
     }
   }
 
-  private resize = (): void => {
-    if (this.disposed || this.presentingXR) return;
+  beginViewportResize(maxHeight: number): void {
+    const { viewport } = this.options;
+    this.viewportResize = { width: Math.max(1, viewport.clientWidth), height: Math.max(1, viewport.clientHeight), renderHeight: Math.max(viewport.clientHeight, Math.ceil(maxHeight)) };
+    this.resize();
+  }
+
+  endViewportResize(): void {
+    if (!this.viewportResize) return;
+    this.viewportResize = null;
+    this.resize();
+  }
+
+  // ResizeObserver runs after animation callbacks. Only resize immediately before drawing,
+  // so a cleared WebGL buffer can never be presented between two animation frames.
+  private resize = (): void => { this.resizePending = true; };
+
+  private applyResize(): void {
+    this.resizePending = false;
     const { viewport, preview } = this.options;
-    const width = Math.max(1, viewport.clientWidth);
-    const height = Math.max(1, viewport.clientHeight);
+    const locked = this.viewportResize;
+    const width = locked?.width ?? Math.max(1, viewport.clientWidth);
+    const height = locked?.renderHeight ?? Math.max(1, viewport.clientHeight);
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    this.renderer.setPixelRatio(dpr);
-    this.renderer.setSize(width, height, false);
-    this.perspectiveCamera.aspect = width / height;
-    this.perspectiveCamera.updateProjectionMatrix();
-    this.orthographicCamera.left = -10 * width / height; this.orthographicCamera.right = 10 * width / height;
-    this.orthographicCamera.updateProjectionMatrix();
+    const size = this.renderer.getSize(new THREE.Vector2());
+    if (this.renderer.getPixelRatio() !== dpr) this.renderer.setPixelRatio(dpr);
+    if (size.x !== width || size.y !== height) this.renderer.setSize(width, height, false);
+    this.renderer.domElement.style.width = locked ? `${width}px` : '100%';
+    this.renderer.domElement.style.height = locked ? `${height}px` : '100%';
+    const aspect = width / (locked?.height ?? height);
+    this.perspectiveCamera.aspect = aspect;
+    this.orthographicCamera.left = -10 * aspect; this.orthographicCamera.right = 10 * aspect;
+    if (locked) {
+      // Extend the drawing below the visible viewport without moving its existing pixels.
+      // Both upward and downward drags then reveal/crop this same full-height canvas.
+      this.perspectiveCamera.setViewOffset(locked.width, locked.height, 0, 0, width, height);
+      this.orthographicCamera.setViewOffset(locked.width, locked.height, 0, 0, width, height);
+    } else {
+      this.perspectiveCamera.clearViewOffset();
+      this.orthographicCamera.clearViewOffset();
+    }
     const hostWidth = Math.max(1, preview.clientWidth);
     const hostHeight = preview.clientHeight || hostWidth * 9 / 16;
     const previewWidth = Math.max(1, Math.min(hostWidth, hostHeight * 16 / 9));
     const previewHeight = previewWidth * 9 / 16;
-    this.previewRenderer.setPixelRatio(dpr);
-    this.previewRenderer.setSize(Math.round(previewWidth), Math.round(previewHeight), false);
+    this.previewRenderer.getSize(size);
+    if (this.previewRenderer.getPixelRatio() !== dpr) this.previewRenderer.setPixelRatio(dpr);
+    if (size.x !== Math.round(previewWidth) || size.y !== Math.round(previewHeight)) this.previewRenderer.setSize(Math.round(previewWidth), Math.round(previewHeight), false);
     this.previewRenderer.domElement.style.width = `${previewWidth}px`;
     this.previewRenderer.domElement.style.height = `${previewHeight}px`;
-  };
+  }
 
   private render = (time: number, frame?: XRFrame): void => {
     if (this.disposed) return;
@@ -1214,6 +1263,7 @@ export class Stage {
       this.renderer.render(this.scene, this.xrControls.camera);
       return;
     }
+    if (this.resizePending && !this.presentingXR) this.applyResize();
     const delta = Math.min(this.lastFrame ? (time - this.lastFrame) / 1000 : 0, 0.05);
     this.lastFrame = time;
     this.updateFly(delta);
