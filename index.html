@@ -7,9 +7,15 @@
     <meta name="description" content="A small stage for your next big idea. Build, animate and frame editable proxy scenes with LittleTake." />
     <title>LittleTake — Studio</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <style>
+      #app[data-opening] { visibility: hidden; }
+      #workspaceOpening { position: fixed; inset: 0; display: grid; place-content: center; gap: 12px; background: #202020; color: #e7e7df; font: 14px system-ui, sans-serif; text-align: center; }
+      #workspaceOpening span { color: #9e9e95; font-size: 12px; }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app" data-opening inert></div>
+    <div id="workspaceOpening" role="status"><strong>LittleTake</strong><span>Opening workspace…</span></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -109,7 +109,10 @@ export class Workspace {
     projectRequestContext({ code: room.code, lease: this.lease, page: this.page }, this);
     room.project = parseProject(serializeProject(room.project), room.editing === 'you');
     const url = new URL(location.href); url.searchParams.set('project', room.code); history.replaceState(null, '', url);
-    this.options.open(room.project); this.home.close(); this.notify();
+    this.options.open(room.project);
+    const editor = document.getElementById('app'); if (editor) { editor.removeAttribute('data-opening'); editor.inert = false; }
+    document.getElementById('workspaceOpening')?.remove();
+    this.home.close(); this.notify();
     if (this.pending && !this.conflict) void this.flush().catch(() => {});
   }
   async join(code: string) {
@@ -225,6 +228,7 @@ export class Workspace {
       <section class="project-cards">${projects.map(item => `<article><button class="project-card-open" data-project-action="open" data-code="${escape(item.code)}"><div class="project-card-art"><span>▱</span><small>${item.scenes} SCENES · ${item.objects} OBJECTS</small></div><h3>${escape(item.name)}</h3><p>Saved ${new Date(item.updatedAt).toLocaleDateString()} · ${escape(this.formatCode(item.code))}</p></button><button class="project-copy-button" data-project-action="copy" data-code="${escape(item.code)}">Duplicate</button></article>`).join('') || '<div class="projects-empty"><span>◇</span><h3>Your next scene starts here</h3><p>Create a project or import an existing LittleTake save.</p><button data-project-action="new">Create your first project</button></div>'}</section>
       ${this.creation ? '<button data-project-action="recover">Retry creating project</button>' : ''}${this.browserRecoveryId ? '<a class="project-recovery-link" href="/api/projects?browserRecovery=' + this.browserRecoveryId + '">Download previous browser data backup</a>' : ''}<p class="projects-error" role="alert" hidden></p><footer>${this.workspace.mode === 'cloud' ? 'Projects, assets and conversations are stored on the cloud server.' : 'Projects, assets and conversations are stored on this computer by the running LittleTake service. Upload to cloud is optional.'}</footer>`;
     if (!this.home.open) this.home.showModal();
+    document.getElementById('workspaceOpening')?.remove();
     if (this.migrationError) this.error(this.migrationError);
     if (load) void fetch('/api/projects?list=1', { cache: 'no-store' }).then(async response => {
       const value = await response.json(); if (!response.ok || !Array.isArray(value.projects)) throw new Error('The project list could not be loaded.');
