@@ -10,6 +10,9 @@ import { collectReferenceSource, readReferenceVideo } from './video';
 import type { SourceEvidence } from './analysis';
 import type { ReferenceConnection, ReferenceDraft, ReferenceImage, ReferenceVideo, ReferenceInput, ReferenceCapture } from './types';
 
+/** Muse quotes measured times like 1.8761666666666668; show them as 1.88. */
+const readableTimes = (text: string) => text.replace(/\d+\.\d{4,}/g, value => Number(value).toFixed(2));
+
 
 const escapeHTML = (text: string) => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
 
@@ -261,7 +264,7 @@ export class ReferenceDialog {
       this.find('#referenceState').textContent = approved ? 'DRAFT READY · VISUAL REVIEW PASSED' : 'BEST DRAFT · DID NOT PASS VISUAL REVIEW';
       this.applyButton.textContent = approved ? 'Use scene' : 'Use draft anyway';
       const palette=[...new Set(draft.scene.objects.map(item=>item.color))];
-      this.find('#referenceReport').innerHTML = `<div class="reference-draft-summary"><h3>${escapeHTML(draft.scene.name)}</h3><p>${escapeHTML(draft.summary)}</p><div class="reference-output-tags"><span>${draft.scene.objects.length} objects</span><span>${animated} moving</span><span>${draft.scene.shots.length} shots</span><span>${draft.scene.cameras.filter(camera=>camera.track).length} camera moves</span></div><div class="reference-palette" aria-label="Scene palette">${palette.map(color=>`<span title="${color}" style="display:inline-block;width:22px;height:22px;border-radius:4px;margin:8px 4px 0 0;background:${color}"></span>`).join('')}</div></div><ol class="reference-object-list">${draft.scene.shots.map(shot=>`<li><span class="reference-kind">${shot.start.toFixed(2)}–${(shot.start+shot.duration).toFixed(2)}s</span><span>${escapeHTML(shot.name)}</span></li>`).join('')}</ol><ul class="reference-object-list">${draft.scene.objects.map(item => `<li><span class="reference-kind">${escapeHTML(item.kind)}${item.track?' · motion':''}</span><span>${escapeHTML(item.name)}</span></li>`).join('')}</ul>${draft.assumptions.length ? `<div class="reference-assumptions"><h4>Estimated / simplified</h4><ul>${draft.assumptions.map(item => `<li>${escapeHTML(item)}</li>`).join('')}</ul></div>` : ''}`;
+      this.find('#referenceReport').innerHTML = `<div class="reference-draft-summary"><h3>${escapeHTML(draft.scene.name)}</h3><p>${escapeHTML(readableTimes(draft.summary))}</p><div class="reference-output-tags"><span>${draft.scene.objects.length} objects</span><span>${animated} moving</span><span>${draft.scene.shots.length} shots</span><span>${draft.scene.cameras.filter(camera=>camera.track).length} camera moves</span></div><div class="reference-palette" aria-label="Scene palette">${palette.map(color=>`<span title="${color}" style="display:inline-block;width:22px;height:22px;border-radius:4px;margin:8px 4px 0 0;background:${color}"></span>`).join('')}</div></div><ol class="reference-object-list">${draft.scene.shots.map(shot=>`<li><span class="reference-kind">${shot.start.toFixed(2)}–${(shot.start+shot.duration).toFixed(2)}s</span><span>${escapeHTML(shot.name)}</span></li>`).join('')}</ol><ul class="reference-object-list">${draft.scene.objects.map(item => `<li><span class="reference-kind">${escapeHTML(item.kind)}${item.track?' · motion':''}</span><span>${escapeHTML(item.name)}</span></li>`).join('')}</ul>${draft.assumptions.length ? `<div class="reference-assumptions"><h4>Estimated / simplified</h4><ul>${draft.assumptions.map(item => `<li>${escapeHTML(readableTimes(item))}</li>`).join('')}</ul></div>` : ''}`;
   }
   private cancelAnalysis(){
     const scanning=this.preparingSource;
