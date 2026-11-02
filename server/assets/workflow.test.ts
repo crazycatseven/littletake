@@ -120,3 +120,21 @@ test('rejected and interrupted jobs retain evidence and budgets; a later explici
   const limited = budgetProvider(provider, 1), request = { instructions: '', content: [], schema: {}, schemaName: 'test' };
   await limited.generateObject(request); await assert.rejects(limited.generateObject(request), /call limit/); assert.equal(calls, 5);
 });
+
+test('an instance that failed before read_asset succeeds when retried with the same arguments', async () => {
+  const library = new AssetLibrary(await mkdtemp(path.join(tmpdir(), 'littletake-assets-'))), diagnostic = newDiagnostic();
+  const place = { assetId: 'builtin-chair', sceneId: 'scene-1', name: 'Chair A', transform };
+  let directorCalls = 0;
+  const transport = (async (_url: unknown, init: RequestInit) => {
+    const body = JSON.parse(init.body as string), outputs = body.input.filter((x: any) => x.type === 'function_call_output').map((x: any) => JSON.parse(x.output));
+    directorCalls++;
+    const call = (name: string, args: unknown) => Response.json({ status: 'completed', output: [{ type: 'function_call', call_id: 'call_' + directorCalls, name, arguments: JSON.stringify(args), status: 'completed' }] });
+    if (directorCalls === 1) return call('instantiate_asset', place);
+    if (directorCalls === 2) { assert.match(outputs.at(-1).error, /Read the asset/); return call('read_asset', { assetId: 'builtin-chair' }); }
+    if (directorCalls === 3) return call('instantiate_asset', place);
+    return Response.json(json({ summary: 'Placed one chair.', requestedViews: [], objectCounts: [], operations: outputs.filter((item: any) => item.placementId).map((item: any) => item.operation) }));
+  }) as typeof fetch;
+  const response = await proposeSceneEdit(input(), new MetaProvider({ apiKey: 'test', model: 'test' }, transport), undefined, diagnostic, library);
+  assert.equal(response.status, 'ready');
+  assert.deepEqual(diagnostic.toolCalls!.map(c => [c.name, Boolean(c.error)]), [['instantiate_asset', true], ['read_asset', false], ['instantiate_asset', false]]);
+});
