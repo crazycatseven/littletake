@@ -1,12 +1,12 @@
 import { isJointProperty, propertyPaths, type JointPropertyPath, type PropertyAnimation, type PropertyPath, type VectorProperty } from './model.ts';
 
-export type PropertyGroup = VectorProperty | 'fov' | JointPropertyPath;
+export type PropertyGroup = VectorProperty | 'fov' | 'followPath.progress' | JointPropertyPath;
 const labels: Record<VectorProperty | 'fov',string> = {position:'Position',rotation:'Rotation',scale:'Scale',pivot:'Pivot Offset',fov:'Field of View'};
 const esc = (value: string) => value.replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]!));
-export const scalarGroup = (group: PropertyGroup): group is 'fov' | JointPropertyPath => group === 'fov' || isJointProperty(group);
-export const propertyGroup = (path: PropertyPath): PropertyGroup => isJointProperty(path) ? path : path.split('.')[0] as PropertyGroup;
+export const scalarGroup = (group: PropertyGroup): group is 'fov' | 'followPath.progress' | JointPropertyPath => group === 'fov' || group === 'followPath.progress' || isJointProperty(group);
+export const propertyGroup = (path: PropertyPath): PropertyGroup => isJointProperty(path) || path === 'followPath.progress' ? path : path.split('.')[0] as PropertyGroup;
 export const groupPaths = (group: PropertyGroup): PropertyPath[] => scalarGroup(group) ? [group] : propertyPaths(group);
-const labelFor = (group: PropertyGroup) => isJointProperty(group) ? group.slice(12) : labels[group];
+const labelFor = (group: PropertyGroup) => group === 'followPath.progress' ? 'Follow Path · Progress' : isJointProperty(group) ? group.slice(12) : labels[group];
 const at = (a: number, b: number) => Math.abs(a-b) < 1e-6;
 
 export function keyState(animation: PropertyAnimation | undefined, group: PropertyGroup, time: number): 'on-key' | 'animated' | '' {

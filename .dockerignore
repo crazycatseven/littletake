@@ -1,8 +1,14 @@
 .git
-.env
-.env.*
 node_modules
 dist
+.env*
 .littletake
 output
 .playwright-mcp
+.playwright-cli
+.vercel
+**/.venv
+**/__pycache__
+**/*.pt
+**/*.pth
+**/*.safetensors

@@ -17,9 +17,12 @@ export interface SceneCamera { id: string; name: string; fov: number; parentId?:
 /** A shot selects a camera and a range of the shared scene clock. Framing belongs only to the camera. */
 export interface Shot { id: string; name: string; cameraId: string; start: number; duration: number }
 export type SceneEntity = SceneObject | SceneCamera;
-export interface SceneDocument { format: 'LittleTake.scene'; version: 3; id: string; name: string; duration: number; fps?: 24 | 30; objects: SceneObject[]; cameras: SceneCamera[]; shots: Shot[]; look?:SceneLook }
-export interface ProjectContent { name: string; scenes: SceneDocument[]; assets?: AssetDefinition[] }
+export interface SceneDocument { format: 'LittleTake.scene'; version: 3; id: string; name: string; duration: number; fps?: 24 | 30; objects: SceneObject[]; cameras: SceneCamera[]; shots: Shot[]; paths?: import('./motion-paths/model').MotionPath[]; look?:SceneLook }
+export interface ProjectContent { name: string; scenes: SceneDocument[]; assets?: AssetDefinition[]; scripts?: import('./scripts/model').ScriptDefinition[] }
 export interface StageOptions {
+  onPathOpen?(id: string): void;
+  onPathSelect?(index: number, part: import('./motion-paths/model').PathPart): void;
+  onPathChange?(id: string, index: number, phase: import('./motion-paths/editor').PathGesture): void;
   onFrame?(time: number): void;
   canEnterXR?(): boolean;
   onXRChange?(active: boolean): void;

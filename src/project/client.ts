@@ -1,5 +1,8 @@
+import type { Workspace } from './workspace';
 let active: { code: string; lease: string; page: string } | null = null;
-export function projectRequestContext(value: typeof active) { active = value; }
+let workspace: Workspace | undefined;
+export function activeWorkspace() { return workspace; }
+export function projectRequestContext(value: typeof active, owner?: Workspace) { active = value; workspace = owner; }
 export function projectDiagnosticId(id: string): string { return active ? active.code + ':' + id : id; }
 export function projectFetch(input: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);

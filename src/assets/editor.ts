@@ -19,6 +19,8 @@ interface Options {
   host: HTMLElement;
   onClose(): void;
   asset: AssetDefinition;
+  initialDraft?: string;
+  onDraftSave(state: AssetEditorState): Promise<void>;
   onSaved(asset: AssetDefinition): string;
 }
 export class AssetEditor {
@@ -29,6 +31,22 @@ export class AssetEditor {
   private stage!: AssetEditorStage;
   private state: AssetEditorState;
   private store: AssetDraftStore;
+  private readonly drafts = new Map<string, string>();
+  private draftSaving: Promise<void> = Promise.resolve();
+  private readonly draftStorage = {
+    getItem: (key: string) => this.drafts.get(key) ?? null,
+    removeItem: (key: string) => { this.drafts.delete(key); },
+    setItem: (key: string, raw: string) => {
+      if (this.drafts.get(key) === raw && !this.storageFailed) return;
+      this.drafts.set(key, raw);
+      const saving = this.options.onDraftSave(JSON.parse(raw)); this.draftSaving = saving;
+      void saving.then(() => { if (this.draftSaving === saving) this.storageFailed = false; }).catch(error => {
+        if (this.draftSaving !== saving) return;
+        this.storageFailed = true;
+        if (!this.closed) this.feedback('Draft has not reached the workspace. Keep this page open and retry. ' + (error as Error).message, true);
+      });
+    },
+  };
   private history: AssetDraft[] = [];
   private cursor = 0;
   private selected: string | null = null;
@@ -44,7 +62,8 @@ export class AssetEditor {
   private exportedState?: string;
   private componentTesting = false;
   constructor(private options: Options) {
-    this.store = new AssetDraftStore(localStorage, options.asset);
+    if (options.initialDraft) this.drafts.set(`littletake.asset-draft.${options.asset.id}`, options.initialDraft);
+    this.store = new AssetDraftStore(this.draftStorage, options.asset);
     this.state = this.store.read() ?? { base: structuredClone(options.asset), draft: draftFromAsset(options.asset), messages: [] };
     if (!this.state.proposal && JSON.stringify(this.state.draft) === JSON.stringify(draftFromAsset(this.state.base))) {
       this.state.base = structuredClone(options.asset); this.state.draft = draftFromAsset(options.asset);
@@ -81,7 +100,7 @@ export class AssetEditor {
       this.render(); this.queuePreview(); this.$('#assetInspectorTab').focus();
       const stale = JSON.stringify(this.state.base) !== JSON.stringify(options.asset);
       this.$('[data-ae="reload-base"]').hidden = !stale;
-      this.feedback(stale ? 'This prefab was updated elsewhere. Your draft is retained. Save it as a new prefab or discard it and reload.' : this.store.read() ? 'Local draft and asset conversation restored.' : 'Save updates the prefab and all linked instances, preserving their transforms and motion.');
+      this.feedback(stale ? 'This prefab was updated elsewhere. Your draft is retained. Save it as a new prefab or discard it and reload.' : this.store.read() ? 'Draft and asset conversation restored from the workspace.' : 'Save updates the prefab and all linked instances, preserving their transforms and motion.');
     } catch (error) { this.stage?.dispose(); this.restoreShell(); throw error; }
   }
   /** Reuse the existing shell. Scene DOM stays connected so its state and handlers survive. */
@@ -123,7 +142,7 @@ export class AssetEditor {
   private commit(draft: AssetDraft) {
     this.state.draft = assetDraft(draft); this.componentTesting = false;
     this.history = this.history.slice(0, this.cursor + 1); this.history.push(structuredClone(this.state.draft)); if (this.history.length > 60) this.history.shift(); this.cursor = this.history.length - 1;
-    this.stage.setDraft(this.current, this.selected); this.render(); this.queuePreview(); if (this.persist()) this.feedback('Draft saved · Scene unchanged');
+    this.stage.setDraft(this.current, this.selected); this.render(); this.queuePreview(); if (this.persist()) this.feedback('Draft updated · Scene unchanged');
   }
   private edit(edits: AssetEdit[]) {
     if (this.locked) return;
@@ -262,6 +281,8 @@ export class AssetEditor {
   private async askExpert() {
     if (this.locked) return; const prompt = this.$<HTMLTextAreaElement>('#assetExpertPrompt').value.trim(); if (!prompt) return;
     const history = this.state.messages.slice(-16).map(({role,text})=>({role,text})); this.state.messages.push({ role:'user',text:prompt }); if (!this.persist()) return;
+    this.busy = true; this.render();
+    try { await this.draftSaving; } catch { this.busy = false; if (!this.closed) this.render(); return; }
     this.$<HTMLTextAreaElement>('#assetExpertPrompt').value = ''; this.busy = true; this.controller = new AbortController(); this.stage.resetTests(); this.render(); this.feedback('The asset expert is working. The scene stays unchanged.');
     try {
       const response = await projectFetch('/api/assets', { method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ action:'expert',base:this.state.base,draft:this.state.draft,prompt,history }),signal:this.controller.signal });
@@ -293,7 +314,7 @@ export class AssetEditor {
       try { message = this.options.onSaved(asset); } catch (error) { message = (error as Error).message + ' The prefab is saved in the library.'; }
       if (copy) {
         this.store.save({...this.state,draft:draftFromAsset(base)});
-        this.store = new AssetDraftStore(localStorage,asset);
+        this.store = new AssetDraftStore(this.draftStorage,asset);
       }
       this.state = {base:asset,draft:draftFromAsset(asset),messages:this.state.messages};
       const persisted=this.persist();
@@ -324,9 +345,10 @@ export class AssetEditor {
     } catch (error) { this.feedback((error as Error).message,true); }
     finally { this.busy = false; if (!this.closed) this.render(); }
   }
-  private close() {
+  private async close() {
     if (this.busy && !this.controller) { this.feedback('Saving prefab. Please wait.'); return; }
-    this.controller?.abort(); if (!this.persist() && this.storageFailed && this.exportedState !== JSON.stringify(this.state)) return;
+    this.controller?.abort(); this.persist(); await this.draftSaving.catch(() => {});
+    if (this.closed || (this.storageFailed && this.exportedState !== JSON.stringify(this.state))) return;
     this.closed = true; clearTimeout(this.previewTimer); this.previewController?.abort(); if (this.previewUrl) URL.revokeObjectURL(this.previewUrl);
     this.stage.dispose(); this.restoreShell(); this.options.onClose(); if (this.returnFocus?.isConnected) this.returnFocus.focus({ preventScroll: true });
   }

@@ -12,11 +12,14 @@ import { worldMatrices } from '../../src/assets/toolkit/transforms.ts';
 import { inspectSpatial, solveSpatial } from '../../src/spatial/methods.ts';
 import { spatialOperationSchema, spatialQuerySchema } from '../../src/spatial/schema.ts';
 import { ReferenceTools, REFERENCE_TOOL_INSTRUCTIONS } from '../reference/sam/tools.ts';
+import { ScriptTools, scriptToolDefinitions } from '../scripts/tools.ts';
+import { SCRIPT_CONTRACT } from '../../src/scripts/contract.ts';
 
 const id = assetReferenceSchema.shape.id;
 const reference = z.strictObject({ assetId: id });
 const directorOperationSchema=z.union([
-  ...operationSchema.options.filter(schema=>!['instantiate_asset','set_asset'].includes(schema.shape.type.value)),
+  ...operationSchema.options.filter(schema=>!['instantiate_asset','set_asset','upsert_script'].includes(schema.shape.type.value)),
+  z.strictObject({type:z.literal('use_checked_script'),sceneId:id,checkId:z.string().min(1).max(64)}),
   z.strictObject({type:z.literal('set_asset'),sceneId:id,id,assetId:id}),
   z.strictObject({type:z.literal('place_asset'),sceneId:id,placementId:id}),
 ]);
@@ -65,6 +68,7 @@ export function budgetProvider(provider: AIProvider, limit = 12): AIProvider {
 }
 
 export class AssetTools {
+  private scripts:ScriptTools;
   private searches = new Map<string, Awaited<ReturnType<AssetLibrary['search']>>>();
   private readAssets = new Map<string, AssetDefinition>();
   private placements = new Map<string, SceneOperation>();
@@ -77,10 +81,11 @@ export class AssetTools {
   private inspectedScene?:{sceneId:string;operations:string;applyTime:number;shots:Set<string>};
   private scenePreviews=new Map<string,{sceneId:string;operations:string;applyTime:number;shots:Set<string>;plan:SceneOperation[]}>();
   private selectedScenePreviewId?:string;
-  constructor(private library: AssetLibrary, private project: ProjectContent, private provider: AIProvider, private diagnostic?: SceneEditDiagnostic,private onAsset?:(asset:AssetDefinition)=>void,private frameBounds?:ImageBounds,private referenceTools?:ReferenceTools) {}
+  constructor(private library: AssetLibrary, private project: ProjectContent, private provider: AIProvider, private diagnostic?: SceneEditDiagnostic,private onAsset?:(asset:AssetDefinition)=>void,private frameBounds?:ImageBounds,private referenceTools?:ReferenceTools) {this.scripts=new ScriptTools(project);}
   private reusableAsset(id:string){return this.readAssets.get(id)??this.project.assets?.find(asset=>asset.id===id&&this.project.scenes.some(scene=>scene.objects.some(object=>object.asset?.id===id)));}
 
   private async execute(name: string, raw: unknown, signal?: AbortSignal): Promise<{ result: unknown; image?: string }> {
+    if(this.scripts.handles(name))return this.scripts.execute(name,raw);
     if (this.referenceTools?.handles(name)) return this.referenceTools.execute(name, raw, signal);
     const key = name + JSON.stringify(raw);
     if (name!=='render_scene'&&this.cache.has(key)) return this.cache.get(key)!;
@@ -175,6 +180,7 @@ export class AssetTools {
     if(scenePreviewId){const inspected=this.scenePreviews.get(scenePreviewId);if(!inspected||plan.operations.length||plan.requestedViews.length)throw new Error('Choose an inspected scenePreviewId and return operations=[] and requestedViews=[]. A changed candidate requires render_scene first.');this.inspectedScene=inspected;this.selectedScenePreviewId=scenePreviewId;return {...plan,operations:structuredClone(inspected.plan)};}
     const effectiveAssets=new Map(this.project.scenes.flatMap(scene=>scene.objects.flatMap(object=>object.asset?[[scene.id+'\0'+object.id,object.asset.id] as const]:[])));
     return { ...plan, operations: plan.operations.map(operation => {
+      if(operation.type==='use_checked_script')return this.scripts.operation(operation.checkId,operation.sceneId);
       if(operation.type==='set_color'){const assetId=effectiveAssets.get(operation.sceneId+'\0'+operation.id);if(assetId&&!this.readAssets.has(assetId))throw new Error(`Read asset ${assetId} before changing this instance's appearance. Instance tint multiplies every part, including skin. Missing costume, headgear or held props require a compatible specialist variant; tint does not add them.`);}
       if(operation.type==='set_asset'){if(!('assetId' in operation))throw new Error('Use a read assetId, not replacement geometry.');const asset=this.readAssets.get(operation.assetId);if(!asset)throw new Error('Read or generate the replacement asset first.');effectiveAssets.set(operation.sceneId+'\0'+operation.id,asset.id);return {type:'set_asset' as const,sceneId:operation.sceneId,id:operation.id,asset:structuredClone(asset)};}
       if (operation.type !== 'place_asset') return operation;
@@ -193,7 +199,7 @@ export class AssetTools {
       request.signal?.throwIfAborted();
       const turn:NonNullable<SceneEditDiagnostic['toolTurns']>[number]={input:structuredClone(input),output:null};(this.diagnostic?.toolTurns??(this.diagnostic?this.diagnostic.toolTurns=[]:[])).push(turn);
       let response;
-      try{response=await this.provider.generateToolTurn!({ instructions: request.instructions + '\n' + ASSET_DIRECTOR_INSTRUCTIONS+(this.referenceTools?.available?'\n'+REFERENCE_TOOL_INSTRUCTIONS:''), input, tools:[...assetToolDefinitions,...(this.referenceTools?.available?this.referenceTools.definitions():[])], schema: request.schema, signal: request.signal,reasoningEffort:request.reasoningEffort,parallelCalls:true,onResponse:output=>{turn.output=output;} });turn.output??=response.output;}
+      try{response=await this.provider.generateToolTurn!({ instructions: request.instructions + '\n' + ASSET_DIRECTOR_INSTRUCTIONS+'\n'+SCRIPT_CONTRACT+(this.referenceTools?.available?'\n'+REFERENCE_TOOL_INSTRUCTIONS:''), input, tools:[...assetToolDefinitions,...scriptToolDefinitions,...(this.referenceTools?.available?this.referenceTools.definitions():[])], schema: request.schema, signal: request.signal,reasoningEffort:request.reasoningEffort,parallelCalls:true,onResponse:output=>{turn.output=output;} });turn.output??=response.output;}
       catch(error){turn.error={code:error instanceof AIError?error.code:'tool_turn_failed',message:error instanceof Error?error.message:'Tool turn failed.'};throw error;}
       input.push(...response.output);
       if (!response.calls.length) { request.onOutput?.(response.text); try { return JSON.parse(response.text); } catch { throw new AIError('invalid_response', 'Muse returned incomplete JSON after using its tools.'); } }

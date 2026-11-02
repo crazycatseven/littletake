@@ -2,19 +2,23 @@ import { z } from 'zod';
 import { Euler, MathUtils, Quaternion, Vector3 } from 'three';
 import type { Transform } from '../types.ts';
 import { applyTransformModifiers } from './transform.ts';
+import { scriptComponentSchema } from '../scripts/model.ts';
 
 export const componentSchema = z.discriminatedUnion('type', [
+  scriptComponentSchema,
   z.strictObject({ type: z.literal('movement'), enabled: z.boolean(), mode: z.enum(['walk', 'drive', 'free']), space: z.enum(['local', 'world']), speed: z.number().min(.1).max(20), turnSpeed: z.number().min(1).max(360) }),
   z.strictObject({ type: z.literal('hinge'), enabled: z.boolean(), speed: z.number().min(1).max(360) }),
   z.strictObject({ type: z.literal('pivot'), enabled: z.boolean(), offset: z.tuple([z.number().min(-1000).max(1000), z.number().min(-1000).max(1000), z.number().min(-1000).max(1000)]) }),
+  z.strictObject({ type: z.literal('followPath'), enabled: z.boolean(), pathId: z.string().max(64), progress: z.number().min(0).max(1), facing: z.boolean(), roll: z.number().min(-180).max(180) }),
 ]);
-export const componentsSchema = z.array(componentSchema).max(2)
+export const componentsSchema = z.array(componentSchema).max(3)
   .refine(items => new Set(items.map(c => c.type)).size === items.length, 'Each component can only be added once.')
-  .refine(items => items.filter(c => c.type !== 'pivot').length <= 1, 'Only one keyboard controller can be attached.');
+  .refine(items => items.filter(c => c.type === 'movement' || c.type === 'hinge' || c.type === 'script').length <= 1, 'Only one input controller can be attached.');
 export type ObjectComponent = z.infer<typeof componentSchema>;
 export const movement = (mode: 'walk'|'drive'|'free' = 'walk', speed = 1.7): ObjectComponent => ({ type: 'movement', enabled: true, mode, space: 'local', speed, turnSpeed: 90 });
 export const pivotOffset = (offset: [number,number,number] = [0,0,0]): ObjectComponent => ({type:'pivot',enabled:true,offset});
-export const inputController = (components: ObjectComponent[] = []) => components.find(c => c.type !== 'pivot' && c.enabled);
+export const followPath = (pathId = ''): ObjectComponent => ({type:'followPath',enabled:true,pathId,progress:0,facing:true,roll:0});
+export const inputController = (components: ObjectComponent[] = []) => components.find(c => (c.type === 'movement' || c.type === 'hinge' || c.type === 'script') && c.enabled);
 export interface ComponentField { key: string; label: string; options?: Record<string, string>; vector?: boolean; animatable?: boolean; min?: number; max?: number; step?: number; unit?: string }
 export interface ComponentScript {
   title: string; description: string; addable?: boolean; fields: ComponentField[]; actions: { id: string; label: string }[];
@@ -22,6 +26,8 @@ export interface ComponentScript {
   update?(component: ObjectComponent, pose: Transform, keys: Set<string>, dt: number, runtime: { velocity: number; yaw: number }): void;
 }
 export const componentScripts: Record<ObjectComponent['type'], ComponentScript> = {
+  script: { title:'Script Component', description:'A project controller written by you or Muse.',addable:false,fields:[],actions:[{id:'control',label:'Start Control'}],help:()=> 'Project script · keyboard and mouse input · recorded to property keys.' },
+  followPath: { title:'Follow Path', description:'Move along an editable 3D path using Progress keyframes.', fields:[], actions:[], help:()=> 'Animate Progress in the scene timeline. Edit the path to reshape the motion.' },
   movement: {
     title: 'Movement Controller', description: 'Walk, drive, or move objects with the keyboard.', actions: [{ id: 'control', label: 'Start Control' }],
     fields: [
@@ -69,6 +75,6 @@ export function updateComponents(components: ObjectComponent[] | undefined, pose
 
 export function componentAddReason(components: ObjectComponent[], type: ObjectComponent['type']): string {
   if (components.some(c => c.type === type)) return 'Added';
-  if (type !== 'pivot' && components.some(c => c.type !== 'pivot')) return 'Remove the current controller first';
+  if ((type === 'movement' || type === 'hinge' || type === 'script') && components.some(c => c.type === 'movement' || c.type === 'hinge' || c.type === 'script')) return 'Remove the current controller first';
   return '';
 }

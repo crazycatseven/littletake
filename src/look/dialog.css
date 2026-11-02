@@ -45,3 +45,12 @@
 .look-brief ol { margin:0; padding-left:16px; }
 @keyframes look-pulse { 50% { opacity:.55; } }
 @media(max-width:760px) { .look-layout { grid-template-columns:1fr; } }
+.look-handoffs { border-top:1px solid var(--line); margin-top:22px; padding-top:18px; }
+.look-handoffs h3 { margin:0 0 5px; font-size:14px; font-weight:550; }
+.look-handoffs p { color:var(--muted); font-size:11px; max-width:750px; }
+.look-handoff-actions,.look-handoff-row { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin:10px 0; font-size:11px; }
+.look-handoff-row { padding:9px 0; border-bottom:1px solid var(--line); }
+.look-handoff-row a { margin-right:auto; }
+.look-handoffs a { color:var(--accent); }
+.look-handoffs textarea { box-sizing:border-box; width:100%; min-height:95px; background:var(--field); color:var(--ink); border:1px solid var(--line); border-radius:var(--radius-control); padding:10px; font-family:inherit; font-size:11px; line-height:1.6; }
+.look-handoffs [hidden] { display:none; }

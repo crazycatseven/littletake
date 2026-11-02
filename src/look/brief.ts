@@ -3,6 +3,7 @@ import { evaluateFov, evaluateTransform } from '../model';
 import type { SceneDocument, SceneObject, Shot, Transform } from '../types';
 import { framedObjects } from './subjects';
 import { zipFiles } from './zip';
+import { videoManifestSchema } from './handoff';
 
 export interface VideoBrief { prompt: string; camera: string; beats: { at: number; action: string }[]; negative: string; model: string }
 /** A frame sent to the brief writer; `at` is seconds from the start of the shot. */
@@ -47,7 +48,7 @@ const bytesOf = (dataURL: string) => Uint8Array.from(atob(dataURL.slice(dataURL.
 const extensionOf = (dataURL: string) => ({ 'image/webp': 'webp', 'image/png': 'png', 'image/jpeg': 'jpg' } as Record<string, string>)[dataURL.slice(5, dataURL.indexOf(';'))] ?? 'bin';
 
 /** One folder per shot: brief, manifest, look and previs stills, and the previs animation when the browser can encode it. */
-export async function videoPackage(doc: SceneDocument, shot: Shot, brief: VideoBrief, direction: string, frames: { at: number; look?: string; previs: string }[], previs: Blob | null): Promise<Blob> {
+export async function videoPackage(doc: SceneDocument, shot: Shot, brief: VideoBrief, direction: string, frames: { at: number; look?: string; previs: string }[], previs: Blob | null, references: { image: string; role: 'style' | 'character' | 'scene'; label: string }[] = []): Promise<Blob> {
   const folder = (shot.name.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'shot') + '-video-package';
   const files: { name: string; data: Uint8Array }[] = [], listed: { file: string; at: number; kind: 'look' | 'previs' }[] = [];
   frames.forEach((frame, index) => {
@@ -56,15 +57,20 @@ export async function videoPackage(doc: SceneDocument, shot: Shot, brief: VideoB
       const file = `${kind}-${label}.${extensionOf(image)}`; files.push({ name: `${folder}/${file}`, data: bytesOf(image) }); listed.push({ file, at: frame.at, kind });
     }
   });
+  const referenceFiles = references.map((reference, index) => {
+    const file = `reference-${index + 1}.${extensionOf(reference.image)}`;
+    files.push({ name: `${folder}/${file}`, data: bytesOf(reference.image) });
+    return { file, role: reference.role, label: reference.label };
+  });
   if (previs) files.push({ name: `${folder}/previs.webm`, data: new Uint8Array(await previs.arrayBuffer()) });
-  const manifest = {
-    format: 'LittleTake.videoPackage', version: 1, scene: doc.name,
-    shot: { name: shot.name, sceneStart: shot.start, duration: shot.duration, fps: doc.fps ?? 24 },
+  const manifest = videoManifestSchema.parse({
+    format: 'LittleTake.videoPackage', version: 1, scene: doc.name, sceneId: doc.id, direction,
+    shot: { id: shot.id, name: shot.name, sceneStart: shot.start, duration: shot.duration, fps: doc.fps ?? 24 },
     brief: { prompt: brief.prompt, camera: brief.camera, beats: brief.beats, negative: brief.negative },
-    frames: listed, previs: previs ? 'previs.webm' : null,
+    frames: listed, references: referenceFiles, previs: previs ? 'previs.webm' : null,
     models: { brief: brief.model, look: listed.some(item => item.kind === 'look') ? 'muse-image-1.0' : null },
     usage: 'Give the first look frame as the start image and the prompt as text to an image-to-video model. previs.webm shows the intended blocking and camera timing.',
-  };
+  });
   files.unshift({ name: `${folder}/brief.md`, data: new TextEncoder().encode(briefMarkdown(shot, brief, direction)) }, { name: `${folder}/manifest.json`, data: new TextEncoder().encode(JSON.stringify(manifest, null, 2)) });
   return new Blob([zipFiles(files) as Uint8Array<ArrayBuffer>], { type: 'application/zip' });
 }

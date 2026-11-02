@@ -1,4 +1,5 @@
 import { bindParentingTree } from './placement/tree';
+import { Box3, Vector3 } from 'three';
 import { descendants, hierarchyRoots, localTransform, worldTransform, sceneEntities, effectivelyHidden } from './placement/hierarchy';
 import { XRKeyframeReader, deleteXRKeyframes } from './xr/timeline';
 import { XRRecording, type XRRecordAction } from './xr/recording';
@@ -21,6 +22,9 @@ import { bindComponents, componentInspector } from './components/inspector';
 import { inputController } from './components/model';
 import { applyTransformModifiers } from './components/transform';
 import { PerformanceSession } from './performance/session';
+import { prepareScripts } from './scripts/runtime';
+import { openScriptEditor } from './scripts/editor';
+import { scriptOnlyChange } from './scripts/operations';
 import { trackPoses, transformSchema } from './performance/motion';
 import { createObject, cloneDocument, evaluateComponents, evaluateFov, evaluateJointAngles, evaluateTransform, animationFor, ensureAnimation, parseDocument, serializeDocument, History, createEmptyScene, createCamera, createShot, addIndependentShot, shotCamera, MAX_CAMERAS, sceneEntity, validateDocument } from './model';
 import { emptyAnimation, evaluateProperty, frameAtTime, isJointProperty, jointProperty, keepRecordedTake, movePropertyKeys, duplicatePropertyKeys, propertyPaths, putKey, putTransformKeys, putVectorKeys, removePropertyKeys, retimeTake, setKeyInterpolation, timeAtFrame, type PropertyPath, type VectorProperty } from './animation/model';
@@ -33,10 +37,12 @@ import { DEFAULT_SCENE_LOOK, lookFields, sceneLookSchema } from './scene-edit/lo
 import { SceneEditPanel } from './scene-edit/panel';
 import { projectContent, serializeContent, validateProjectContent } from './project/model';
 import { applyProjectOperations } from './scene-edit/operations';
-import { sketchedCameraMove, sketchedPath, withCameraMove } from './spatial/sketch';
+import { sketchedCameraMove, withCameraMove } from './spatial/sketch';
+import { fitPath, pathCurve, pathSchema, pathMatrix, pathTransform, pathHandles, setPathHandle, setPathHandleMode, insertPathPoint, type MotionPath, type PathPart } from './motion-paths/model';
+import { pathInspector, followFields } from './motion-paths/panel';
 import './project/panel.css';
 import type { SceneSnapshot } from './scene-edit/operations';
-import { type ProjectDocument, ProjectStorage, createProject, parseProject, serializeProject, MAX_PROJECT_SIZE } from './project/storage';
+import { type ProjectDocument, createProject, parseProject, serializeProject, MAX_PROJECT_SIZE } from './project/storage';
 import { Workspace } from './project/workspace';
 import { MAX_ARCHIVE_BYTES } from './project/room';
 
@@ -60,6 +66,7 @@ const icons: Record<string, string> = {
   folder: '<path d="M3 6h7l2 3h9v12H3Z"/>',
   save: '<path d="M4 3h13l4 4v14H4ZM8 3v7h8V3M8 21v-7h9v7"/>',
   download: '<path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/>',
+  upload: '<path d="M12 16V4m-5 5 5-5 5 5M4 17v4h16v-4"/>',
   focus: '<path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/><circle cx="12" cy="12" r="3"/>',
   plus: '<path d="M12 4v16M4 12h16"/>',
   key: '<path d="m12 3 9 9-9 9-9-9 9-9Z"/>',
@@ -77,7 +84,7 @@ const app = $('#app');
 app.innerHTML = `
 <header class="app-header">
   <a class="brand" href="/" aria-label="LittleTake Studio"><span class="brand-mark">L</span><span>LittleTake</span></a>
-  <div class="project-title"><input id="projectName" aria-label="Project name" maxlength="120"/><span id="saveStatus" class="save-status">Local draft</span></div>
+  <div class="project-title"><input id="projectName" aria-label="Project name" maxlength="120"/></div>
   <div class="history-actions"><button class="icon-button" data-action="undo" aria-label="Undo" title="Undo · Ctrl Z">${icon('undo')}</button><button class="icon-button" data-action="redo" aria-label="Redo" title="Redo · Ctrl Shift Z">${icon('redo')}</button></div>
   <div class="header-actions"><button data-action="reference">${icon('camera')}<span>Video or sketch</span></button><button class="primary-button" data-action="export">${icon('download')}<span>Export project</span></button><details class="studio-menu" id="sceneMenu"><summary aria-label="Scene menu" title="Scene menu">${icon('more')}</summary><div class="menu-content"><button data-action="open">${icon('folder')}Open scene / project</button><button data-action="export-scene">${icon('download')}Export current scene</button><button data-action="top-view">${icon('eye')}Layout snapshot</button><button data-action="new-project">${icon('plus')}New project</button><button data-action="save">${icon('save')}Save locally<kbd>⌘ / Ctrl S</kbd></button><button data-action="shortcuts">${icon('help')}Keyboard shortcuts</button></div></details></div>
 </header>
@@ -113,11 +120,8 @@ app.innerHTML = `
 <dialog id="shortcutsDialog"><div class="dialog-heading"><h2>Keyboard shortcuts</h2><button data-action="close-shortcuts" aria-label="Close shortcuts">✕</button></div><p class="muted">Editor controls.</p><dl class="shortcut-list"><dt>Orbit / pan / zoom</dt><dd>Left drag / Middle drag / Scroll</dd><dt>Fly around the scene</dt><dd>Hold right mouse + W A S D · Q / E up & down</dd><dt>Asset drawer</dt><dd>B · configurable in the bottom bar</dd><dt>Object controls</dt><dd>W/S forward/back · A/D turn · R record · Esc exit</dd><dt>Move / rotate / scale</dt><dd>G / R / S</dd><dt>Constrain an axis</dt><dd>X / Y / Z</dd><dt>Box select / add to selection</dt><dd>Shift drag empty space / Ctrl Shift drag</dd><dt>Multi-select in Hierarchy</dt><dd>Ctrl click / Shift click a range</dd><dt>Drop to surface</dt><dd>Double-click the green Y move handle</dd><dt>View orientation</dt><dd>Click an axis / drag the upper-right gizmo</dd><dt>Focus selection</dt><dd>F</dd><dt>Insert property key</dt><dd>Hover or focus a property · I</dd><dt>Play / pause</dt><dd>Space</dd><dt>Duplicate / delete</dt><dd>Ctrl D / Delete</dd><dt>Undo / redo</dt><dd>Ctrl Z / Ctrl Shift Z</dd><dt>Save locally</dt><dd>Ctrl S</dd></dl><p class="dialog-note">Use Key Transform for a whole pose, or key an individual property and expand its axes in the timeline.</p></dialog>
 `;
 
-const projectStorage = new ProjectStorage({ getItem: key => localStorage.getItem(key), setItem: (key, value) => localStorage.setItem(key, value) });
-let project = createProject(), recovered = false, storageError = '';
+let project = createProject(null), storageError = '';
 let workspace: Workspace | undefined;
-try { const loaded = projectStorage.load(); project = loaded.project; recovered = loaded.recovered; }
-catch { storageError = 'The saved project could not be opened. Download saved data before opening a replacement.'; }
 const emptyView = createEmptyScene('empty-view', 'No scene');
 let doc: SceneDocument = project.scenes.find(scene => scene.id === project.activeSceneId) ?? emptyView;
 let history = new History<ProjectContent>(projectContent(project));
@@ -128,7 +132,6 @@ let axis: Axis | null = null;
 let time = 0;
 let playing = false;
 let lastFrame = performance.now();
-let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let statusTimer: ReturnType<typeof setTimeout> | undefined;
 let stage: Stage;
 let placementPanel: PlacementPanel | undefined;
@@ -144,6 +147,10 @@ let timelineOpen = false;
 let timelineHeight = window.innerHeight <= 720 ? 180 : 220;
 let autoKey = false, showAxisKeys = false, showAllSamples = false, animationZoom=1;
 let openProperties = new Set<PropertyGroup>(), selectedPropertyKey: SelectedPropertyKey | null = null;
+let selectedPathId:string|null=null,selectedPathPoint=-1,selectedPathPart:PathPart='point';
+const selectedMotionPath=()=>visibleScene().paths?.find(path=>path.id===selectedPathId);
+function openMotionPath(id:string,edit=false){const path=doc.paths?.find(p=>p.id===id);if(!path)return;pause();flushFieldEdit();(document.activeElement as HTMLElement)?.blur();selection.active=null;selectedPropertyKey=null;selectedPathId=id;selectedPathPoint=edit?0:-1;selectedPathPart='point';setSidePanel('inspector');renderAll();}
+function changePathPoint(index:number,phase:import('./motion-paths/editor').PathGesture){if(phase==='start'){pause();flushFieldEdit();return;}if(phase==='end'){changed(index<0?'Path transformed':'Path reshaped');return;}if(phase==='cancel'){syncStage();renderInspector();return;}syncStage();const path=selectedMotionPath();if(!path)return;const point=index<0?undefined:selectedPathPart==='point'?path.points[index]:pathHandles(path)[index][selectedPathPart];if(point)$('#inspector').querySelectorAll<HTMLInputElement>('[data-path-coordinate]').forEach(input=>{if(document.activeElement!==input)input.value=String(num(point[Number(input.dataset.pathCoordinate)]));});$('#inspector').querySelectorAll<HTMLInputElement>('[data-path-transform]').forEach(input=>{if(document.activeElement!==input)input.value=String(num(pathTransform(path)[input.dataset.pathTransform as keyof Transform][Number(input.dataset.pathAxis)]));});const mode=$<HTMLSelectElement>('#motionPathHandleMode');if(mode&&index>=0)mode.value=pathHandles(path)[index].mode;}
 let hoveredProperty: PropertyGroup | null = null;
 const unkeyed = new Map<string, {time:number;value:number}>();
 $('#animationFps').insertAdjacentHTML('afterend','<select id="animationZoom" aria-label="Timeline zoom"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select>');
@@ -176,15 +183,17 @@ function syncDocument(){
   time=clamp(time,0,doc.duration);
 }
 function replaceContent(next:ProjectContent,focus?:{sceneId:string|null;shotId:string|null}){
-  const content=updateAssetInstances(validateProjectContent(next),libraryAssets).project; if(!content.assets)delete project.assets;Object.assign(project,content);
+  const content=updateAssetInstances(validateProjectContent(next),libraryAssets).project; if(!content.assets)delete project.assets;if(!content.scripts)delete project.scripts;Object.assign(project,content);
   for(const key of unkeyed.keys()){const [sceneId,id]=key.split('|'),scene=project.scenes.find(item=>item.id===sceneId);if(!scene||!sceneEntity(scene,id))unkeyed.delete(key);}
   if(focus){project.activeSceneId=focus.sceneId;project.activeShotId=focus.shotId;}
   syncDocument();
 }
 function openProject(next:ProjectDocument){
+  performanceSession?.dispose();performanceSession=null;
+  stage?.cancelPath();
   pause();flushFieldEdit();sceneEditor?.session.cancel();referenceDialog.contextChanged();
   storageError='';$('#storageWarning').hidden=true;$('.workspace').inert=false;$('#timelinePanel').inert=false;$('.app-header').inert=false;
-  project=next;assetProjectToken=newId();selection.active=null;time=0;syncDocument();history=new History(projectContent(project));
+  project=next;assetProjectToken=newId();selection.active=null;selectedPathId=null;time=0;syncDocument();history=new History(projectContent(project));
   sceneEditor?.session.replaceBook(next.conversations);if(sceneEditor)project.conversations=sceneEditor.session.book;
   renderAll();persist();
   synchronizeAssets(libraryAssets);void assetsPanel?.refresh();
@@ -199,6 +208,8 @@ function synchronizeAssets(assets:AssetDefinition[]):number {
   syncDocument();renderAll();persist();return result.count;
 }
 function switchScene(id:string){
+  stage?.cancelPath();
+  selectedPathId=null;
   pause();flushFieldEdit();
   if(editPreview){previewSceneId=id;previewShotId=visibleScene().shots[0]?.id??null;selection.active=null;time=0;renderAll();return;}
   sceneEditor?.session.contextChanged();project.activeSceneId=id;project.activeShotId=project.scenes.find(scene=>scene.id===id)?.shots[0]?.id??null;selection.active=null;time=0;syncDocument();renderAll();persist();
@@ -272,13 +283,13 @@ function renderNavigation(){
 }
 function status(message: string) { $('#statusText').textContent = message; clearTimeout(statusTimer); statusTimer=setTimeout(()=>$('#statusText').textContent='Ready',5000); }
 function persist() {
-  clearTimeout(saveTimer);
   workspace?.save(project);
 }
-function changed(message?: string) { project.revision++;sceneEditor?.sceneChanged(); if(liveFieldEdit){pendingFieldDoc=structuredClone(projectContent(project));clearTimeout(fieldCommitTimer);fieldCommitTimer=setTimeout(flushFieldEdit,450);}else{flushFieldEdit();history.commit(projectContent(project));} renderAll(); if(!storageError)$('#saveStatus').textContent='Saving…'; clearTimeout(saveTimer); saveTimer=setTimeout(persist,350); if(message)status(message); }
+function changed(message?: string) { project.revision++;sceneEditor?.sceneChanged(); if(liveFieldEdit){pendingFieldDoc=structuredClone(projectContent(project));clearTimeout(fieldCommitTimer);fieldCommitTimer=setTimeout(flushFieldEdit,450);}else{flushFieldEdit();history.commit(projectContent(project));} renderAll(); persist(); if(message)status(message); }
 function pause() { const wasPlaying=playing; playing=false; renderTransport(); if(wasPlaying){renderInspector();syncStage();} }
 function select(id: string | null) { selectIds(id ? [id] : [], 'replace'); }
 function selectIds(ids: string[], mode: SelectionMode, range = false) {
+  selectedPathId=null;
   if(performanceSession)return;flushFieldEdit();
   const previous=selection.active;
   for(const id of ids){let node=sceneEntity(visibleScene(),id);while(node?.parentId){collapsedHierarchy.delete(visibleScene().id+'|'+node.parentId);node=sceneEntity(visibleScene(),node.parentId);}}
@@ -312,6 +323,7 @@ function currentDraft(item:SceneEntity,path:PropertyPath) {
 function propertyValue(item:SceneEntity,path:PropertyPath):number {
   const draft=currentDraft(item,path);if(draft)return draft.value;
   if(path==='fov')return 'fov' in item?evaluateFov(item,time):45;
+  if(path==='followPath.progress'){const follow='kind' in item?item.components?.find(c=>c.type==='followPath'):undefined;return evaluateProperty(item.animation,path,follow?.type==='followPath'?follow.progress:0,time);}
   if(isJointProperty(path))return 'kind' in item?evaluateJointAngles(item,time)[path.slice(12)]??0:0;
   const [group,axis]=path.split('.') as [VectorProperty,'x'|'y'|'z'],index='xyz'.indexOf(axis);
   if(group==='pivot') {
@@ -329,11 +341,12 @@ function displayedPose(item:SceneEntity):Transform {
 }
 function sceneWithDrafts(scene:SceneDocument):SceneDocument {
   const overlay=(item:SceneEntity):SceneEntity=>{
-    const paths=['position','rotation','scale','pivot'].flatMap(group=>propertyPaths(group as VectorProperty)).concat('fov', Object.keys(item.animation?.curves??{}).filter(isJointProperty));
+    const paths:PropertyPath[]=[...['position','rotation','scale','pivot'].flatMap(group=>propertyPaths(group as VectorProperty)),'fov','followPath.progress',...Object.keys(item.animation?.curves??{}).filter(isJointProperty)];
     if(!paths.some(path=>currentDraft(item,path)))return item;
     const copy=structuredClone(item);copy.transform=displayedPose(item);copy.track=null;delete copy.animation;
     if('fov' in copy && 'fov' in item)copy.fov=propertyValue(item,'fov');
     if('kind' in copy && 'kind' in item){copy.components=structuredClone(evaluateComponents(item,time));const pivot=copy.components?.find(component=>component.type==='pivot');if(pivot?.type==='pivot')pivot.offset=['x','y','z'].map(axis=>propertyValue(item,`pivot.${axis}` as PropertyPath)) as Transform['position'];if(item.asset){copy.jointAngles=evaluateJointAngles(item,time);for(const path of paths)if(isJointProperty(path))copy.jointAngles[path.slice(12)]=propertyValue(item,path);}}
+    if('kind' in copy){const follow=copy.components?.find(c=>c.type==='followPath');if(follow?.type==='followPath')follow.progress=propertyValue(item,'followPath.progress');}
     return copy;
   };
   return {...scene,objects:scene.objects.map(item=>overlay(item) as SceneObject),cameras:scene.cameras.map(item=>overlay(item) as typeof item)};
@@ -346,7 +359,7 @@ function editProperty(item:SceneEntity,path:PropertyPath,value:number):boolean {
   const [group,axis]=path.split('.') as [VectorProperty,'x'|'y'|'z'];const index='xyz'.indexOf(axis);
   if(autoKey||existing) {
     const next=ensureAnimation(item);
-    if(autoKey && path!=='fov' && !isJointProperty(path)){
+    if(autoKey && !scalarGroup(path as PropertyGroup) && path!=='fov' && !isJointProperty(path)){
       const values=propertyValues(item,group) as Transform['position'];values[index]=value;putVectorKeys(next,group,time,values);
       groupPaths(group).forEach(key=>{if(currentDraft(item,key))unkeyed.delete(draftId(item,key));});
     }else{
@@ -357,6 +370,7 @@ function editProperty(item:SceneEntity,path:PropertyPath,value:number):boolean {
   }
   if(!keys.length){
     if(path==='fov'&&'fov' in item)item.fov=value;
+    else if(path==='followPath.progress'&&'kind' in item){const follow=item.components?.find(c=>c.type==='followPath');if(follow?.type==='followPath')follow.progress=value;}
     else if(isJointProperty(path)&&'kind' in item)item.jointAngles={...item.jointAngles,[path.slice(12)]:value};
     else if(group==='pivot'&&'kind' in item){const pivot=item.components?.find(component=>component.type==='pivot');if(pivot?.type==='pivot')pivot.offset[index]=value;}
     else if(group!=='pivot')item.transform[group][index]=value;
@@ -384,9 +398,10 @@ function keyTransform(item:SceneEntity):void {
   selectedPropertyKey=null;changed('Transform keyed');
 }
 const xrKeyframes = new XRKeyframeReader();
-function syncStage() { const item=entity(), visibleDoc=sceneWithDrafts(visibleScene()),session=performanceSession;
+function syncStage() { const visibleDoc=sceneWithDrafts(visibleScene()),session=performanceSession;
+  stage?.setMotionPath(selectedMotionPath()??null,selectedPathPoint,!!workspace?.canEdit&&!editPreview&&!performanceSession&&!playing,selectedPathPart);
   if(xrRecording && xrRecording.mode!=='armed')visibleDoc.objects=visibleDoc.objects.map(object=>object.id===xrRecording!.before.id?{...object,track:null,animation:undefined,transform:xrRecording!.preview(time)}:object);
-  const component=inputController(session?.before.components);stage?.setControlled(session?{id:session.before.id,pose:session.preview(time),world:component?.type==='movement'&&component.space==='world'}:null);
+  const component=inputController(session?.before.components);stage?.setControlled(session?{id:session.before.id,pose:session.preview(time),joints:session.previewJoints(time),world:component?.type==='movement'&&component.space==='world'}:null);
   stage?.update(visibleDoc,Math.min(time,visibleDoc.duration),selection.ids,Boolean(editPreview) || !!session || playing, editPreview ? previewShotId : project.activeShotId,(editPreview??project).assets??[]); }
 function followTimelineShot(){
   const shot=shotAtTime(visibleScene(),time),id=shot?.id??null;
@@ -397,6 +412,7 @@ function followTimelineShot(){
 function seek(value: number) { time=clamp(value,0,visibleScene().duration);followTimelineShot(); renderTime(); syncStage(); if(!playing)renderInspector(); }
 function renderTransport() { document.querySelectorAll<HTMLButtonElement>('[data-action="play"]').forEach(button=>{button.innerHTML=icon(playing?'pause':'play');button.setAttribute('aria-label',playing?'Pause':'Play');button.classList.toggle('is-playing',playing);}); }
 function renderTime() {
+  const progress=$<HTMLInputElement>('#followPathProgress'),active=entity();if(progress&&active&&document.activeElement!==progress)progress.value=String(num(propertyValue(active,'followPath.progress')*100));
   const doc=visibleScene(), shot=activeShot();
   const camera=shotCamera(doc,shot?.id??null)??doc.cameras.find(item=>item.id===selection.active)??doc.cameras[0];
   $('#shotFrameStatus').textContent=shot?(time<shot.start||time>shot.start+shot.duration?'Outside shot range':camera?.name+' · 16:9'):camera?camera.name+' · Preview':'No camera';
@@ -414,11 +430,12 @@ function renderTime() {
 function renderSelection() {
   document.querySelectorAll<HTMLElement>('[data-select]').forEach(node=>{ const selected=selection.ids.includes(node.dataset.select!);node.classList.toggle('selected',selected);node.classList.toggle('active-selection',node.dataset.select===selection.active);node.setAttribute('aria-pressed',String(selected)); });
   const selected=selectedObjects(),visible=selected.filter(item=>!item.hidden),disabled=!!editPreview||!!performanceSession||!!storageError;
-  $('#selectionCount').textContent=selection.ids.length+' selected';
+  $('#selectionCount').textContent=(selection.ids.length+(selectedMotionPath()?1:0))+' selected';
   $<HTMLButtonElement>('[data-action="hide-selection"]').disabled=disabled||!visible.length;
   $<HTMLButtonElement>('[data-action="show-selection"]').disabled=disabled||!selected.some(item=>effectivelyHidden(doc,item.id));
-  $<HTMLButtonElement>('[data-action="ground"]').disabled=disabled||playing||!visible.length;
-  placementPanel?.update(visible.map(item=>item.name),disabled||playing);
+  const follows=visible.some(o=>o.components?.some(c=>c.type==='followPath'&&c.enabled&&c.pathId));
+  $<HTMLButtonElement>('[data-action="ground"]').disabled=disabled||playing||!visible.length||follows;
+  placementPanel?.update(visible.map(item=>item.name),disabled||playing||follows);
   document.querySelectorAll<HTMLElement>('[data-shot]').forEach(node=>{const active=node.dataset.shot===activeShot()?.id;node.classList.toggle('selected',active);node.setAttribute('aria-pressed',String(active));});
   document.querySelectorAll<HTMLElement>('[data-tool]').forEach(node=>{node.classList.toggle('active',node.dataset.tool===tool);node.setAttribute('aria-pressed',String(node.dataset.tool===tool));});
   document.querySelectorAll<HTMLElement>('[data-axis]').forEach(node=>{node.classList.toggle('active',node.dataset.axis===axis);node.setAttribute('aria-pressed',String(node.dataset.axis===axis));});
@@ -441,7 +458,7 @@ function setTimelineHeight(value: number) {
 }
 function saveTimelineHeight() {try{localStorage.setItem('littletake.timeline.height',String(timelineHeight));}catch{}}
 function renderOutliner() {
-  const scene=visibleScene(),nodes=sceneEntities(scene);$('#objectCount').textContent=String(scene.objects.length);
+  const scene=visibleScene(),nodes=sceneEntities(scene);$('#objectCount').textContent=String(scene.objects.length+(scene.paths?.length??0));
   const query=$<HTMLInputElement>('#hierarchySearch').value.trim().toLowerCase(),shown=new Set<string>();
   for(const item of nodes)if(!query||item.name.toLowerCase().includes(query)){let node:SceneEntity|undefined=item;while(node&&!shown.has(node.id)){shown.add(node.id);node=nodes.find(p=>p.id===node!.parentId);}}
   const row=(item:SceneEntity,depth:number):string=>{
@@ -450,7 +467,7 @@ function renderOutliner() {
     const select='<button class="object-row" data-tree-id="'+esc(item.id)+'" data-select="'+esc(item.id)+'" draggable="true" '+(object?'data-prefab-object="'+esc(item.id)+'" ':'')+'aria-label="Select '+esc(item.name)+'">'+icon(object?item.kind:'camera')+'<span>'+esc(item.name)+'</span>'+((item.track||item.animation)?'<span class="motion-dot" title="Animated"></span>':'')+'</button>';
     return '<div class="hierarchy-object '+(hidden?'is-hidden':'')+'" data-tree-id="'+esc(item.id)+'" style="padding-left:'+depth*14+'px"><button class="hierarchy-toggle" data-tree-toggle="'+esc(item.id)+'" aria-label="'+(closed?'Expand ':'Collapse ')+esc(item.name)+' children" '+(children.length?'aria-expanded="'+!closed+'"':'disabled')+'>'+(closed?'▸':'▾')+'</button>'+select+(object?'<button class="visibility-toggle" draggable="false" data-visibility-id="'+esc(item.id)+'" aria-label="'+(hidden?'Show ':'Hide ')+esc(item.name)+'" title="'+(hidden?'Show':'Hide')+' object; applies to selected objects when selected">'+icon(hidden?'hidden':'eye')+'</button>':'')+'</div>'+(!closed?children.map(child=>row(child,depth+1)).join(''):'');
   };
-  $('#outliner').innerHTML=scene.objects.filter(item=>!item.parentId).map(item=>row(item,0)).join('')+'<div class="outliner-heading">CAMERAS <button data-action="add-camera" aria-label="New camera">＋</button></div>'+scene.cameras.filter(item=>!item.parentId).map(item=>row(item,0)).join('')+'<div data-tree-root class="hierarchy-root-drop">Drop here to move to scene root</div>';
+  $('#outliner').innerHTML=scene.objects.filter(item=>!item.parentId).map(item=>row(item,0)).join('')+'<div class="outliner-heading">CAMERAS <button data-action="add-camera" aria-label="New camera">＋</button></div>'+scene.cameras.filter(item=>!item.parentId).map(item=>row(item,0)).join('')+'<div class="outliner-heading">PATHS <button data-action="create-motion-path" aria-label="Draw a new path">＋</button></div>'+(scene.paths??[]).filter(path=>!query||path.name.toLowerCase().includes(query)).map(path=>`<button class="motion-path-row ${path.id===selectedPathId?'selected':''}" data-path-open="${esc(path.id)}">⌁ ${esc(path.name)}</button>`).join('')+'<div data-tree-root class="hierarchy-root-drop">Drop here to move to scene root</div>';
   const hidden=scene.objects.filter(item=>effectivelyHidden(scene,item.id)).length;
   $('#visibilitySummary').textContent=hidden?'Show all · '+hidden+' hidden':'All objects visible';
   $<HTMLButtonElement>('#visibilitySummary').disabled=!hidden||!!editPreview||!!performanceSession;
@@ -513,6 +530,7 @@ function renderInspector() {
   if(!performanceSession && !editPreview && document.activeElement instanceof HTMLInputElement && $('#inspector').contains(document.activeElement)) return;
   const inspectedDoc=visibleScene(),item=sceneEntity(inspectedDoc,selection.active);
   $('#inspector').inert=Boolean(editPreview)||!workspace?.canEdit;
+  const path=selectedMotionPath();if(path){selectedPathPoint=Math.min(selectedPathPoint,path.points.length-1);$('#inspector').innerHTML=pathInspector(path,selectedPathPoint,playing||!!editPreview||!!performanceSession||!workspace?.canEdit,selectedPathPart);return;}
   if(selection.ids.length>1) {
     const items=inspectedDoc.objects.filter(item=>selection.ids.includes(item.id)),center=stage?.selectionCenter()??[0,0,0];
     const fields=(label:string,group:string,values:number[])=>'<div class="property-group"><label class="property-label">'+label+'</label><div class="vector-inputs">'+values.map((value,i)=>'<label class="vector-field"><span>'+['X','Y','Z'][i]+'</span><input type="number" aria-label="'+label+' '+['X','Y','Z'][i]+'" data-placement="'+group+'" data-index="'+i+'" step="'+(group==='rotation'?5:.1)+'" value="'+num(value)+'" '+(playing?'disabled':'')+'/></label>').join('')+'</div></div>';
@@ -521,6 +539,7 @@ function renderInspector() {
     const visible=items.filter(item=>!item.hidden).length;
     if(visible<items.length)$('#inspector').querySelector('.property-note')!.textContent='Transforms affect '+visible+' visible objects. Hidden objects keep their positions and motion.';
     if(!visible)$('#inspector').querySelectorAll<HTMLInputElement|HTMLButtonElement>('[data-placement],[data-action="ground"]').forEach(node=>node.disabled=true);
+    if(items.some(o=>o.components?.some(c=>c.type==='followPath'&&c.enabled&&c.pathId))){$('#inspector').querySelectorAll<HTMLInputElement|HTMLButtonElement>('[data-placement],[data-action="ground"]').forEach(node=>node.disabled=true);$('#inspector').querySelector('.property-note')!.textContent='Edit or disable Follow Path before moving this selection.';}
     return;
   }
   if(!item){$('#inspector').innerHTML=inspectedDoc===emptyView?'<div class="empty-inspector"><h3>No scene selected</h3><p>Open Assets / Scenes to create a scene.</p></div>':'<div class="inspector-title"><span class="entity-type">SCENE</span></div><h3>'+esc(inspectedDoc.name)+'</h3>'+lookFields(inspectedDoc.look??DEFAULT_SCENE_LOOK);return;}
@@ -532,14 +551,19 @@ function renderInspector() {
   const links=isCamera?'<div class="camera-shot-links">'+(linked.length?linked.map(shot=>'<button data-shot="'+esc(shot.id)+'">'+icon('camera')+esc(shot.name)+'</button>').join(''):'<button data-action="camera-shot">'+icon('plus')+'Create shot with this camera</button>')+'</div>'+(linked.length>1?'<p class="property-note">These '+linked.length+' shots share this camera’s framing and motion. Duplicate a shot for independent framing.</p>':''):'';
   const material='kind' in item?'<div class="inspector-section"><div class="section-label">MATERIAL</div><div class="color-palette">'+colors.map(color=>'<button class="color-swatch '+(item.color===color?'active':'')+'" style="--swatch:'+color+'" data-color="'+color+'" aria-label="Set color '+color+'"></button>').join('')+'<label class="custom-color" title="Custom color"><input type="color" aria-label="Custom object color" id="objectColor" value="'+item.color+'"/></label></div></div>':'';
   $('#inspector').innerHTML=title+links+('kind' in item?visibilityCard([item]):'')+transform+
-    ('kind' in item?componentInspector({...item,components:evaluateComponents(item,time)?.map(component=>component.type==='pivot'?{...component,offset:['x','y','z'].map(axis=>propertyValue(item,`pivot.${axis}` as PropertyPath)) as Transform['position']}:component)},Boolean(editPreview)||playing||!!performanceSession||!!item.hidden,performanceSession?.mode==='control',false,group=>keyButton(animationFor(item),group,time,locked),(group,index)=>componentAxisKey(item,group,index,locked)):'')+
+    ('kind' in item?componentInspector({...item,components:evaluateComponents(item,time)?.map(component=>component.type==='pivot'?{...component,offset:['x','y','z'].map(axis=>propertyValue(item,`pivot.${axis}` as PropertyPath)) as Transform['position']}:component)},Boolean(editPreview)||playing||!!performanceSession||!!item.hidden,performanceSession?.mode==='control'&&!editPreview,false,group=>keyButton(animationFor(item),group,time,locked),(group,index)=>componentAxisKey(item,group,index,locked),(editPreview??project).scripts??[]):'')+
     (isCamera?'<button class="add-motion camera-align" data-action="use-view">'+icon('eye')+'Use current scene view</button><button class="add-motion" data-action="draw-path" title="Drag across the floor; the camera travels it over its shot and keeps the framed subject in view" '+(locked||playing||!!performanceSession||!!editPreview?'disabled':'')+'>'+icon('camera')+'Draw camera move on floor</button>':'')+
-    ('kind' in item?'<button class="add-motion" data-action="draw-path" title="Drag across the floor; the object walks the line from the playhead" '+(locked||playing||!!performanceSession||!!item.hidden||!!editPreview?'disabled':'')+'>'+icon('move')+'Draw path on floor</button>':'')+
     jointFields(item,locked)+material+(shot?shotFields(shot,inspectedDoc):'');
   const excludedParents=descendants(sceneEntities(inspectedDoc),item.id);
   $('#entityName').insertAdjacentHTML('afterend','<label class="parent-field">Parent<select id="entityParent" aria-label="Parent object" '+(locked?'disabled':'')+'><option value="">Scene root</option>'+sceneEntities(inspectedDoc).filter(parent=>!excludedParents.has(parent.id)).map(parent=>'<option value="'+esc(parent.id)+'" '+(item.parentId===parent.id?'selected':'')+'>'+esc(parent.name)+'</option>').join('')+'</select></label>');
+  const follow='kind' in item?item.components?.find(c=>c.type==='followPath'):undefined;
+  if(follow?.type==='followPath')$('#inspector').querySelector('[data-component-card="followPath"] .component-fields')?.insertAdjacentHTML('afterbegin',followFields(inspectedDoc,follow.pathId,propertyValue(item,'followPath.progress'),follow.facing,follow.roll,keyButton(animationFor(item),'followPath.progress',time,locked),locked));
   renderPendingChanges(item);
-  if('kind' in item){$('#inspector').insertAdjacentHTML('beforeend','<button class="asset-save-button" data-action="save-asset">Create Independent Prefab…</button>');bindComponents($('#inspector'),item,()=>{(document.activeElement as HTMLElement)?.blur();if(item.animation&&!item.components?.some(component=>component.type==='pivot'))for(const path of propertyPaths('pivot'))delete item.animation.curves[path];changed('Component settings saved');},()=>performanceSession?exitPerformance():beginPerformance(),true);}
+  if(follow?.type==='followPath'&&follow.enabled&&follow.pathId){
+    $('#inspector').querySelectorAll<HTMLInputElement|HTMLButtonElement>('[data-pose="position"],[data-key-group="position"],[data-key-path^="position."],[data-action="key-transform"]'+(follow.facing?',[data-pose="rotation"],[data-key-group="rotation"],[data-key-path^="rotation."]':'')).forEach(input=>input.disabled=true);
+    $('#inspector').querySelector('.transform-key-actions')?.insertAdjacentHTML('afterend','<p class="property-note">Follow Path controls world position'+(follow.facing?' and facing':'')+'. Disable it to edit the base pose.</p>');
+  }
+  if('kind' in item){$('#inspector').insertAdjacentHTML('beforeend','<button class="asset-save-button" data-action="save-asset">Create Independent Prefab…</button>');bindComponents($('#inspector'),item,()=>{(document.activeElement as HTMLElement)?.blur();if(item.animation&&!item.components?.some(component=>component.type==='pivot'))for(const path of propertyPaths('pivot'))delete item.animation.curves[path];if(item.animation&&!item.components?.some(c=>c.type==='followPath'))delete item.animation.curves['followPath.progress'];changed('Component settings saved');},()=>performanceSession?exitPerformance():void beginPerformance(),true,project.scripts??[]);}
   if('asset' in item&&item.asset)$('#entityName').insertAdjacentHTML('afterend',`<button class="asset-instance-edit" data-action="edit-asset">◇ Edit Prefab</button>`);
   if(performanceSession){const button=$('#inspector').querySelector<HTMLElement>('[data-component-action]');if(button&&performanceSession.mode!=='control')button.textContent=performanceSession.mode==='record'?'Recording…':'Review Recording';}
   if(performanceSession)$('#inspector').querySelectorAll<HTMLInputElement|HTMLButtonElement>('.entity-name,[data-action],[data-color],#objectColor').forEach(node=>node.disabled=true);
@@ -555,6 +579,7 @@ function renderTimeline() {
   const groups:PropertyGroup[]=item?('fov' in item?['position','rotation','fov']:['position','rotation','scale',...(item.components?.some(component=>component.type==='pivot')?['pivot' as const]:[])]):[];
   const joints=item?instanceJoints(item):[],jointNames=Object.fromEntries(joints.map(part=>[jointProperty(part.id),jointLabel(part)]));
   groups.push(...joints.map(part=>jointProperty(part.id)));
+  if(item&&'kind' in item&&item.components?.some(c=>c.type==='followPath'))groups.unshift('followPath.progress');
   const pending=[...unkeyed.entries()].filter(([key])=>key.startsWith(`${doc.id}|`));
   const summary=item?esc(item.name):'Select an object or camera';
   $('#timelineRows').innerHTML='<div class="timeline-group">SHOTS <span>One camera · a range of scene time</span><button data-action="add-shot" aria-label="Add shot">'+icon('plus')+'New shot</button></div>'+shots+'<div class="timeline-group">PROPERTIES <span>'+summary+'</span>'+(pending.length?'<button data-action="review-draft">'+pending.length+' unkeyed change · Review</button>':'')+'</div>'+renderPropertyRows(animation,groups,openProperties,selectedPropertyKey,doc.duration,fps(),showAllSamples,jointNames);
@@ -565,12 +590,22 @@ function renderTimeline() {
   applyTimelineZoom();renderTime();
 }
 function renderAll() {
+  if(performanceSession){const item=doc.objects.find(o=>o.id===performanceSession!.before.id);if(item)performanceSession.refreshScripts(project.scripts??[],item);}
   renderNavigation();
   if(document.activeElement!==$('#projectName')) ($<HTMLInputElement>('#projectName')).value=project.name;
   ($<HTMLInputElement>('#duration')).value=String(visibleScene().duration);
   renderOutliner();renderTimeline();syncStage();renderInspector();renderSelection();renderTransport();renderTime();assetsPanel?.update(project.assets);renderPerformance();
 }
+function editProjectScripts(scriptId?:string){
+  if(!workspace?.canEdit||editPreview||assetEditor)return;ensureScene();const token=assetProjectToken,sceneId=doc.id;
+  performanceSession?.keys.clear();
+  openScriptEditor({project:()=>projectContent(project),sceneId,selectedId:selection.active??undefined,scriptId,save:(script,expectedRevision)=>{
+    if(token!==assetProjectToken||!workspace?.canEdit)throw new Error('The active project changed.');
+    replaceContent(applyProjectOperations(projectContent(project),[{type:'upsert_script',sceneId,script,expectedRevision}],time));changed('Script saved · Undo available');
+  }});
+}
 function duplicate() {
+  const path=selectedMotionPath();if(path&&workspace?.canEdit&&!editPreview&&!performanceSession&&!storageError){if((doc.paths?.length??0)>=100){status('Scene path limit reached.');return;}pause();flushFieldEdit();const copy=structuredClone(path);copy.id=nextId('path',[...sceneEntities(doc),...doc.shots,...doc.paths??[]]);copy.name=path.name.slice(0,110)+' copy';(doc.paths??=[]).push(copy);selectedPathId=copy.id;selectedPathPoint=-1;changed('Independent path duplicated');return;}
   if(!workspace?.canEdit||!selection.ids.length||editPreview||performanceSession||storageError)return;
   try{pause();flushFieldEdit();const result=duplicateHierarchy(doc,selection.ids,time);Object.assign(doc,result.scene);selection.set(result.ids);if(doc.cameras.some(camera=>result.ids.includes(camera.id)))project.activeShotId=null;changed('Selection and children duplicated');}catch(error){status((error as Error).message);}
 }
@@ -609,9 +644,13 @@ async function createObjectPrefab(source:HierarchyAssetSource,folder:string){
   }catch(error){status((error as Error).message);}
   finally{assetSaveBusy=false;}
 }
-function beginPerformance(){
+async function beginPerformance(record=false){
   const item=entity();if(!workspace?.canEdit||performanceSession||editPreview||!item||!('kind' in item)||effectivelyHidden(doc,item.id)||!inputController(item.components))return;
-  pause();flushFieldEdit();sceneEditor?.sceneChanged();performanceSession=new PerformanceSession(item,time,doc);assetsPanel?.setOpen(false);setSidePanel('inspector');renderAll();stage?.focusCanvas();status('Control active · R records · Esc keeps position and exits');
+  if(item.components?.some(c=>c.type==='followPath'&&c.enabled&&c.pathId)){status('Disable Follow Path before using keyboard controls.');return;}
+  const token=assetProjectToken;
+  try{if(inputController(item.components)?.type==='script')await prepareScripts();if(performanceSession||token!==assetProjectToken||entity()!==item||!workspace?.canEdit)return;
+    pause();flushFieldEdit();sceneEditor?.sceneChanged();performanceSession=new PerformanceSession(item,time,doc,project.scripts??[],project.assets??[]);assetsPanel?.setOpen(false);setSidePanel('inspector');renderAll();stage?.focusCanvas();status('Control active · R records · Esc keeps position and exits');if(record)startPerformanceRecord();
+  }catch(error){status('Controller could not start: '+(error as Error).message);}
 }
 function applyPlacement():boolean{
   if(!performanceSession)return false;
@@ -619,8 +658,8 @@ function applyPlacement():boolean{
   try{const next=performanceSession.placement();if(JSON.stringify(next)!==JSON.stringify(item)){Object.assign(item,next);changed('Placement saved · Entire motion path moved');}return true;}
   catch(error){status(`${error instanceof Error?error.message:'Placement could not be saved'} Use Discard Position to exit.`);return false;}
 }
-function exitPerformance(){if(!performanceSession)return;if(performanceSession.mode==='record'){stopPerformanceRecord();return;}if(performanceSession.mode==='review')return;if(!applyPlacement())return;performanceSession=null;pause();renderAll();persist();synchronizeAssets(libraryAssets);}
-function discardPosition(){if(!performanceSession||performanceSession.mode!=='control')return;performanceSession=null;pause();renderAll();persist();synchronizeAssets(libraryAssets);status('Positioning discarded');}
+function exitPerformance(){if(!performanceSession)return;if(performanceSession.mode==='record'){stopPerformanceRecord();return;}if(performanceSession.mode==='review')return;if(!applyPlacement())return;performanceSession.dispose();performanceSession=null;pause();renderAll();persist();synchronizeAssets(libraryAssets);}
+function discardPosition(){if(!performanceSession||performanceSession.mode!=='control')return;performanceSession.dispose();performanceSession=null;pause();renderAll();persist();synchronizeAssets(libraryAssets);status('Positioning discarded');}
 function startPerformanceRecord(){
   if(!performanceSession||performanceSession.mode!=='control')return;
   if(!applyPlacement())return;performanceSession.start(doc.duration);time=performanceSession.time;playing=false;setTimelineOpen(true);renderAll();stage?.focusCanvas();
@@ -630,35 +669,52 @@ function discardPerformance(retry=false){if(!performanceSession)return;playing=f
 function keepPerformance(){
   const session=performanceSession,item=session?entity(session.before.id):null;if(!session?.draft||!item)return;
   try{
-    const track=session.draft,frames=[{time:track.start,transform:track.from},...(track.samples??[]).map(sample=>({time:track.start+sample.at*track.duration,transform:sample.transform})),{time:track.start+track.duration,transform:track.to}];
+    const frames=session.recordedFrames;
     const current=animationFor(item)??emptyAnimation();let n=1;while(current.takes.some(take=>take.id===`take-${n}`))n++;
     item.animation=keepRecordedTake(current,`take-${n}`,frames,doc.duration);item.track=null;
-    performanceSession=null;playing=false;openProperties.clear();changed('Recording kept · Shared across shots · Undo available');persist();synchronizeAssets(libraryAssets);
+    session.dispose();performanceSession=null;playing=false;openProperties.clear();changed('Recording kept · Shared across shots · Undo available');persist();synchronizeAssets(libraryAssets);
   }catch(error){status((error as Error).message);}
 }
 function renderPerformance(){
   const session=performanceSession,active=!!session,bar=$('#performanceBar');bar.hidden=!active;
   $('.stage-panel').classList.toggle('performance-active',active);
-  $('#sceneAI').inert=active||!workspace?.canEdit;$('#timelineContent').inert=active;$('.library-panel').inert=active;$('.app-header').inert=active;
+  $('#sceneAI').inert=(active&&!session?.scriptRevision)||!workspace?.canEdit;$('#timelineContent').inert=active;$('.library-panel').inert=active;$('.app-header').inert=active;
   $<HTMLInputElement>('#duration').disabled=active||!!editPreview||doc===emptyView;$<HTMLSelectElement>('#shotSelect').disabled=active;
   $<HTMLInputElement>('#animationFrame').disabled=active||!!editPreview;$<HTMLSelectElement>('#animationFps').disabled=active||!!editPreview;$<HTMLButtonElement>('#autoKey').disabled=active||!!editPreview;
   document.querySelectorAll<HTMLButtonElement>('[data-action="add-shot"],[data-action="rewind"],[data-action="top-view"]').forEach(b=>b.disabled=active||doc===emptyView);
   document.querySelectorAll<HTMLButtonElement>('[data-action="play"]').forEach(b=>b.disabled=visibleScene()===emptyView||(!!session&&session.mode!=='review'));
   if(!session)return;
-  bar.dataset.mode=session.mode;
-  const header=`<div><strong>${session.mode==='record'?'● Recording':session.mode==='review'?'Review Take':'Positioning'} · ${esc(session.before.name)}</strong><small>${session.mode==='review'?session.draft!.duration.toFixed(1)+' s · Awaiting review':inputController(session.before.components)?.type==='hinge'?'W/S open/close · Camera stays fixed':'W/S move · A/D turn · Camera stays fixed'}</small></div>`;
+  bar.dataset.mode=session.mode;bar.dataset.scriptRevision=String(session.scriptRevision??'');
+  const control=inputController(session.before.components),help=control?.type==='script'?project.scripts?.find(s=>s.id===control.scriptId)?.controls:control?.type==='hinge'?'W/S open/close · Camera stays fixed':'W/S move · A/D turn · Camera stays fixed';
+  const header=`<div><strong>${session.mode==='record'?'● Recording':session.mode==='review'?'Review Take':'Positioning'} · ${esc(session.before.name)}</strong><small>${session.mode==='review'?session.draft!.duration.toFixed(1)+' s · Awaiting review':esc(help??'')}${session.scriptRevision?' · Running revision '+session.scriptRevision:''}</small></div>`;
   bar.innerHTML=header+(session.mode==='control'?'<button data-performance="record" class="primary-button">● Record <kbd>R</kbd></button><button data-performance="exit">Stop Control <kbd>Esc</kbd></button><button data-performance="discard-position">Discard Position</button>':session.mode==='record'?`<span id="performanceClock">${timecode(time)}</span><button data-performance="stop" class="record-button">■ Stop Recording</button>`:'<button data-performance="preview">▷ Play Take</button><button data-performance="retry">↻ Record Again</button><button data-performance="discard">Discard</button><button data-performance="keep" class="primary-button">✓ Keep Take</button>');
   bar.querySelectorAll<HTMLButtonElement>('[data-performance]').forEach(button=>button.onclick=()=>{
     switch(button.dataset.performance){case 'record':startPerformanceRecord();break;case 'exit':exitPerformance();break;case 'discard-position':discardPosition();break;case 'stop':stopPerformanceRecord();break;case 'preview':togglePlay();button.textContent=playing?'Ⅱ Pause':'▷ Play Take';break;case 'retry':discardPerformance(true);break;case 'discard':discardPerformance();break;case 'keep':keepPerformance();break;}
   });
 }
 function remove(){if(!selection.ids.length)return;try{const operations=hierarchyRoots(sceneEntities(doc),selection.ids).map(id=>({type:doc.objects.some(item=>item.id===id)?'remove_object' as const:'remove_camera' as const,sceneId:doc.id,id}));replaceContent(applyProjectOperations(projectContent(project),operations,time));changed('Selection removed');}catch(error){status((error as Error).message);}}
+
+function drawMotionRoute(existing?:MotionPath){
+  if(!stage||!workspace?.canEdit||editPreview||performanceSession||storageError)return;
+  if(stage.drawingPath){stage.cancelPath();return;}ensureScene();pause();flushFieldEdit();
+  const sceneId=doc.id,token=assetProjectToken,height=existing?pathCurve(existing).getPoint(0).y:0;
+  stage.pathView('top');stage.drawPath(stroke=>{
+    if(doc.id!==sceneId||token!==assetProjectToken)return;
+    try{let points=fitPath(stroke.map(([x,,z])=>[x,height,z]));if(points.length<2||pathCurve(points).getLength()<.1)throw new Error('Draw a longer route.');
+      const path:MotionPath=existing??{id:nextId('path',[...sceneEntities(doc),...doc.shots,...doc.paths??[]]),name:'Path '+((doc.paths?.length??0)+1),points};
+      if(existing){const inverse=pathMatrix(path).invert();points=points.map(p=>new Vector3(...p).applyMatrix4(inverse).toArray());}else{const center=new Box3().setFromPoints(points.map(p=>new Vector3(...p))).getCenter(new Vector3());path.transform={position:center.toArray(),rotation:[0,0,0],scale:[1,1,1]};points=points.map(p=>p.map((v,i)=>v-center.getComponent(i)) as Transform['position']);path.points=points;}
+      pathSchema.parse({...path,points,...(existing?{handles:undefined}:{})});
+      if(!existing){if((doc.paths?.length??0)>=100)throw new Error('Scene path limit reached.');(doc.paths??=[]).push(path);}else{path.points=points;delete path.handles;}
+      selection.active=null;selectedPathId=path.id;selectedPathPoint=0;selectedPathPart='point';setSidePanel('inspector');changed(`Independent path · ${points.length} control points · Add Follow Path to an object to use it`);
+    }catch(error){status((error as Error).message);}
+  },()=>status('Path drawing cancelled'));
+}
 function chooseTool(next:ToolMode){tool=next;stage?.setTool(tool);renderSelection();}
 function chooseAxis(next:Axis|null){axis=next;stage?.setAxis(axis);renderSelection();}
 function togglePlay(){if(playing)pause();else{const take=performanceSession?.draft,start=take?.start??0,end=take?take.start+take.duration:visibleScene().duration;if(time>=end-0.001||time<start)time=start;playing=true;followTimelineShot();lastFrame=performance.now();renderTransport();syncStage();}}
-function restore(next:ProjectContent|null){if(!next)return;pause();replaceContent(next);project.revision++;sceneEditor?.sceneChanged();renderAll();persist();}
+function restore(next:ProjectContent|null){if(!next)return;stage?.cancelPath();pause();replaceContent(next);project.revision++;sceneEditor?.sceneChanged();renderAll();persist();}
 function exportScene(){if(!project.activeSceneId){status('Add a scene before exporting it');return;}const portable=doc.objects.some(o=>o.asset)?{...createProject(doc),assets:project.assets?.filter(a=>doc.objects.some(o=>o.asset?.id===a.id))}:null;const blob=new Blob([portable?serializeProject(portable):serializeDocument(doc)],{type:'application/json'}),url=URL.createObjectURL(blob),anchor=document.createElement('a');anchor.href=url;anchor.download=`${doc.name.replace(/[^a-z0-9-_ ]/gi,'').trim()||'LittleTake'}.json`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('Scene exported');}
-function downloadProject(saved=false){if(!saved&&workspace?.room){void workspace.download().catch(error=>status((error as Error).message));return;}const text=saved?projectStorage.savedText():serializeProject(project);if(!text)return;const url=URL.createObjectURL(new Blob([text],{type:'application/json'})),anchor=document.createElement('a');anchor.href=url;anchor.download=saved?'LittleTake-recovery.json':`${project.name.replace(/[^a-z0-9-_ ]/gi,'').trim()||'LittleTake'}.project.json`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+function downloadProject(_saved=false){if(workspace?.room){void workspace.download().catch(error=>status((error as Error).message));return;}const text=serializeProject(project);const url=URL.createObjectURL(new Blob([text],{type:'application/json'})),anchor=document.createElement('a');anchor.href=url;anchor.download=`${project.name.replace(/[^a-z0-9-_ ]/gi,'').trim()||'LittleTake'}.project.json`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 
 syncDocument();
 const referenceDialog = new ReferenceDialog(draft => {
@@ -707,6 +763,7 @@ function xrTransform(id:string,pose:Transform,phase:TransformPhase):boolean {
 
 function editSelection(updates:PoseUpdate[],phase:TransformPhase,wholeMotion:TransformScope):boolean {
   if(editPreview||performanceSession||storageError||!workspace?.canEdit)return false;
+  if(phase==='start'&&updates.some(update=>doc.objects.find(o=>o.id===update.id)?.components?.some(c=>c.type==='followPath'&&c.enabled&&c.pathId))){status('Edit or disable Follow Path before transforming this object. Scale can be edited in the Inspector.');return false;}
   if(phase==='start'||phase==='change'){try{updates=updates.map(update=>({id:update.id,transform:localTransform(doc,update.id,update.transform,time)}));}catch(error){status((error as Error).message);return false;}}
   if(phase==='start'){
     flushFieldEdit();pause();
@@ -741,7 +798,7 @@ try {
   $('.viewport-heading .transform-tools').insertAdjacentHTML('afterend','<div id="placementTools"></div>');
   $('.stage-panel').insertAdjacentHTML('beforeend','<div id="hiddenCount" class="hidden-count" hidden></div>');
   $('.shot-heading h2').insertAdjacentHTML('afterend','<button class="shot-export-button" data-action="export-shot" title="Export the current shot as an image or video">'+icon('download')+'Export</button><button class="shot-export-button" data-action="look-frames" title="Render finished film stills of this shot with Muse Image">'+icon('camera')+'Look</button>');
-  stage=new Stage({viewport:$('#viewport'),preview:$('#preview'),onSelect:selectIds,onStatus:message=>$('#viewHint').textContent=message,onTransform:editSelection,
+  stage=new Stage({viewport:$('#viewport'),preview:$('#preview'),onSelect:selectIds,onStatus:message=>$('#viewHint').textContent=message,onTransform:editSelection,onPathOpen:id=>openMotionPath(id),onPathSelect:(index,part)=>{selectedPathPoint=index;selectedPathPart=part;renderInspector();syncStage();},onPathChange:(_id,index,phase)=>changePathPoint(index,phase),
     onFrame:tick,
     canEnterXR:()=>!assetEditor&&!editPreview&&!performanceSession&&!storageError&&!unkeyed.size&&!document.querySelector('dialog[open]'),
     onXRChange:active=>{
@@ -805,10 +862,10 @@ try {
 sceneEditor=new SceneEditPanel({
   root:$('#sceneAI'), book:project.conversations, context:()=>({project:projectContent(project),sceneId:project.activeSceneId,shotId:project.activeShotId,revision:project.revision,time,selectedId:selection.active,selectedIds:[...selection.ids]}), prepare:()=>{pause();flushFieldEdit();},
   changed:()=>persist(),clearSelection:()=>select(null),removeSelection:id=>selectIds(selection.ids.filter(selected=>selected!==id),'replace'),
-  focus:context=>{const scene=project.scenes.find(scene=>scene.id===context.sceneId);if((context.sceneId!==null&&!scene)||(context.shotId!==null&&!scene?.shots.some(shot=>shot.id===context.shotId))){status('The original scene or shot no longer exists. Choose a context and send a new message.');return false;}pause();flushFieldEdit();project.activeSceneId=context.sceneId;project.activeShotId=context.shotId;selection.set(context.selectedIds??(context.selectedId?[context.selectedId]:[]));syncDocument();time=clamp(context.time??0,0,doc.duration);renderAll();return true;},
+  focus:context=>{if(performanceSession){if(context.sceneId===doc.id&&context.selectedId===performanceSession.before.id)return true;status('Stop Control before switching scene context.');return false;}const scene=project.scenes.find(scene=>scene.id===context.sceneId);if((context.sceneId!==null&&!scene)||(context.shotId!==null&&!scene?.shots.some(shot=>shot.id===context.shotId))){status('The original scene or shot no longer exists. Choose a context and send a new message.');return false;}pause();flushFieldEdit();project.activeSceneId=context.sceneId;project.activeShotId=context.shotId;selection.set(context.selectedIds??(context.selectedId?[context.selectedId]:[]));syncDocument();time=clamp(context.time??0,0,doc.duration);renderAll();return true;},
   capture:(content,sceneId,shotId,frame,view)=>{const scene=content.scenes.find(item=>item.id===sceneId);if(!stage||!scene)throw new Error('Choose an existing scene before capturing a view.');return stage.captureSnapshot(scene,frame,view,shotId,content.assets??[]);},
-  preview:(next,focus)=>{if(!next&&!editPreview)return;editPreview=next;previewSceneId=focus?.sceneId??next?.scenes[0]?.id??null;const scene=next?.scenes.find(item=>item.id===previewSceneId);previewShotId=scene?.shots.find(item=>item.id===focus?.shotId)?.id??scene?.shots[0]?.id??null;$('#aiPreviewBadge').hidden=!next;if(!next&&!entity())selection.active=null;time=clamp(time,0,visibleScene().duration);pause();renderAll();},
-  apply:(next,base,focus)=>{if(serializeContent(projectContent(project))!==base)return false;replaceContent(next,focus);changed('Muse changes applied · Undo to restore');return true;},
+  preview:(next,focus)=>{if(!next&&!editPreview)return;if(next&&performanceSession&&!scriptOnlyChange(projectContent(project),next,doc.id,performanceSession.before.id)){status('Stop Control to review changes to the scene. Script-only updates can be applied during control.');return;}editPreview=next;previewSceneId=performanceSession?doc.id:focus?.sceneId??next?.scenes[0]?.id??null;const scene=next?.scenes.find(item=>item.id===previewSceneId);previewShotId=scene?.shots.find(item=>item.id===focus?.shotId)?.id??scene?.shots[0]?.id??null;$('#aiPreviewBadge').hidden=!next;if(!next&&!entity())selection.active=null;time=clamp(time,0,visibleScene().duration);pause();renderAll();},
+  apply:(next,base,focus)=>{if(serializeContent(projectContent(project))!==base)return false;if(performanceSession&&!scriptOnlyChange(projectContent(project),next,doc.id,performanceSession.before.id)){status('Stop Control before applying scene changes.');return false;}replaceContent(next,performanceSession?undefined:focus);changed('Muse changes applied · Undo to restore');return true;},
 });
 
 function captureTopView() {
@@ -830,19 +887,31 @@ app.addEventListener('click',event=>{
   if(target.dataset.keyGroup){const item=entity();if(item&&!editPreview&&!performanceSession){event.preventDefault();pause();try{keyProperty(item,target.dataset.keyGroup as PropertyGroup,true);}catch(error){status((error as Error).message);}}return;}
   if(target.dataset.keyPath){const item=entity(),path=target.dataset.keyPath as PropertyPath;if(item&&!editPreview&&!performanceSession){event.preventDefault();pause();try{const value=propertyValue(item,path),animation=ensureAnimation(item),existing=animation.curves[path]?.some(key=>Math.abs(key.time-time)<1e-6);if(existing&&!currentDraft(item,path))removePropertyKeys(animation,[path],time);else{const orientation=path.startsWith('rotation.')?displayedPose(item).rotation:undefined;putKey(animation,path,time,value,orientation);unkeyed.delete(draftId(item,path));}selectedPropertyKey=existing?null:{group:propertyGroup(path),path,time};changed('Axis key updated');}catch(error){status((error as Error).message);}}return;}
   if(target.dataset.animationToggle){const group=target.dataset.animationToggle as PropertyGroup;if(!scalarGroup(group)){openProperties.has(group)?openProperties.delete(group):openProperties.add(group);renderTimeline();renderTime();}return;}
-  if(performanceSession && !target.closest('#performanceBar,.control-component') && !['play','timeline'].includes(target.dataset.action??''))return;
+  if(performanceSession && !target.closest('#performanceBar,.control-component') && !(performanceSession.scriptRevision&&(target.closest('#sceneAI')||target.dataset.panel)) && !['play','timeline'].includes(target.dataset.action??''))return;
   target.closest<HTMLDetailsElement>('details.studio-menu')?.removeAttribute('open');
   if(target.dataset.library){setLibraryTab(target.dataset.library as 'objects'|'assets');return;}
+  if(target.dataset.pathOpen){openMotionPath(target.dataset.pathOpen,target.dataset.pathEdit==='true');return;}
+  if(target.dataset.pathPart){selectedPathPart=target.dataset.pathPart as PathPart;renderInspector();syncStage();return;}
+  if(target.dataset.pathView){stage?.pathView(target.dataset.pathView as 'top'|'side'|'perspective');return;}
   if(target.dataset.panel){setSidePanel(target.dataset.panel as 'muse'|'inspector');return;}
   if(target.dataset.shot){switchShot(target.dataset.shot);return;}
   if(target.dataset.select){const range=event.shiftKey&&!!target.closest('#outliner');selectIds([target.dataset.select],range?(event.ctrlKey||event.metaKey?'append':'replace'):(event.ctrlKey||event.metaKey||event.shiftKey?'toggle':'replace'),range);setSidePanel('inspector');return;}
   if(editPreview && !['focus','reset-view','play','rewind','top-view','refresh-snapshot','timeline','expand-preview','close-preview','close-snapshot','download-snapshot'].includes(target.dataset.action??''))return;
+  if(target.hasAttribute('data-script-manage')||target.dataset.scriptOpen){editProjectScripts(target.dataset.scriptOpen);return;}
+  if(target.dataset.scriptAttach){const item=entity();if(!workspace?.canEdit||performanceSession||!item||!('kind' in item))return;try{replaceContent(applyProjectOperations(projectContent(project),[{type:'attach_script',sceneId:doc.id,id:item.id,scriptId:target.dataset.scriptAttach,parameters:{},replaceController:false}],time));changed('Script attached · Start Control to try it');}catch(error){status((error as Error).message);}return;}
   if(target.dataset.visibilityId){const item=doc.objects.find(item=>item.id===target.dataset.visibilityId);if(item){const ids=selection.ids.includes(item.id)?selection.ids:[item.id];if(effectivelyHidden(doc,item.id))showHierarchy(ids);else setHidden(ids,true);}return;}
   if(target.dataset.tool){chooseTool(target.dataset.tool as ToolMode);return;}
   if(target.dataset.axis){chooseAxis(axis===target.dataset.axis?null:target.dataset.axis as Axis);return;}
   if(target.dataset.add){ensureScene();if(doc.objects.length>=100){status('This scene supports up to 100 objects');return;}pause();const item=createObject(target.dataset.add as Exclude<PrimitiveKind,'asset'>,nextObjectIndex());doc.objects.push(item);selection.active=item.id;time=0;setLibraryTab('objects');changed(`${item.name} added`);return;}
   if(target.dataset.color){const item=entity();if(item && 'color' in item){item.color=target.dataset.color;changed();}return;}
   switch(target.dataset.action){
+    case 'create-motion-path':drawMotionRoute();break;
+    case 'redraw-motion-path':{const path=selectedMotionPath();if(path)drawMotionRoute(path);break;}
+    case 'edit-motion-path':selectedPathPoint=0;selectedPathPart='point';renderAll();break;
+    case 'close-motion-path':selectedPathPoint=-1;selectedPathPart='point';renderAll();break;
+    case 'insert-path-point':{const path=selectedMotionPath();if(!path||path.points.length>=64)break;selectedPathPoint=insertPathPoint(path,selectedPathPoint);selectedPathPart='point';changed('Control point inserted · Curve preserved');break;}
+    case 'remove-path-point':{const path=selectedMotionPath();if(!path||path.points.length<=2)break;const points=path.points.filter((_,i)=>i!==selectedPathPoint);if(!points.some(p=>Math.hypot(...p.map((v,i)=>v-points[0][i]))>.001)){status('Keep at least two distinct points.');break;}path.points=points;if(path.handles)path.handles=path.handles.filter((_,i)=>i!==selectedPathPoint);selectedPathPoint=Math.min(selectedPathPoint,points.length-1);selectedPathPart='point';changed('Control point removed');break;}
+    case 'delete-motion-path':{const path=selectedMotionPath();if(!path)break;for(const object of doc.objects){const follow=object.components?.find(c=>c.type==='followPath'&&c.pathId===path.id);if(follow?.type==='followPath')follow.pathId='';}doc.paths=doc.paths?.filter(p=>p.id!==path.id);selectedPathId=null;changed('Path removed · Undo restores it');break;}
     case 'axis-keys':showAxisKeys=!showAxisKeys;renderInspector();break;
     case 'key-transform':{const item=entity();if(item){pause();try{keyTransform(item);}catch(error){status((error as Error).message);}}break;}
     case 'auto-key':autoKey=!autoKey;renderTime();break;
@@ -856,15 +925,13 @@ app.addEventListener('click',event=>{
     case 'look-frames':{const shot=activeShot();if(shot&&workspace){pause();flushFieldEdit();try{openLookFrames(stage.createShotRenderer(shot.cameraId),shot,time,workspace);}catch(error){status((error as Error).message);}}break;}
     case 'edit-asset':{const item=entity();if(item&&'asset' in item&&item.asset){const asset=project.assets?.find(a=>a.id===item.asset!.id);if(asset)openAssetEditor(asset);}break;}
     case 'save-asset':saveSelectionAsset();break;
-    case 'record-performance':beginPerformance();startPerformanceRecord();break;
+    case 'record-performance':void beginPerformance(true);break;
     case 'focus':stage?.focusSelection();break;
     case 'ground':pause();stage?.dropSelection();break;
-    case 'draw-path':{const item=entity();if(!stage||!item)break;if(stage.drawingPath){stage.cancelPath();break;}pause();flushFieldEdit();const sceneId=doc.id,id=item.id,isCamera='fov' in item;
+    case 'draw-path':{const item=entity();if(!stage||!item)break;if('kind' in item){drawMotionRoute();break;}if(stage.drawingPath){stage.cancelPath();break;}pause();flushFieldEdit();const sceneId=doc.id,id=item.id,isCamera='fov' in item;
       stage.drawPath(points=>{if(doc.id!==sceneId){status('Switch back to that scene to draw its path.');return;}
         try{
           if(isCamera){const camera=doc.cameras.find(c=>c.id===id);if(!camera)throw new Error('That camera is no longer in this scene.');const move=sketchedCameraMove(doc,camera,points,time,activeShot()??null);replaceContent(withCameraMove(projectContent(project),sceneId,id,move.track));changed(`Camera move set · ${move.length.toFixed(1)} m over ${move.duration.toFixed(1)} s from ${move.start.toFixed(1)} s · ${move.subject?'keeps '+move.subject.name+' in frame':'keeps its current aim'}`);return;}
-          const object=doc.objects.find(o=>o.id===id);if(!object)throw new Error('That object is no longer in this scene.');
-          const path=sketchedPath(doc,object,points,time);replaceContent(applyProjectOperations(projectContent(project),[path.operation],time));changed(`Path set · ${path.length.toFixed(1)} m in ${path.operation.duration.toFixed(1)} s from ${path.operation.start.toFixed(1)} s${path.fitted?' · sped up to finish with the scene':''}`);
         }catch(error){status((error as Error).message);}
       },()=>status('Path drawing cancelled'));break;}
     case 'reset-view':stage?.resetView();break;
@@ -875,7 +942,7 @@ app.addEventListener('click',event=>{
     case 'delete':remove();break;
     case 'play':togglePlay();break;
     case 'rewind':pause();seek(0);break;
-    case 'save':persist();void workspace?.flush().then(()=>status('Project saved on this computer')).catch(error=>status((error as Error).message));break;
+    case 'save':persist();void workspace?.flush().catch(error=>status((error as Error).message));break;
     case 'export':downloadProject();break;
     case 'export-scene':exportScene();break;
     case 'add-scene':addScene();break;
@@ -892,6 +959,7 @@ app.addEventListener('click',event=>{
     case 'project-results':void workspace?.showResults();break;
     case 'save-copy':void workspace?.saveCopy().catch(error=>status((error as Error).message));break;
     case 'retry-save':void workspace?.retry();break;
+    case 'upload-cloud':void workspace?.uploadToCloud().catch(error=>status((error as Error).message));break;
     case 'new-project':void workspace?.newProject();break;
     case 'export-project':downloadProject();break;
     case 'recover-storage':downloadProject(true);break;
@@ -915,9 +983,20 @@ document.addEventListener('pointerdown',event=>{document.querySelectorAll<HTMLDe
 $('.library-tabs').addEventListener('keydown',event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();setLibraryTab(libraryTab==='objects'?'assets':'objects');$<HTMLButtonElement>(`[data-library="${libraryTab}"]`).focus();}});
 $('.panel-tabs').addEventListener('keydown',event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();const next=$('#sceneAI').hidden?'muse':'inspector';setSidePanel(next);$<HTMLButtonElement>(`[data-panel="${next}"]`).focus();}});
 const onPropertyInput = (event: Event)=>{
+  const control=event.target as HTMLInputElement;
+  if(control.id==='motionPathPoint'){selectedPathPoint=Number(control.value);selectedPathPart='point';renderInspector();syncStage();return;}
+  if(control.id==='motionPathHandleMode'){if(event.type==='change'&&workspace?.canEdit&&!playing&&!editPreview&&!performanceSession){const path=selectedMotionPath();if(path&&selectedPathPoint>=0){setPathHandleMode(path,selectedPathPoint,control.value as 'auto'|'aligned'|'free');changed('Tangent mode updated');}}return;}
+  if(['followPathTarget','followPathFacing','followPathRoll'].includes(control.id)){
+    if(event.type!=='change'||!workspace?.canEdit||editPreview||performanceSession)return;const item=entity(),follow=item&&'kind' in item?item.components?.find(c=>c.type==='followPath'):undefined;if(follow?.type!=='followPath')return;
+    if(control.id==='followPathTarget')follow.pathId=control.value;else if(control.id==='followPathFacing')follow.facing=control.checked;else follow.roll=clamp(Number(control.value)||0,-180,180);changed('Follow Path updated');return;
+  }
   if(assetEditor)return;
   if((event.target as HTMLElement).id==='hierarchySearch')return;
   const input=event.target as HTMLInputElement;if(!(input instanceof HTMLInputElement)||input.type==='file'||editPreview||performanceSession)return;
+  if(input.id==='motionPathName'){const path=selectedMotionPath();if(path&&input.value.trim()){path.name=input.value.trim().slice(0,120);changed();}return;}
+  if(input.dataset.pathTransform){const path=selectedMotionPath(),value=Number(input.value),group=input.dataset.pathTransform as keyof Transform,axis=Number(input.dataset.pathAxis);if(path&&input.value!==''&&Number.isFinite(value)&&!playing){const pose=structuredClone(pathTransform(path));pose[group][axis]=clamp(value,group==='scale'?.01:group==='rotation'?-360000:-990,group==='scale'?100:group==='rotation'?360000:990);if(pathSchema.safeParse({...path,transform:pose}).success){path.transform=pose;changed();}}return;}
+  if(input.dataset.pathCoordinate!==undefined){const path=selectedMotionPath(),value=Number(input.value),axis=Number(input.dataset.pathCoordinate);if(path&&selectedPathPoint>=0&&input.value!==''&&Number.isFinite(value)&&!playing){if(selectedPathPart==='point'){const points=path.points.map((p,i)=>i===selectedPathPoint?p.map((v,n)=>n===axis?clamp(value,-990,990):v) as Transform['position']:p);if(pathSchema.safeParse({...path,points}).success){path.points=points;changed();}}else{const offset=[...pathHandles(path)[selectedPathPoint][selectedPathPart]] as Transform['position'];offset[axis]=clamp(value,-1980,1980);setPathHandle(path,selectedPathPoint,selectedPathPart,offset);const mode=$<HTMLSelectElement>('#motionPathHandleMode');if(mode)mode.value=pathHandles(path)[selectedPathPoint].mode;changed('Tangent updated');}}return;}
+  if(input.id==='followPathProgress'){const item=entity(),value=Number(input.value);if(item&&input.value!==''&&Number.isFinite(value)&&!playing){if(editProperty(item,'followPath.progress',clamp(value/100,0,1)))changed('Path progress updated');else{renderTimeline();renderTime();syncStage();}}return;}
   if(input.dataset.jointPath){
     const item=entity(),value=Number(input.value),path=input.dataset.jointPath;
     if(input.value!==''&&item&&'kind' in item&&!playing&&!item.hidden&&Number.isFinite(value)&&isJointProperty(path)){
@@ -940,7 +1019,7 @@ const onPropertyInput = (event: Event)=>{
   if(input.id==='shotName'&&activeShot()){activeShot()!.name=input.value.trim().slice(0,120)||'Untitled shot';changed();return;}
   if(input.id==='objectColor' && item && 'color' in item){item.color=input.value;changed();return;}
   if(!Number.isFinite(value)){renderAll();return;}
-  if(input.dataset.pose && item && !playing){const before=displayedPose(item),pose=copyPose(before),group=input.dataset.pose as keyof Transform,index=Number(input.dataset.component);pose[group][index]=group==='scale'?clamp(value,0.01,100):group==='position'?clamp(value,-1000,1000):clamp(value,-360000,360000);if('kind' in item)applyTransformModifiers(before,pose,evaluateComponents(item,time));let saved=false;for(const g of ['position','rotation','scale'] as const)for(const [i,axis] of ['x','y','z'].entries())if(Math.abs(before[g][i]-pose[g][i])>1e-8)saved=editProperty(item,`${g}.${axis}` as PropertyPath,pose[g][i])||saved;if(saved)changed();else{renderTimeline();renderTime();syncStage();}}
+  if(input.dataset.pose && item && !playing){const before=displayedPose(item),pose=copyPose(before),group=input.dataset.pose as keyof Transform,index=Number(input.dataset.component);pose[group][index]=group==='scale'?clamp(value,0.01,100):group==='position'?clamp(value,-1000,1000):clamp(value,-360000,360000);if('kind' in item&&!item.components?.some(c=>c.type==='followPath'&&c.enabled&&c.pathId))applyTransformModifiers(before,pose,evaluateComponents(item,time));let saved=false;for(const g of ['position','rotation','scale'] as const)for(const [i,axis] of ['x','y','z'].entries())if(Math.abs(before[g][i]-pose[g][i])>1e-8)saved=editProperty(item,`${g}.${axis}` as PropertyPath,pose[g][i])||saved;if(saved)changed();else{renderTimeline();renderTime();syncStage();}}
   if(input.id==='cameraFov'&&item&&'fov' in item){if(editProperty(item,'fov',clamp(value,10,120)))changed();else{renderTimeline();renderTime();syncStage();}}
   if(input.id==='duration'){pause();try{replaceContent(applyProjectOperations(projectContent(project),[{type:'set_duration',sceneId:doc.id,duration:clamp(value,1,60)}],time));changed('Scene duration updated · motion timing kept');}catch(error){status('Shorten existing shots and motion first. '+(error as Error).message);}return;}
   if((input.id==='shotStart'||input.id==='shotDuration')&&activeShot()){pause();const shot=activeShot()!;try{const next=applyProjectOperations(projectContent(project),[{type:'set_shot_range',sceneId:doc.id,id:shot.id,cameraId:shot.cameraId,start:input.id==='shotStart'?value:shot.start,duration:input.id==='shotDuration'?value:shot.duration}],time);replaceContent(next);changed('Shot range updated · scene motion unchanged');}catch(error){status((error as Error).message);}return;}
@@ -1053,7 +1132,7 @@ window.addEventListener('keydown',event=>{
   if(performanceSession){if(mod||event.altKey)return;event.preventDefault();if(key==='escape'&&!event.repeat){performanceSession.mode==='record'?stopPerformanceRecord():performanceSession.mode==='control'?exitPerformance():discardPerformance();return;}if(key==='r'&&!event.repeat){performanceSession.mode==='record'?stopPerformanceRecord():performanceSession.mode==='control'?startPerformanceRecord():undefined;return;}if(performanceSession.mode==='review'){if(key===' '&&!event.repeat)togglePlay();return;}if(['w','a','s','d','f','v','shift',' '].includes(key))performanceSession.keys.add(key);return;}
   if(mod&&key==='z'){event.preventDefault();flushFieldEdit();restore(event.shiftKey?history.redo():history.undo());return;}
   if(mod&&key==='y'){event.preventDefault();flushFieldEdit();restore(history.redo());return;}
-  if(mod&&key==='s'){event.preventDefault();persist();status('Scene saved on this device');return;}
+  if(mod&&key==='s'){event.preventDefault();persist();void workspace?.flush().catch(error=>status((error as Error).message));return;}
   if(mod&&key==='d'){event.preventDefault();if(selectedPropertyKey&&!$<HTMLButtonElement>('#duplicateKey').disabled)$<HTMLButtonElement>('#duplicateKey').click();else duplicate();return;}
   if(key==='h'&&!mod&&!event.repeat){event.preventDefault();setHidden(event.altKey?doc.objects.map(item=>item.id):selection.ids,!event.altKey);return;}
   if(mod&&key==='a'&&target.closest('#viewport,#outliner')){event.preventDefault();selectIds(doc.objects.map(item=>item.id),'replace');setSidePanel('inspector');return;}
@@ -1062,26 +1141,37 @@ window.addEventListener('keydown',event=>{
   if(key==='g'||key==='r'||key==='s'){event.preventDefault();chooseTool(key==='g'?'translate':key==='r'?'rotate':'scale');}
   if(key==='x'||key==='y'||key==='z')chooseAxis(axis===key.toUpperCase()?null:key.toUpperCase() as Axis);
   if(key==='f'){event.preventDefault();stage?.focusSelection();}
-  if(key==='delete'||key==='backspace'){event.preventDefault();if(selectedPropertyKey&&!$<HTMLButtonElement>('#deleteKey').disabled)$<HTMLButtonElement>('#deleteKey').click();else remove();}
+  if(key==='delete'||key==='backspace'){event.preventDefault();if(selectedMotionPath())$<HTMLButtonElement>(`[data-action="${selectedPathPoint<0?'delete-motion-path':'remove-path-point'}"]`).click();else if(selectedPropertyKey&&!$<HTMLButtonElement>('#deleteKey').disabled)$<HTMLButtonElement>('#deleteKey').click();else remove();}
   if(key==='escape'){chooseAxis(null);pause();document.querySelectorAll<HTMLDetailsElement>('details.studio-menu[open]').forEach(menu=>menu.open=false);}
 });
 window.addEventListener('keyup',event=>performanceSession?.keys.delete(event.code.startsWith('Key')?event.code.slice(3).toLowerCase():event.code==='Space'?' ':event.key.toLowerCase()));
+$('#viewport').addEventListener('pointermove',event=>{if(!performanceSession?.scriptRevision||performanceSession.mode==='review')return;performanceSession.mouse.buttons=event.buttons;if(event.buttons&1){const rect=$('#viewport').getBoundingClientRect();performanceSession.mouse.dx+=event.movementX/Math.max(1,rect.width);performanceSession.mouse.dy+=event.movementY/Math.max(1,rect.height);}},true);
+window.addEventListener('pointerup',()=>{if(performanceSession)performanceSession.mouse.buttons=0;});
+document.addEventListener('focusin',event=>{if((event.target as HTMLElement).matches('input,textarea,select,[contenteditable=true]'))performanceSession?.keys.clear();});
 window.addEventListener('blur',()=>{performanceSession?.keys.clear();if(performanceSession?.mode==='record')stopPerformanceRecord();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){performanceSession?.keys.clear();if(performanceSession?.mode==='record')stopPerformanceRecord();}});
-function tick(now:number){const delta=Math.min((now-lastFrame)/1000,0.05);lastFrame=now;if(xrRecording?.previewing){xrRecording.advance(delta);time=xrRecording.time;renderTime();syncStage();}if(performanceSession&&performanceSession.mode!=='review'){let stopped:boolean;try{stopped=performanceSession.update(delta,doc.duration);}catch(error){performanceSession=null;pause();renderAll();status((error as Error).message);requestAnimationFrame(tick);return;}time=performanceSession.time;renderTime();syncStage();$('#inspector').querySelectorAll<HTMLInputElement>('[data-pose]').forEach(input=>input.value=String(num(performanceSession!.pose[input.dataset.pose as keyof Transform][Number(input.dataset.component)])));if(stopped)renderAll();else if(performanceSession.mode==='record')$('#performanceClock').textContent=timecode(time);}
+function tick(now:number){const delta=Math.min((now-lastFrame)/1000,0.05);lastFrame=now;if(xrRecording?.previewing){xrRecording.advance(delta);time=xrRecording.time;renderTime();syncStage();}if(performanceSession&&performanceSession.mode!=='review'){let stopped:boolean;try{stopped=performanceSession.update(delta,doc.duration);}catch(error){const failed=performanceSession;if(failed.mode==='record')failed.stop();if(failed.mode!=='review'){failed.dispose();performanceSession=null;}pause();renderAll();status('Controller stopped: '+(error as Error).message);return;}time=performanceSession.time;renderTime();syncStage();$('#inspector').querySelectorAll<HTMLInputElement>('[data-pose]').forEach(input=>input.value=String(num(performanceSession!.pose[input.dataset.pose as keyof Transform][Number(input.dataset.component)])));if(stopped)renderAll();else if($('#performanceBar').dataset.scriptRevision!==String(performanceSession.scriptRevision??''))renderPerformance();else if(performanceSession.mode==='record')$('#performanceClock').textContent=timecode(time);if(performanceSession.scriptError)status(performanceSession.scriptError);}
 if(playing){const take=performanceSession?.draft,end=take?take.start+take.duration:visibleScene().duration;time=Math.min(time+delta,end);followTimelineShot();if(time>=end){pause();renderInspector();if(performanceSession?.mode==='review')renderPerformance();}renderTime();syncStage();}}
 window.addEventListener('pagehide',()=>{sceneEditor?.session.cancel('This response was interrupted. Retry when you are ready.');persist();});
 window.addEventListener('beforeunload',event=>{if(!storageAvailable||performanceSession||unkeyed.size){event.preventDefault();event.returnValue='';}});
-function openAssetEditor(asset:AssetDefinition) {
+async function openAssetEditor(asset:AssetDefinition) {
   if(assetEditor||editPreview||storageError||performanceSession||!workspace?.canEdit)return;
   pause();flushFieldEdit();assetsPanel?.setOpen(false);sceneEditor?.session.cancel('Asset editing opened. The scene conversation is retained.');
-  try{assetEditor=new AssetEditor({host:app,asset,onClose(){assetEditor=null;renderAll();void assetsPanel?.refresh();},onSaved(nextAsset){
+  try{
+    const owner=workspace,target=workspace.room!,draft=target.outputs.find(output=>output.kind==='asset-draft'&&output.sceneId===asset.id),initialDraft=draft?await owner.output(draft.id,target):undefined;
+    const draftText=initialDraft?await initialDraft.text():undefined;
+    if(workspace.room!==target||assetEditor)return;
+    const ids=new Map(target.outputs.filter(output=>output.kind==='asset-draft').map(output=>[output.sceneId,output.id]));
+    assetEditor=new AssetEditor({host:app,asset,...(draftText?{initialDraft:draftText}:{}),async onDraftSave(state){
+      const id=ids.get(state.base.id)??newId();ids.set(state.base.id,id);
+      await owner.putOutput({id,kind:'asset-draft',sceneId:state.base.id,shotId:'',name:state.base.name+' draft',mime:'application/json'},new Blob([JSON.stringify(state)],{type:'application/json'}),target);
+    },onClose(){assetEditor=null;renderAll();void assetsPanel?.refresh();},onSaved(nextAsset){
     const count=synchronizeAssets([...libraryAssets.filter(a=>a.id!==nextAsset.id),nextAsset]);
     void assetsPanel?.refresh();return count?`Updated ${count} linked instances in this project; transforms and motion retained.`:'Available in the asset library across projects.';
   }});}catch(error){status(error instanceof Error?error.message:'Could not open asset editor');}
 }
 window.addEventListener('focus',()=>{void assetsPanel?.refresh();});
-$('.header-actions').insertAdjacentHTML('afterbegin','<button data-action="projects">'+icon('folder')+'<span>Projects</span></button><button data-action="project-results">Results</button><button data-action="share-project" title="Project code and editing access">Share</button><span id="projectMode" class="project-mode" hidden></span>');
+$('.header-actions').insertAdjacentHTML('afterbegin','<button data-action="projects">'+icon('folder')+'<span>Projects</span></button><button data-action="project-results">Results</button><button data-action="share-project" title="Project code and editing access">Share</button><button class="icon-button" data-action="upload-cloud" title="Upload to cloud" aria-label="Upload to cloud" hidden>'+icon('upload')+'</button><span id="projectMode" class="project-mode" hidden></span>');
 $('#storageWarning').insertAdjacentHTML('beforeend','<button data-action="retry-save">Retry save</button><button data-action="save-copy">Save as new project</button>');
 workspace = new Workspace({
   project:()=>project,
@@ -1090,9 +1180,16 @@ workspace = new Workspace({
   beforeSwitch:()=>{flushFieldEdit();if(unkeyed.size||performanceSession||assetEditor){status('Finish the current edit or recording before switching projects');return false;}persist();return true;},
   result:(_output,data)=>{void data.text().then(text=>referenceDialog.restore(JSON.parse(text))).catch(error=>status((error as Error).message));},
   recoverBrowserSave:()=>downloadProject(true),
+  mode:info=>{
+    $('[data-action="upload-cloud"]').hidden=info.mode!=='local'||!info.cloudAvailable;
+    $('[data-action="save"]').innerHTML=icon('save')+'Save project<kbd>⌘ / Ctrl S</kbd>';
+  },
+  notice:status,
   state:(message,readOnly,problem)=>{
     const wasReadOnly=document.body.dataset.projectReadonly==='true';
-    $('#saveStatus').textContent=message;storageAvailable=!workspace?.hasUnsaved;
+    storageAvailable=!workspace?.hasUnsafeChanges;
+    $<HTMLButtonElement>('[data-action="upload-cloud"]').disabled=readOnly||!!workspace?.isUploading;
+    $('[data-action="upload-cloud"]').setAttribute('aria-busy',String(!!workspace?.isUploading));
     document.body.dataset.projectReadonly=String(readOnly);
     const badge=$('#projectMode');badge.hidden=!readOnly;badge.dataset.readonly=String(readOnly);badge.textContent='Viewing';
     $('#storageWarning').hidden=!problem;$('#storageWarning > span').textContent=message;
@@ -1112,7 +1209,7 @@ document.addEventListener('click',event=>{
 document.addEventListener('pointerdown',event=>{if(!workspace?.canEdit&&(event.target as HTMLElement).closest('[data-key],[data-clip],[data-shot-clip],.timeline-key')){event.preventDefault();event.stopImmediatePropagation();}},true);
 document.addEventListener('keydown',event=>{if(!workspace?.canEdit&&!(event.target as HTMLElement).closest('input,textarea,[contenteditable=true]')&&['delete','backspace','g','r','s','i','d'].includes(event.key.toLowerCase())){event.preventDefault();event.stopImmediatePropagation();}},true);
 function enforceViewing(){
-  $('#inspector').inert=!workspace?.canEdit||!!editPreview;$('#sceneAI').inert=!workspace?.canEdit||!!performanceSession;
+  $('#inspector').inert=!workspace?.canEdit||!!editPreview;$('#sceneAI').inert=!workspace?.canEdit||!!performanceSession&&!performanceSession.scriptRevision;
   document.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLSelectElement>('[data-viewer-disabled]').forEach(node=>{node.disabled=false;delete node.dataset.viewerDisabled;});
   if(workspace?.canEdit)return;
   const nodes=Array.from(document.querySelectorAll<HTMLButtonElement>('[data-action]')).filter(node=>!viewingActions.has(node.dataset.action!));
@@ -1120,4 +1217,4 @@ function enforceViewing(){
 }
 new MutationObserver(enforceViewing).observe(app,{childList:true,subtree:true});
 setTimelineHeight(timelineHeight);setTimelineOpen(timelineHeight>62);renderAll();void assetsPanel?.refresh();
-void workspace.start(recovered&&!storageError?project:null,storageError);
+void workspace.start();

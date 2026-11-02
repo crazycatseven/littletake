@@ -1,52 +1,37 @@
 import type { SceneEditInput } from './types.ts';
 import type { SceneEditDiagnostic } from './diagnostics.ts';
 import type { Conversation } from './conversations.ts';
-import { projectDiagnosticId } from '../project/client.ts';
+import { activeWorkspace, projectDiagnosticId } from '../project/client.ts';
+import type { ProjectRoom } from '../project/room.ts';
+import type { Workspace } from '../project/workspace.ts';
 
 export interface DiagnosticIdentity { turnId: string; conversationId: string; messageId: string }
 export interface RequestDiagnostic<T = SceneEditInput> extends DiagnosticIdentity {
   id: string; startedAt: string; finishedAt?: string; input: T;
   status: 'pending' | 'ready' | 'needs_views' | 'needs_reference_frames' | 'failed' | 'cancelled';
-  server?: SceneEditDiagnostic;result?:unknown;error?: string; unreadableResponse?: string;
+  server?: SceneEditDiagnostic; result?: unknown; error?: string; unreadableResponse?: string;
 }
-
-// Large request snapshots live separately from the small, frequently saved project document.
-function openDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open('littletake.diagnostics', 1);
-    request.onupgradeneeded = () => {
-      const records = request.result.createObjectStore('requests', { keyPath: 'id' });
-      records.createIndex('conversation', 'conversationId');
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(new Error('Could not open diagnostic storage.'));
-    request.onblocked = () => reject(new Error('Close other LittleTake tabs to open diagnostic storage.'));
-  });
-}
-
+const targets = new Map<string, { workspace: Workspace; room: ProjectRoom }>();
+const conversation = (value: string) => value.slice(value.indexOf(':') + 1);
+/** Large snapshots are project outputs on the running service, alongside media and results. */
 export async function saveDiagnostic<T>(record: RequestDiagnostic<T>): Promise<void> {
-  const database = await openDatabase();
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction('requests', 'readwrite');
-      transaction.objectStore('requests').put(structuredClone(record));
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = transaction.onabort = () => reject(new Error('Could not save the run diagnostic. Browser storage may be full.'));
-    });
-  } finally { database.close(); }
+  let target = targets.get(record.id);
+  if (!target) {
+    const workspace = activeWorkspace(), room = workspace?.room;
+    if (!workspace || !room) throw new Error('Open a project before starting an AI request.');
+    target = { workspace, room }; targets.set(record.id, target);
+  }
+  if (record.status === 'cancelled' && target.workspace.room?.id !== target.room.id) { targets.delete(record.id); return; }
+  await target.workspace.putOutput({ id: record.id, kind: 'diagnostic', sceneId: conversation(record.conversationId), shotId: '', name: 'AI request ' + record.startedAt, mime: 'application/json' }, new Blob([JSON.stringify(record)], { type: 'application/json' }), target.room);
+  if (record.finishedAt) targets.delete(record.id);
 }
-
 export async function readDiagnostics<T = SceneEditInput>(conversationId: string): Promise<RequestDiagnostic<T>[]> {
-  const database = await openDatabase();
-  try {
-    return await new Promise((resolve, reject) => {
-      const request = database.transaction('requests').objectStore('requests').index('conversation').getAll(conversationId);
-      request.onsuccess = () => resolve((request.result as RequestDiagnostic<T>[]).sort((a, b) => a.startedAt.localeCompare(b.startedAt)));
-      request.onerror = () => reject(new Error('Could not read the saved diagnostics.'));
-    });
-  } finally { database.close(); }
+  const workspace = activeWorkspace(), room = workspace?.room; if (!workspace || !room) return [];
+  const outputs = room.outputs.filter(output => output.kind === 'diagnostic' && output.sceneId === conversation(conversationId));
+  const requests: RequestDiagnostic<T>[] = [];
+  for (const output of outputs) requests.push(JSON.parse(await (await workspace.output(output.id, room)).text()));
+  return requests.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
 }
-
 export async function downloadDiagnostics(conversation: Conversation): Promise<number> {
   const savedConversation = structuredClone(conversation);
   const requests = await readDiagnostics(projectDiagnosticId(savedConversation.id));

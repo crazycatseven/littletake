@@ -36,7 +36,7 @@ export function instantiateAsset(asset:AssetDefinition,id:string,position:Vec3,d
   if(track){track.start=0;track.duration=Math.min(track.duration,duration);for(const pose of trackPoses(track))pose.position=pose.position.map((v,i)=>v+position[i]) as Vec3;}
   const animation=asset.template?.animation?structuredClone(asset.template.animation):undefined;
   if(animation){for(const [index,axis] of (['x','y','z'] as const).entries())for(const key of animation.curves[`position.${axis}`]??[])key.value+=position[index];validateAnimation(animation,duration);}
-  return {id,name:asset.name,kind:'asset',asset:{id:asset.id},color:'#ffffff',transform,track,...(animation?{animation}:{}),components:structuredClone(asset.template?.components??[]),...(asset.template?.jointAngles?{jointAngles:structuredClone(asset.template.jointAngles)}:{})};
+  return {id,name:asset.name,kind:'asset',asset:{id:asset.id},color:'#ffffff',transform,track,...(animation?{animation}:{}),components:structuredClone(asset.template?.components??[]).map(c=>c.type==='followPath'?{...c,pathId:''}:c),...(asset.template?.jointAngles?{jointAngles:structuredClone(asset.template.jointAngles)}:{})};
 }
 export function saveObjectAsset(object:SceneObject,assets:AssetDefinition[],id:string):AssetDefinition {
   const source=assets.find(a=>a.id===object.asset?.id);
@@ -50,7 +50,7 @@ export function saveObjectAsset(object:SceneObject,assets:AssetDefinition[],id:s
   const transform=structuredClone(object.transform),track=structuredClone(object.track),animation=object.animation?structuredClone(object.animation):undefined;
   if(track)for(const pose of trackPoses(track))pose.position=pose.position.map((v,i)=>v-transform.position[i]) as Vec3;
   if(animation)for(const [index,axis] of (['x','y','z'] as const).entries())for(const key of animation.curves[`position.${axis}`]??[])key.value-=transform.position[index];
-  transform.position=[0,0,0];asset.template={transform,components:structuredClone(object.components??[]),track,...(animation?{animation}: {}),...(object.jointAngles?{jointAngles:structuredClone(object.jointAngles)}:{})};return validateAsset(asset);
+  transform.position=[0,0,0];asset.template={transform,components:structuredClone(object.components??[]).filter(c=>c.type!=='script').map(c=>c.type==='followPath'?{...c,pathId:''}:c),track,...(animation?{animation}: {}),...(object.jointAngles?{jointAngles:structuredClone(object.jointAngles)}:{})};return validateAsset(asset);
 }
 
 /** Detach only this object from its previous prefab; other instances keep their original reference. */

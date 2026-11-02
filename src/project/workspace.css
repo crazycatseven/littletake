@@ -216,6 +216,49 @@
   font-size:11px;
   display:grid;
   gap:9px}
+.project-share-dialog .project-identity {
+  margin-top:14px}
+.project-cloud-dialog {
+  box-sizing:border-box;
+  width:min(620px,94vw);
+  max-height:85dvh;
+  overflow:auto;
+  padding:26px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:var(--paper);
+  color:var(--ink);
+  box-shadow:0 20px 80px #00000055}
+.project-cloud-dialog::backdrop {
+  background:#00000080;
+  backdrop-filter:blur(4px)}
+.project-cloud-dialog header {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:20px}
+.project-cloud-dialog h2 {font-size:23px;font-weight:500;margin:0}
+.project-cloud-dialog>p {font-size:13px;line-height:1.7;color:var(--muted)}
+.project-cloud-dialog button {
+  padding:10px 13px;
+  border:1px solid var(--line);
+  border-radius:6px;
+  background:transparent;
+  color:var(--ink);
+  font:inherit;
+  font-size:12px;
+  cursor:pointer}
+.project-cloud-dialog header button {border:0}
+.project-cloud-dialog button:disabled {opacity:.5;cursor:wait}
+.project-cloud-dialog button.primary-button {background:var(--selection)}
+.cloud-project-list {display:grid;gap:8px;max-height:55dvh;overflow:auto}
+.cloud-project-list>button {display:flex;align-items:center;justify-content:space-between;gap:20px;text-align:left;background:var(--surface-raised);padding:15px}
+.cloud-project-list>button:hover {border-color:var(--accent)}
+.cloud-project-list strong {display:block;font-size:14px;font-weight:500}
+.cloud-project-list small {display:block;font-size:11px;color:var(--muted);margin-top:6px}
+.cloud-project-actions {display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+[data-action=upload-cloud][hidden] {display:none}
+[data-action=upload-cloud][aria-busy=true] {opacity:.5;cursor:wait}
 .project-share-dialog input {
   width:100%;
   box-sizing:border-box;
