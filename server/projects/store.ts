@@ -3,7 +3,8 @@ import { mkdirSync, existsSync, readFileSync, writeFileSync, renameSync, unlinkS
 import path from 'node:path';
 import { backup, DatabaseSync } from 'node:sqlite';
 import { parseProject, serializeProject } from '../../src/project/storage.ts';
-import { EDIT_LEASE_MS, MAX_OUTPUT_BYTES, type ProjectRoom, type ProjectOutput } from '../../src/project/room.ts';
+import { EDIT_LEASE_MS, MAX_OUTPUT_BYTES, type ProjectRoom, type ProjectOutput, type ProjectSummary, type ProjectCover } from '../../src/project/room.ts';
+import { coverVisual, validateCover, type CoverAttachment } from '../../src/project/cover.ts';
 import type { HandoffReceipt, VideoManifest } from '../../src/look/handoff.ts';
 import type { ProjectBundle } from '../../src/project/archive.ts';
 
@@ -37,6 +38,10 @@ export class ProjectRoomStore {
         scene_id TEXT NOT NULL, shot_id TEXT NOT NULL, name TEXT NOT NULL, mime TEXT NOT NULL,
         updated_at INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY(project_id,id)
       );
+      CREATE TABLE IF NOT EXISTS project_covers (
+        project_id TEXT PRIMARY KEY REFERENCES projects(id), saved_version INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL, data BLOB NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS ai_calls (project_id TEXT NOT NULL,run_id TEXT NOT NULL,calls INTEGER NOT NULL,PRIMARY KEY(project_id,run_id));
       CREATE TABLE IF NOT EXISTS handoffs (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, token TEXT NOT NULL UNIQUE,
         scene_id TEXT NOT NULL, shot_id TEXT NOT NULL, name TEXT NOT NULL, created_at INTEGER NOT NULL, revoked_at INTEGER, archive BLOB NOT NULL);`);
@@ -61,7 +66,7 @@ export class ProjectRoomStore {
     return { id: row.id, code: row.code, project: JSON.parse(row.document), savedVersion: row.saved_version, contentVersion: row.content_version,
       ...(row.cloud_origin && row.cloud_version !== null ? { cloud: { origin: row.cloud_origin, version: row.cloud_version, localVersion: row.cloud_local_version ?? 0 } } : {}),
       updatedAt: row.updated_at, editing: occupied ? row.lease_token === lease && (!row.lease_page || row.lease_page === page) ? 'you' : 'occupied' : 'available',
-      leaseExpiresAt: occupied ? row.lease_until : null, outputs: this.outputs(row.id), handoffs: this.handoffs(row.id) };
+      leaseExpiresAt: occupied ? row.lease_until : null, outputs: this.outputs(row.id), handoffs: this.handoffs(row.id), cover: this.coverInfo(row.id) };
   }
   private requireEditor(row: Row, lease: string, page?: string) {
     if (row.lease_token !== lease || (row.lease_until ?? 0) <= this.now() || (row.lease_page && row.lease_page !== page))
@@ -71,7 +76,7 @@ export class ProjectRoomStore {
     try { return serializeProject(parseProject(JSON.stringify(value), false)); }
     catch { throw new ProjectRoomError('invalid_project', 'This project could not be validated. The saved project was not changed.', 400); }
   }
-  create(id: string, lease: string, value: unknown, sourceCode?: string, outputs: { output: ProjectOutput; data: Uint8Array }[] = [], page?: string): ProjectRoom {
+  create(id: string, lease: string, value: unknown, sourceCode?: string, outputs: { output: ProjectOutput; data: Uint8Array }[] = [], page?: string, cover?: CoverAttachment): ProjectRoom {
     const document = this.document(value);
     return this.transaction(() => {
       const existing = this.db.prepare('SELECT * FROM projects WHERE id=?').get(id) as unknown as Row | undefined;
@@ -86,7 +91,10 @@ export class ProjectRoomStore {
       if (sourceCode) {
         const source = this.row(sourceCode);
         this.db.prepare('INSERT INTO outputs SELECT ?,id,kind,scene_id,shot_id,name,mime,updated_at,data FROM outputs WHERE project_id=?').run(id, source.id);
+        const originalCover = this.coverAttachment(source);
+        if (!cover && originalCover) cover = { ...originalCover, current: originalCover.current && coverVisual(JSON.parse(source.document)) === coverVisual(JSON.parse(document)) };
       }
+      if (cover) this.writeCover(id, cover.current ? 1 : 0, cover.data);
       for (const { output, data } of outputs) {
         if (data.byteLength > MAX_OUTPUT_BYTES) throw new ProjectRoomError('output_too_large', 'This result is larger than 64 MB.', 413);
         this.db.prepare('INSERT INTO outputs VALUES(?,?,?,?,?,?,?,?,?)').run(id, output.id, output.kind, output.sceneId, output.shotId, output.name, output.mime, output.updatedAt, data);
@@ -100,9 +108,41 @@ export class ProjectRoomStore {
     if (!row) throw new ProjectRoomError('project_missing', 'This project is not in the workspace.', 404);
     return this.snapshot(row, lease, page);
   }
-  list(): { id: string; code: string; name: string; updatedAt: number; scenes: number; objects: number }[] {
-    return (this.db.prepare('SELECT id,code,document,updated_at FROM projects ORDER BY updated_at DESC,id').all() as unknown as { id: string; code: string; document: string; updated_at: number }[])
-      .map(row => { const project = JSON.parse(row.document); return { id: row.id, code: row.code, name: project.name, updatedAt: row.updated_at, scenes: project.scenes.length, objects: project.scenes.reduce((sum: number, scene: { objects: unknown[] }) => sum + scene.objects.length, 0) }; });
+  list(): ProjectSummary[] {
+    return (this.db.prepare('SELECT id,code,document,updated_at,saved_version FROM projects ORDER BY updated_at DESC,id').all() as unknown as Pick<Row, 'id' | 'code' | 'document' | 'updated_at' | 'saved_version'>[])
+      .map(row => { const project = JSON.parse(row.document); return { id: row.id, code: row.code, name: project.name, updatedAt: row.updated_at, savedVersion: row.saved_version, scenes: project.scenes.length, objects: project.scenes.reduce((sum: number, scene: { objects: unknown[] }) => sum + scene.objects.length, 0), cover: this.coverInfo(row.id) }; });
+  }
+  private coverInfo(id: string): ProjectCover | null {
+    const info = this.db.prepare('SELECT saved_version AS savedVersion,updated_at AS updatedAt,length(data)>0 AS hasImage FROM project_covers WHERE project_id=?').get(id);
+    return info ? { savedVersion: Number(info.savedVersion), updatedAt: Number(info.updatedAt), hasImage: Boolean(info.hasImage) } : null;
+  }
+  private coverAttachment(row: Row): CoverAttachment | undefined {
+    const cover = this.db.prepare('SELECT saved_version,data FROM project_covers WHERE project_id=?').get(row.id);
+    return cover ? { data: cover.data as Uint8Array, current: cover.saved_version === row.saved_version } : undefined;
+  }
+  private writeCover(id: string, version: number, data: Uint8Array): ProjectCover {
+    try { validateCover(data); } catch (error) { throw new ProjectRoomError('invalid_cover', (error as Error).message, 400); }
+    const updatedAt = Math.max(this.now(), (this.coverInfo(id)?.updatedAt ?? 0) + 1);
+    this.db.prepare('INSERT INTO project_covers VALUES(?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET saved_version=excluded.saved_version,updated_at=excluded.updated_at,data=excluded.data').run(id, version, updatedAt, data);
+    return { savedVersion: version, updatedAt, hasImage: data.length > 0 };
+  }
+  readCover(code: string): { cover: ProjectCover; data: Uint8Array } {
+    return this.transaction(() => {
+      const row = this.row(code), cover = this.coverInfo(row.id);
+      if (!cover) throw new ProjectRoomError('cover_missing', 'This project does not have a cover yet.', 404);
+      return { cover, data: this.db.prepare('SELECT data FROM project_covers WHERE project_id=?').get(row.id)!.data as Uint8Array };
+    });
+  }
+  saveCover(code: string, lease: string, version: number, data: Uint8Array, page?: string): { cover: ProjectCover; contentVersion: number } {
+    return this.transaction(() => {
+      const row = this.row(code); this.requireEditor(row, lease, page);
+      if (row.saved_version !== version) throw new ProjectRoomError('cover_stale', 'The project changed while its cover was being captured.');
+      const previous = this.coverInfo(row.id);
+      if (previous?.savedVersion === version) return { cover: previous, contentVersion: row.content_version };
+      const cover = this.writeCover(row.id, version, data);
+      this.db.prepare('UPDATE projects SET content_version=content_version+1 WHERE id=?').run(row.id);
+      return { cover, contentVersion: row.content_version + 1 };
+    });
   }
   private handoffs(projectId: string): HandoffReceipt[] {
     return this.db.prepare('SELECT id,token,scene_id AS sceneId,shot_id AS shotId,name,created_at AS createdAt,revoked_at AS revokedAt FROM handoffs WHERE project_id=? ORDER BY created_at DESC,rowid DESC').all(projectId) as unknown as HandoffReceipt[];
@@ -168,6 +208,8 @@ export class ProjectRoomStore {
       if (row.saved_version !== version) throw new ProjectRoomError('save_conflict', 'A newer project is already saved. Your changes have not replaced it.');
       this.db.prepare('UPDATE projects SET document=?,saved_version=saved_version+1,content_version=content_version+1,updated_at=?,lease_until=? WHERE id=?')
         .run(document, this.now(), this.now() + EDIT_LEASE_MS, row.id);
+      if (this.coverInfo(row.id)?.savedVersion === row.saved_version && coverVisual(JSON.parse(row.document)) === coverVisual(JSON.parse(document)))
+        this.db.prepare('UPDATE project_covers SET saved_version=? WHERE project_id=?').run(row.saved_version + 1, row.id);
       return this.get(code, lease, page);
     });
   }
@@ -195,7 +237,7 @@ export class ProjectRoomStore {
   bundle(id: string): ProjectBundle {
     return this.transaction(() => {
       const room = this.getById(id);
-      return { id: room.id, version: room.contentVersion, project: room.project,
+      return { id: room.id, version: room.contentVersion, project: room.project, cover: this.coverAttachment(this.row(room.code)),
         outputs: room.outputs.map(output => ({ output, data: this.db.prepare('SELECT data FROM outputs WHERE project_id=? AND id=?').get(id, output.id)!.data as Uint8Array })) };
     });
   }
@@ -205,9 +247,13 @@ export class ProjectRoomStore {
     this.db.prepare('UPDATE projects SET document=?,saved_version=saved_version+1,content_version=content_version+1,updated_at=? WHERE id=?').run(document, this.now(), row.id);
     this.db.prepare('DELETE FROM outputs WHERE project_id=?').run(row.id);
     for (const { output, data } of bundle.outputs) this.db.prepare('INSERT INTO outputs VALUES(?,?,?,?,?,?,?,?,?)').run(row.id, output.id, output.kind, output.sceneId, output.shotId, output.name, output.mime, output.updatedAt, data);
+    if (bundle.cover) this.writeCover(row.id, bundle.cover.current ? row.saved_version + 1 : 0, bundle.cover.data);
+    else this.db.prepare('DELETE FROM project_covers WHERE project_id=?').run(row.id);
   }
   private sameBundle(row: Row, bundle: ProjectBundle) {
     if (row.document !== this.document(bundle.project)) return false;
+    const cover = this.coverAttachment(row);
+    if (Boolean(cover) !== Boolean(bundle.cover) || (cover && bundle.cover && (cover.current !== bundle.cover.current || !Buffer.from(cover.data).equals(bundle.cover.data)))) return false;
     const outputs = this.outputs(row.id); if (outputs.length !== bundle.outputs.length) return false;
     return bundle.outputs.every(item => {
       const saved = outputs.find(output => output.id === item.output.id);
@@ -249,6 +295,7 @@ export class ProjectRoomStore {
           const id = randomUUID(); let code = roomCode(); while (this.db.prepare('SELECT 1 FROM projects WHERE code=?').get(code)) code = roomCode();
           this.db.prepare('INSERT INTO projects(id,code,document,saved_version,updated_at,creator_token) VALUES(?,?,?,?,?,?)').run(id, code, this.document(copy), 1, this.now(), lease);
           this.db.prepare('INSERT INTO outputs SELECT ?,id,kind,scene_id,shot_id,name,mime,updated_at,data FROM outputs WHERE project_id=?').run(id, row.id);
+          const cover = this.coverAttachment(row); if (cover) this.writeCover(id, cover.current ? 1 : 0, cover.data);
         }
         if ((!changed || conflict) && !this.sameBundle(row, bundle)) this.replaceBundle(row, bundle);
       } else {

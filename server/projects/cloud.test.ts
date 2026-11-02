@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { startApplication } from '../app/service.ts';
@@ -48,6 +48,8 @@ test('public cloud needs no login; local edits transfer only on upload and proje
   await value(await fetch(local.origin + '/api/projects?code=' + room.code + '&output=1', { method: 'POST', headers: { ...editor, 'x-littletake-output': encodeURIComponent(JSON.stringify(metadata)) }, body: bytes }));
   room.project.name = 'Edited locally';
   room = await value(await call(local.origin, '/api/projects?code=' + room.code, { action: 'save', savedVersion: room.savedVersion, project: room.project }, editor));
+  const coverImage = new Uint8Array(await readFile(new URL('./fixtures/cover.webp', import.meta.url)));
+  await value(await fetch(local.origin + `/api/projects?code=${room.code}&cover=1&version=${room.savedVersion}`, { method: 'POST', headers: { ...editor, 'Content-Type': 'image/webp' }, body: coverImage }));
   assert.equal(cloud.projects.list().length, 0, 'ordinary local saves never write to cloud');
   assert.deepEqual(await value(await call(local.origin, '/api/projects?workspace=1')), { mode: 'local', cloudAvailable: true });
   assert.deepEqual(await value(await call(cloud.origin, '/api/projects?workspace=1')), { mode: 'cloud', cloudAvailable: false });
@@ -55,6 +57,10 @@ test('public cloud needs no login; local edits transfer only on upload and proje
   assert.equal(cloud.projects.list().length, 1); assert.equal(cloud.projects.list()[0].id, id);
   assert.equal(uploaded.cloud!.origin, cloud.origin); assert.ok(uploaded.url.startsWith(cloud.origin));
   const remote = cloud.projects.getById(id);
+  const sharedCover = await fetch(cloud.origin + '/api/projects?cover=1&code=' + remote.code);
+  assert.equal(sharedCover.status, 200, 'another browser sees the uploaded cover without an editing seat');
+  assert.deepEqual(new Uint8Array(await sharedCover.arrayBuffer()), coverImage);
+  assert.equal(remote.cover!.savedVersion, remote.savedVersion);
   const joined = await value(await fetch(cloud.origin + '/api/projects?code=' + remote.code));
   assert.equal(joined.id, id, 'a project code opens without a login');
   const claimed = await value(await call(cloud.origin, '/api/projects?code=' + remote.code, { action: 'claim' }, { ...editor, Authorization: '' }));
@@ -68,11 +74,19 @@ test('public cloud needs no login; local edits transfer only on upload and proje
   assert.equal(cloud.projects.getById(id).contentVersion, previous, 'replayed uploads are idempotent');
   const list = await value<{ projects: { id: string }[] }>(await call(second.origin, '/api/cloud-projects'));
   assert.equal(list.projects[0].id, id); assert.ok(!JSON.stringify(list).includes(password));
-  const downloaded = await value(await call(second.origin, '/api/cloud-projects', { action: 'open', id }, other));
+  const galleryCover = await call(second.origin, '/api/cloud-projects?cover=1&code=' + remote.code);
+  assert.equal(galleryCover.status, 200); assert.deepEqual(new Uint8Array(await galleryCover.arrayBuffer()), coverImage);
+  assert.equal(second.projects.list().length, 0, 'browsing cloud cards and covers does not download projects');
+  const downloaded = await value(await call(second.origin, '/api/cloud-projects', { action: 'open', code: remote.code }, other));
   assert.equal(downloaded.id, id); assert.deepEqual(downloaded.project, remote.project);
   assert.deepEqual(second.projects.readOutput(downloaded.code, metadata.id).data, bytes);
+  assert.deepEqual(second.projects.readCover(downloaded.code).data, coverImage);
+  const coverUpdatedAt = downloaded.cover!.updatedAt;
   downloaded.project.name = 'Second local copy';
   await value(await call(second.origin, '/api/projects?code=' + downloaded.code, { action: 'save', savedVersion: downloaded.savedVersion, project: downloaded.project }, other));
+  const renamed = second.projects.getById(id);
+  assert.equal(renamed.cover!.updatedAt, coverUpdatedAt, 'renaming keeps the existing image');
+  assert.equal(renamed.cover!.savedVersion, renamed.savedVersion);
   assert.equal(cloud.projects.getById(id).project.name, 'Edited locally');
   await value(await call(second.origin, '/api/cloud-projects', { action: 'upload', id }, other));
   assert.equal(cloud.projects.getById(id).project.name, 'Second local copy');
@@ -80,9 +94,11 @@ test('public cloud needs no login; local edits transfer only on upload and proje
   assert.equal(local.projects.getById(id).cloud!.version, previous);
   const fresh = await value(await call(local.origin, '/api/cloud-projects', { action: 'open', id }, editor));
   assert.equal(fresh.id, id); assert.equal(fresh.project.name, 'Second local copy');
+  assert.deepEqual(local.projects.readCover(fresh.code).data, coverImage);
   const bundle = await readProjectArchive(await (await call(cloud.origin, '/api/projects?bundle=' + id)).blob(), false);
   assert.equal(bundle.id, id); assert.equal(bundle.version, cloud.projects.getById(id).contentVersion);
   assert.deepEqual(bundle.outputs[0].data, bytes);
+  assert.deepEqual(bundle.cover, { current: true, data: coverImage });
   const foreignOrigin = await call(local.origin, '/api/cloud-projects', { action: 'upload', id }, { ...editor, Origin: 'https://other.example' });
   assert.equal(foreignOrigin.status, 403);
 });
@@ -93,6 +109,8 @@ test('active editors and output-only cloud revisions block stale uploads; confli
   t.after(async () => { await local.close(); await cloud.close(); });
   const localSession = session(), cloudSession = session(), id = randomUUID();
   const room = await value(await call(local.origin, '/api/projects', { action: 'create', id, project: createProject() }, localSession), 201);
+  const coverImage = new Uint8Array(await readFile(new URL('./fixtures/cover.webp', import.meta.url)));
+  local.projects.saveCover(room.code, localSession['x-littletake-edit-lease'], room.savedVersion, coverImage, localSession['x-littletake-edit-page']);
   await value(await call(local.origin, '/api/cloud-projects', { action: 'upload', id }, localSession));
   const remote = cloud.projects.getById(id);
   room.project.name = 'Local change';
@@ -116,8 +134,24 @@ test('active editors and output-only cloud revisions block stale uploads; confli
   const duplicate = local.projects.list().find(item => item.id !== id)!;
   assert.equal(duplicate.name, 'Local change local copy');
   assert.deepEqual(local.projects.readOutput(duplicate.code, localOutput.id).data, data);
+  assert.deepEqual(local.projects.readCover(duplicate.code).data, coverImage, 'conflict recovery retains the local cover');
+  assert.deepEqual(local.projects.readCover(opened.code).data, coverImage, 'opening the cloud version retains its cover');
   assert.equal(local.projects.getById(duplicate.id).cloud, undefined, 'a recovered duplicate is independent');
   assert.equal(cloud.projects.list().length, 1, 'recovery does not mutate the cloud');
+  const cloudEditing = await value(await call(cloud.origin, '/api/projects?code=' + remote.code, { action: 'claim' }, cloudSession));
+  cloudEditing.project.name = 'Changed by a cloud editor';
+  await value(await call(cloud.origin, '/api/projects?code=' + remote.code, { action: 'save', savedVersion: cloudEditing.savedVersion, project: cloudEditing.project }, cloudSession));
+  opened.project.name = 'Manual replacement';
+  opened.project.scenes[0].objects[0].transform.position[0] = 7;
+  await value(await call(local.origin, '/api/projects?code=' + opened.code, { action: 'save', savedVersion: opened.savedVersion, project: opened.project }, localSession));
+  await error(await call(local.origin, '/api/cloud-projects', { action: 'upload', id, overwrite: true }, localSession), 'editor_present');
+  assert.equal(cloud.projects.getById(id).project.name, 'Changed by a cloud editor', 'manual replacement still respects an active cloud editor');
+  await value(await call(cloud.origin, '/api/projects?code=' + remote.code, { action: 'release' }, cloudSession));
+  await error(await call(local.origin, '/api/cloud-projects', { action: 'upload', id }, localSession), 'cloud_conflict');
+  await value(await call(local.origin, '/api/cloud-projects', { action: 'upload', id, overwrite: true }, localSession));
+  assert.equal(cloud.projects.getById(id).project.name, 'Manual replacement');
+  assert.equal(cloud.projects.getById(id).project.scenes[0].objects[0].transform.position[0], 7);
+  assert.equal(cloud.projects.list().length, 1, 'explicit replacement keeps the same cloud project ID');
 });
 
 test('upload baselines retain edits made during transfer, and versioned archives reject identity substitution', async t => {

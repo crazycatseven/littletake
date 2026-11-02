@@ -21,6 +21,8 @@ import type { Axis, PrimitiveKind, SceneDocument, SceneObject, StageOptions, Too
 import { SKETCH_STEP } from './spatial/sketch';
 import { PathEditor } from './motion-paths/editor';
 import type { MotionPath } from './motion-paths/model';
+import type { ProjectCoverFrame } from './project/room';
+import { COVER_WIDTH, COVER_HEIGHT } from './project/cover';
 
 const STROKE_LIMIT = 4096;
 
@@ -520,6 +522,29 @@ export class Stage {
       this.update(doc, time, [], true, shotId, assets);
       return renderSceneSnapshot(this.previewRenderer, this.scene, this.shotCamera, doc.objects.filter(item=>!effectivelyHidden(doc,item.id)).map(item => ({ id: item.id, name: item.name, root: this.views.get(item.id)!.root })), view, time, this.previewCameraId,measureVisible,frameBounds??doc.cameras.find(camera=>camera.id===this.previewCameraId)?.frameBounds);
     } finally { this.update(previous.doc, previous.time, previous.selected, previous.playing, previous.shotId,previous.assets); }
+  }
+
+  get canCaptureProjectCover(): boolean { return !this.disposed && !!this.currentDoc && !this.playing && !this.dragging && !this.controlled && !this.sketch && !this.presentingXR && this.flyPointer === null; }
+
+  captureProjectPreview({ scene: doc, shotId, assets }: ProjectCoverFrame): string | null {
+    if (!doc || !doc.objects.some(item => !effectivelyHidden(doc, item.id))) return null;
+    if (!this.canCaptureProjectCover || !this.currentDoc) throw new Error('The stage is not ready for a project preview.');
+    const previous = { doc: this.currentDoc, time: this.currentTime, selected: [...this.selectedIds], playing: this.playing, shotId: this.currentShotId, assets: this.currentAssets };
+    const time = doc.shots.find(shot => shot.id === shotId)?.start ?? 0;
+    try {
+      this.update(doc, time, [], true, shotId, assets);
+      const objects = doc.objects.filter(item => !effectivelyHidden(doc, item.id)).map(item => ({ id: item.id, name: item.name, root: this.views.get(item.id)!.root }));
+      const camera = this.shotCamera.clone(); camera.aspect = 16 / 9;
+      if (!this.previewCameraId) {
+        const bounds = new THREE.Box3(); objects.forEach(item => bounds.expandByObject(item.root));
+        const center = bounds.getCenter(new THREE.Vector3()), radius = Math.max(.5, bounds.getBoundingSphere(new THREE.Sphere()).radius);
+        camera.fov = 40; const distance = radius * 1.15 / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2));
+        camera.position.copy(center).addScaledVector(new THREE.Vector3(1, .65, 1.25).normalize(), distance);
+        camera.lookAt(center); camera.far = Math.max(500, distance + radius * 2);
+      }
+      camera.updateProjectionMatrix();
+      return renderSceneSnapshot(this.previewRenderer, this.scene, camera, objects, 'shot', time, this.previewCameraId, false, doc.cameras.find(item => item.id === this.previewCameraId)?.frameBounds, { width: COVER_WIDTH, height: COVER_HEIGHT, type: 'image/webp', quality: .82 }).dataUrl;
+    } finally { this.update(previous.doc, previous.time, previous.selected, previous.playing, previous.shotId, previous.assets); }
   }
 
   createShotRenderer(cameraId: string): ShotRenderer {

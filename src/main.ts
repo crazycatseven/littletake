@@ -942,7 +942,7 @@ app.addEventListener('click',event=>{
     case 'delete':remove();break;
     case 'play':togglePlay();break;
     case 'rewind':pause();seek(0);break;
-    case 'save':persist();void workspace?.flush().catch(error=>status((error as Error).message));break;
+    case 'save':persist();void workspace?.saveNow().catch(error=>status((error as Error).message));break;
     case 'export':downloadProject();break;
     case 'export-scene':exportScene();break;
     case 'add-scene':addScene();break;
@@ -1132,7 +1132,7 @@ window.addEventListener('keydown',event=>{
   if(performanceSession){if(mod||event.altKey)return;event.preventDefault();if(key==='escape'&&!event.repeat){performanceSession.mode==='record'?stopPerformanceRecord():performanceSession.mode==='control'?exitPerformance():discardPerformance();return;}if(key==='r'&&!event.repeat){performanceSession.mode==='record'?stopPerformanceRecord():performanceSession.mode==='control'?startPerformanceRecord():undefined;return;}if(performanceSession.mode==='review'){if(key===' '&&!event.repeat)togglePlay();return;}if(['w','a','s','d','f','v','shift',' '].includes(key))performanceSession.keys.add(key);return;}
   if(mod&&key==='z'){event.preventDefault();flushFieldEdit();restore(event.shiftKey?history.redo():history.undo());return;}
   if(mod&&key==='y'){event.preventDefault();flushFieldEdit();restore(history.redo());return;}
-  if(mod&&key==='s'){event.preventDefault();persist();void workspace?.flush().catch(error=>status((error as Error).message));return;}
+  if(mod&&key==='s'){event.preventDefault();persist();void workspace?.saveNow().catch(error=>status((error as Error).message));return;}
   if(mod&&key==='d'){event.preventDefault();if(selectedPropertyKey&&!$<HTMLButtonElement>('#duplicateKey').disabled)$<HTMLButtonElement>('#duplicateKey').click();else duplicate();return;}
   if(key==='h'&&!mod&&!event.repeat){event.preventDefault();setHidden(event.altKey?doc.objects.map(item=>item.id):selection.ids,!event.altKey);return;}
   if(mod&&key==='a'&&target.closest('#viewport,#outliner')){event.preventDefault();selectIds(doc.objects.map(item=>item.id),'replace');setSidePanel('inspector');return;}
@@ -1175,6 +1175,8 @@ $('.header-actions').insertAdjacentHTML('afterbegin','<button data-action="proje
 $('#storageWarning').insertAdjacentHTML('beforeend','<button data-action="retry-save">Retry save</button><button data-action="save-copy">Save as new project</button>');
 workspace = new Workspace({
   project:()=>project,
+  preview:frame=>{if(!stage)throw new Error('Scene previews are unavailable.');return stage.captureProjectPreview(frame);},
+  previewReady:()=>!!stage?.canCaptureProjectCover&&!playing&&!performanceSession&&!assetEditor&&!editPreview&&!unkeyed.size&&!document.querySelector('dialog[open]'),
   open:openProject,
   stop:()=>{pause();flushFieldEdit();sceneEditor?.session.cancel('The project session stopped. Completed work is kept.');referenceDialog.contextChanged();document.querySelectorAll<HTMLDialogElement>('.look-dialog[open]').forEach(dialog=>dialog.close());},
   beforeSwitch:()=>{flushFieldEdit();if(unkeyed.size||performanceSession||assetEditor){status('Finish the current edit or recording before switching projects');return false;}persist();return true;},
@@ -1182,7 +1184,9 @@ workspace = new Workspace({
   recoverBrowserSave:()=>downloadProject(true),
   mode:info=>{
     $('[data-action="upload-cloud"]').hidden=info.mode!=='local'||!info.cloudAvailable;
-    $('[data-action="save"]').innerHTML=icon('save')+'Save project<kbd>⌘ / Ctrl S</kbd>';
+    $('[data-action="upload-cloud"]').title='Upload to cloud · Replace this project';
+    $('[data-action="share-project"]').hidden=info.mode==='local';
+    $('[data-action="save"]').innerHTML=icon('save')+(info.mode==='cloud'?'Save project':info.cloudAvailable?'Upload to cloud':'Export project')+'<kbd>⌘ / Ctrl S</kbd>';
   },
   notice:status,
   state:(message,readOnly,problem)=>{

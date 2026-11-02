@@ -1,6 +1,12 @@
 import type { ProjectDocument } from './storage.ts';
 import { z } from 'zod';
 import type { HandoffReceipt } from '../look/handoff.ts';
+import type { SceneDocument } from '../types.ts';
+import type { AssetDefinition } from '../assets/model.ts';
+
+export interface ProjectCover { savedVersion: number; updatedAt: number; hasImage: boolean }
+export interface ProjectSummary { id: string; code: string; name: string; updatedAt: number; savedVersion: number; scenes: number; objects: number; cover: ProjectCover | null }
+export interface ProjectCoverFrame { scene: SceneDocument | null; shotId: string | null; assets: AssetDefinition[] }
 
 export interface ProjectRoom {
   id: string;
@@ -14,6 +20,7 @@ export interface ProjectRoom {
   leaseExpiresAt: number | null;
   outputs: ProjectOutput[];
   handoffs?: HandoffReceipt[];
+  cover?: ProjectCover | null;
 }
 
 export interface WorkspaceInfo { mode: 'local' | 'cloud'; cloudAvailable: boolean }

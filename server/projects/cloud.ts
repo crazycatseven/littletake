@@ -3,7 +3,7 @@ import { projectArchive, readProjectArchive } from '../../src/project/archive.ts
 import { ProjectRoomError, ProjectRoomStore } from './store.ts';
 import { readBytes } from './api.ts';
 
-/** Explicit local-to-cloud transfers; ordinary project saves always use the local store. */
+/** Browse cloud projects and transfer complete snapshots only at the user's request. */
 export function createCloudProjectsHandler(store: ProjectRoomStore, env: Record<string, string | undefined>) {
   const origin = env.LITTLETAKE_CLOUD_URL ? new URL(env.LITTLETAKE_CLOUD_URL).origin : null;
   if (origin && !origin.startsWith('https:') && !['127.0.0.1', 'localhost', '::1'].includes(new URL(origin).hostname))
@@ -22,26 +22,38 @@ export function createCloudProjectsHandler(store: ProjectRoomStore, env: Record<
         if (body) { headers.set('Content-Type', 'application/zip'); headers.set('Origin', origin); }
         let response: Response;
         try { response = await fetch(origin + '/api/projects?' + query, { method: body ? 'POST' : 'GET', headers, body, signal: request.signal, redirect: 'error' }); }
-        catch (error) { if (request.signal.aborted) throw error; throw new ProjectRoomError('cloud_unavailable', 'The cloud could not be reached. Your local project is saved on this device.', 503); }
+        catch (error) { if (request.signal.aborted) throw error; throw new ProjectRoomError('cloud_unavailable', 'The cloud could not be reached. Keep this page open and retry.', 503); }
         if (!response.ok) {
           const value = await response.json().catch(() => ({}));
           throw new ProjectRoomError(value.error?.code ?? 'cloud_unavailable', value.error?.message ?? 'Cloud access failed. Check the workspace connection.', response.status);
         }
         return response;
       };
-      if (request.method === 'GET') return json(await (await remote('list=1')).json());
+      if (request.method === 'GET') {
+        if (url.searchParams.has('cover')) {
+          const code = z.string().min(1).max(32).parse(url.searchParams.get('code'));
+          const image = await remote('cover=1&code=' + encodeURIComponent(code));
+          return new Response(image.body, { status: image.status, headers: { 'Content-Type': 'image/webp', 'Cache-Control': 'private, no-cache', 'X-Content-Type-Options': 'nosniff' } });
+        }
+        return json(await (await remote('list=1')).json());
+      }
       const lease = z.uuid().parse(request.headers.get('x-littletake-edit-lease')), page = z.uuid().parse(request.headers.get('x-littletake-edit-page'));
-      const input = z.strictObject({ action: z.enum(['open', 'upload']), id: z.uuid(), keepLocal: z.boolean().optional() }).parse(JSON.parse((await readBytes(request, 2048)).toString('utf8')));
+      const input = z.strictObject({ action: z.enum(['open', 'upload']), id: z.uuid().optional(), code: z.string().min(1).max(32).optional(), keepLocal: z.boolean().optional(), overwrite: z.boolean().optional() })
+        .refine(value => value.action === 'upload' ? !!value.id : !!value.id || !!value.code)
+        .parse(JSON.parse((await readBytes(request, 2048)).toString('utf8')));
       if (input.action === 'open') {
-        const bundle = await readProjectArchive(await (await remote('bundle=' + input.id)).blob(), false);
+        const id = input.id ?? (await (await remote('code=' + encodeURIComponent(input.code!))).json()).id;
+        const bundle = await readProjectArchive(await (await remote('bundle=' + id)).blob(), false);
         return json(store.openCloud(bundle, origin, lease, page, input.keepLocal));
       }
-      const room = store.getById(input.id, lease, page);
+      const room = store.getById(input.id!, lease, page);
       if (room.editing !== 'you') throw new ProjectRoomError('read_only', 'Start editing the local project before uploading it.', 403);
       if (room.cloud && room.cloud.origin !== origin) throw new ProjectRoomError('cloud_mismatch', 'This project belongs to a different cloud workspace. Upload a duplicate instead.');
-      const bundle = store.bundle(input.id);
-      const result = await (await remote('upload=1&id=' + input.id + (room.cloud ? '&base=' + room.cloud.version : ''), projectArchive(bundle))).json();
-      const local = store.linkCloud(input.id, origin, result.contentVersion ?? result.savedVersion, bundle.version!, lease, page);
+      const bundle = store.bundle(input.id!);
+      const latest = input.overwrite ? await (await remote('id=' + input.id)).json() : null;
+      const base = latest ? latest.contentVersion ?? latest.savedVersion : room.cloud?.version;
+      const result = await (await remote('upload=1&id=' + input.id + (base !== undefined ? '&base=' + base : ''), projectArchive(bundle))).json();
+      const local = store.linkCloud(input.id!, origin, result.contentVersion ?? result.savedVersion, bundle.version!, lease, page);
       return json({ cloud: local.cloud, url: origin + '/?project=' + result.code });
     } catch (error) {
       if (request.signal.aborted) throw error;

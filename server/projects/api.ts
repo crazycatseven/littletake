@@ -3,6 +3,7 @@ import { MAX_PROJECT_SIZE } from '../../src/project/storage.ts';
 import { ProjectRoomError, ProjectRoomStore } from './store.ts';
 import { MAX_OUTPUT_BYTES, MAX_ARCHIVE_BYTES, projectOutputSchema, type WorkspaceInfo } from '../../src/project/room.ts';
 import { projectArchive, readProjectArchive } from '../../src/project/archive.ts';
+import { MAX_COVER_BYTES } from '../../src/project/cover.ts';
 
 const inputSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('create'), id: z.uuid(), project: z.unknown(), sourceCode: z.string().max(32).optional() }),
@@ -44,6 +45,12 @@ export function createProjectRoomsHandler(store: ProjectRoomStore, workspace: Wo
         if (url.searchParams.has('bundle')) return new Response(projectArchive(store.bundle(z.uuid().parse(url.searchParams.get('bundle')))), { headers: { 'Content-Type': 'application/zip', 'Cache-Control': 'no-store' } });
         if (url.searchParams.has('id')) return json(store.getById(z.uuid().parse(url.searchParams.get('id')), lease, page));
         if (!code) throw new ProjectRoomError('code_required', 'Enter a project code to join.', 400);
+        if (url.searchParams.has('cover')) {
+          const { cover, data } = store.readCover(code), etag = '"cover-' + cover.updatedAt + '"';
+          const headers = { 'Content-Type': 'image/webp', 'Cache-Control': 'private, no-cache', 'X-Content-Type-Options': 'nosniff', ETag: etag };
+          if (request.headers.get('if-none-match') === etag) return new Response(null, { status: 304, headers });
+          return new Response(data.length ? new Uint8Array(data) : null, { status: data.length ? 200 : 204, headers });
+        }
         const outputId = url.searchParams.get('output');
         if (outputId) {
           const { output, data } = store.readOutput(code, outputId);
@@ -54,6 +61,12 @@ export function createProjectRoomsHandler(store: ProjectRoomStore, workspace: Wo
       const origin = request.headers.get('origin');
       if (origin && origin !== url.origin) throw new ProjectRoomError('wrong_origin', 'Open LittleTake directly to edit a project.', 403);
       if (!lease) throw new ProjectRoomError('lease_required', 'An editing session is required.', 403);
+      if (url.searchParams.has('cover')) {
+        if (!code) throw new ProjectRoomError('code_required', 'Choose a project before saving its cover.', 400);
+        if (request.headers.get('content-type') !== 'image/webp') throw new ProjectRoomError('invalid_cover', 'Send a WebP cover.', 415);
+        const version = z.coerce.number().int().positive().parse(url.searchParams.get('version'));
+        return json(store.saveCover(code, lease, version, await readBytes(request, MAX_COVER_BYTES), page));
+      }
       if (url.searchParams.has('browserRecovery')) {
         const id = z.uuid().parse(url.searchParams.get('browserRecovery')), bytes = await readBytes(request, MAX_ARCHIVE_BYTES);
         const { readZip } = await import('../../src/look/zip.ts');
@@ -72,7 +85,7 @@ export function createProjectRoomsHandler(store: ProjectRoomStore, workspace: Wo
           const base = url.searchParams.has('base') ? z.coerce.number().int().positive().parse(url.searchParams.get('base')) : undefined;
           return json(store.publish({ ...bundle, id }, lease, page, base));
         }
-        return json(store.create(id, lease, bundle.project, undefined, bundle.outputs, page), 201);
+        return json(store.create(id, lease, bundle.project, undefined, bundle.outputs, page, bundle.cover), 201);
       }
       if (url.searchParams.has('output')) {
         if (!code) throw new ProjectRoomError('code_required', 'Choose a project before saving results.', 400);

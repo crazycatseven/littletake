@@ -14,7 +14,7 @@
   background:var(--paper)}
 .projects-heading {
   display:flex;
-  justify-content:space-between;
+  gap:22px;
   align-items:center;
   padding-bottom:27px;
   border-bottom:1px solid var(--line)}
@@ -22,28 +22,32 @@
   font-size:10px;
   letter-spacing:2px;
   color:var(--muted)}
+.projects-heading .brand {color:var(--ink);text-decoration:none;font-size:21px;font-weight:600;letter-spacing:-.7px}
+.projects-heading nav {display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
 .projects-welcome {
-  min-height:240px;
+  min-height:150px;
   display:flex;
   align-items:center;
   justify-content:space-between;
   gap:36px;
-  padding:38px 0}
+  padding:30px 0 20px}
 .projects-welcome small {
   color:var(--accent);
   font-size:10px;
   font-weight:600;
   letter-spacing:1.8px}
 .projects-welcome h1 {
-  font-size:clamp(27px,3vw,42px);
+  font-size:clamp(27px,3vw,36px);
   font-weight:500;
-  letter-spacing:-1.6px;
-  margin:14px 0}
+  letter-spacing:-1.2px;
+  margin:0 0 10px}
 .projects-welcome p {
   max-width:580px;
   color:var(--muted);
-  font-size:14px;
-  line-height:1.8}
+  font-size:13px;
+  line-height:1.8;
+  margin:0}
+.projects-count {color:var(--muted);font-size:11px;white-space:nowrap}
 .projects-dialog button {
   cursor:pointer;
   border:1px solid var(--line);
@@ -58,21 +62,19 @@
 .projects-dialog button.primary-button {
   background:var(--selection);
   border-color:var(--accent)}
+.projects-dialog :is(button,a,input,select):focus-visible {outline:2px solid var(--focus-ring);outline-offset:3px}
 .projects-toolbar {
   display:flex;
   justify-content:space-between;
   align-items:center;
-  padding:18px 0}
-.projects-toolbar h2 {
-  font-size:16px;
-  font-weight:500}
-.projects-toolbar h2 span {
-  font-size:11px;
-  color:var(--muted);
-  margin-left:8px}
-.projects-toolbar>div {
-  display:flex;
-  gap:9px}
+  gap:20px;
+  padding:4px 0 24px}
+.project-search {display:flex;align-items:center;gap:10px;width:330px;max-width:100%;padding:0 12px;border:1px solid var(--line);border-radius:6px;background:var(--field);color:var(--muted)}
+.project-search input {width:100%;min-width:0;height:38px;background:transparent;border:0;color:var(--ink);font:inherit;font-size:12px}
+.project-search:focus-within {border-color:var(--accent)}
+.project-search input:focus-visible {outline:0}
+.project-sort {display:flex;align-items:center;gap:10px;font-size:11px;color:var(--muted)}
+.project-sort select {padding:8px 10px;border:1px solid var(--line);border-radius:5px;background:var(--field);color:var(--ink);font:inherit;cursor:pointer}
 .project-cards {
   display:grid;
   grid-template-columns:repeat(3,minmax(0,1fr));
@@ -81,8 +83,10 @@
   position:relative;
   overflow:hidden;
   border:1px solid var(--line);
-  border-radius:12px;
-  background:var(--surface-raised)}
+  border-radius:9px;
+  background:var(--surface-raised);
+  transition:border-color .16s,transform .16s}
+.project-cards article:hover {border-color:var(--accent);transform:translateY(-2px)}
 .project-cards .project-card-open {
   display:block;
   text-align:left;
@@ -90,25 +94,34 @@
   border:0;
   border-radius:0;
   width:100%}
+.project-cards .project-card-open:hover {background:transparent}
+.project-cards .project-card-open:focus-visible {outline-offset:-3px}
 .project-card-art {
-  height:160px;
+  aspect-ratio:16/9;
   background:linear-gradient(145deg,var(--surface-raised),var(--selection));
   display:flex;
   align-items:center;
   justify-content:center;
+  overflow:hidden;
   position:relative}
-.project-card-art>span {
-  font-size:72px;
-  line-height:1;
-  color:var(--accent);
-  transform:rotate(-12deg)}
+.project-card-art img {display:block;position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0}
+.project-cover-placeholder {display:grid;justify-items:center;gap:10px;color:var(--muted);font-size:11px}
+.project-cover-placeholder svg {width:54px;height:54px;color:var(--accent);opacity:.6}
+[data-preview-state=ready] .project-card-art img {opacity:1}
+[data-preview-state=ready] .project-cover-placeholder {display:none}
 .project-card-art small {
   position:absolute;
-  bottom:14px;
-  left:17px;
-  font-size:9px;
-  letter-spacing:1px;
-  color:var(--muted)}
+  bottom:12px;
+  left:12px;
+  font-size:10px;
+  padding:5px 7px;
+  border-radius:4px;
+  background:#202420c9;
+  color:#fffef7}
+.project-open-arrow {position:absolute;right:12px;bottom:12px;display:grid;place-items:center;width:26px;height:26px;background:#202420c9;color:#fffef7;border-radius:4px;opacity:0;transition:opacity .16s}
+.project-card-open:is(:hover,:focus-visible) .project-open-arrow {opacity:1}
+.project-cards .project-preview-retry {display:none;position:absolute;top:10px;right:10px;padding:5px 10px;background:var(--paper);font-size:17px}
+[data-preview-state=error] .project-preview-retry {display:block}
 .project-card-open h3 {
   font-size:16px;
   font-weight:500;
@@ -145,6 +158,8 @@
   font-size:12px;
   margin-bottom:20px}
 .projects-dialog footer {
+  margin-top:32px;
+  border-top:1px solid var(--line);
   padding:35px 0;
   color:var(--muted);
   font-size:11px}
@@ -307,17 +322,23 @@ body[data-project-readonly=true] #projectName,body[data-project-readonly=true] #
 .projects-welcome {
   align-items:flex-start;
   flex-direction:column;
-  gap:15px}
-.projects-toolbar {
-  align-items:flex-start;
   gap:15px;
-  flex-direction:column}
-.project-card-art {
-  height:125px}
+  min-height:0}
+.projects-heading {flex-wrap:wrap;gap:15px}
+.projects-heading nav {width:100%;margin:0}
+.projects-toolbar {
+  align-items:stretch;
+  gap:15px;
+  margin-top:18px}
+.project-search {flex:1;min-width:0}
+.project-sort>span {display:none}
 }
 @media(max-width:480px) {
   .project-cards {
   grid-template-columns:1fr}
+}
+@media(prefers-reduced-motion:reduce) {
+  .project-cards article,.project-open-arrow {transition:none}
 }
 
 .project-results-dialog {
