@@ -1,6 +1,7 @@
 import { Euler, MathUtils, Matrix4, Quaternion, Vector3 } from 'three';
 import { evaluateTransform } from '../animation/model.ts';
 import type { SceneDocument, SceneEntity, Transform, Vec3 } from '../types.ts';
+import { eulerDegrees } from '../rotation.ts';
 
 export function sceneEntities(scene: SceneDocument): SceneEntity[] { return [...scene.objects, ...scene.cameras]; }
 export function transformMatrix(pose: Transform): Matrix4 {
@@ -13,8 +14,7 @@ export function matrixTransform(matrix: Matrix4, exact = false): Transform {
     if (matrix.elements.some((v,i) => !Number.isFinite(v) || Math.abs(v-copy.elements[i]) > magnitude*1e-7) || Math.min(scale.x,scale.y,scale.z) <= 0)
       throw new Error('This parent has a rotation and non-uniform scale combination that cannot preserve the world pose. Use uniform parent scale first.');
   }
-  const angles = new Euler().setFromQuaternion(quaternion, 'XYZ');
-  return { position: position.toArray(), rotation: [angles.x,angles.y,angles.z].map(MathUtils.radToDeg) as Vec3, scale: scale.toArray() };
+  return { position: position.toArray(), rotation: eulerDegrees(quaternion), scale: scale.toArray() };
 }
 export function validateParents(entities: SceneEntity[]): void {
   const nodes = new Map(entities.map(item => [item.id,item])), done = new Set<string>(), visiting = new Set<string>();

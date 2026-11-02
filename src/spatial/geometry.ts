@@ -6,6 +6,7 @@ import { createAssetGroup, disposeAssetGroup, poseAssetJoints, type AssetDefinit
 import { evaluateTransform, evaluateJointAngles, sceneEntity } from '../model.ts';
 import type { ProjectContent, SceneObject, Transform, Vec3 } from '../types.ts';
 import type { SpatialFrame } from './schema.ts';
+import { eulerDegrees } from '../rotation.ts';
 
 /** The viewport and spatial tools build precisely the same meshes. */
 export function primitiveGeometry(kind: string): BufferGeometry {
@@ -49,8 +50,7 @@ export function matrixOf(pose: Transform): Matrix4 {
 }
 export function poseOf(matrix: Matrix4): Transform {
   const position = new Vector3(), scale = new Vector3(), quaternion = new Quaternion(); matrix.decompose(position, quaternion, scale);
-  const euler = new Euler().setFromQuaternion(quaternion, 'XYZ');
-  return { position: position.toArray(), rotation: [euler.x, euler.y, euler.z].map(v => v === 0 ? 0 : MathUtils.radToDeg(v)) as Vec3, scale: scale.toArray() };
+  return { position: position.toArray(), rotation: eulerDegrees(quaternion), scale: scale.toArray() };
 }
 export function geometryVertices(root: Group): Vector3[] {
   root.updateWorldMatrix(true, true); const vertices: Vector3[] = [];
