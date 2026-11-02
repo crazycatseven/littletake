@@ -1,5 +1,6 @@
 import { Euler, MathUtils, Matrix4, Quaternion, Vector3 } from 'three';
-import { evaluateTransform } from '../animation/model.ts';
+import { evaluateTransform, evaluateProperty } from '../animation/model.ts';
+import { pathPose } from '../motion-paths/model.ts';
 import type { SceneDocument, SceneEntity, Transform, Vec3 } from '../types.ts';
 import { eulerDegrees } from '../rotation.ts';
 
@@ -33,7 +34,10 @@ export function sceneWorldMatrices(scene: SceneDocument, time: number, override?
     if (result.has(id)) return result.get(id)!;
     const item = nodes.get(id); if (!item || visiting.has(id)) throw new Error('Invalid parent hierarchy: '+id);
     visiting.add(id);
-    const matrix = (item.parentId ? world(item.parentId).clone() : new Matrix4()).multiply(transformMatrix(override?.id===id ? override.pose : evaluateTransform(item,time)));
+    let matrix = (item.parentId ? world(item.parentId).clone() : new Matrix4()).multiply(transformMatrix(override?.id===id ? override.pose : evaluateTransform(item,time)));
+    const follow='kind' in item ? item.components?.find(c=>c.type==='followPath'&&c.enabled) : undefined;
+    const path=follow?.type==='followPath' ? scene.paths?.find(p=>p.id===follow.pathId) : undefined;
+    if(path && follow?.type==='followPath' && override?.id!==id) matrix=transformMatrix(pathPose(path,evaluateProperty(item.animation,'followPath.progress',follow.progress,time),matrixTransform(matrix),follow.facing,follow.roll));
     visiting.delete(id); result.set(id,matrix); return matrix;
   };
   nodes.forEach(item => world(item.id)); return result;

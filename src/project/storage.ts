@@ -17,6 +17,7 @@ const projectSchema = z.strictObject({
   activeSceneId: z.string().nullable(), activeShotId: z.string().nullable(),
   revision: z.number().int().nonnegative(), conversations: conversationsSchema,
   assets: z.array(z.unknown()).max(1000).optional(),
+  scripts: z.array(z.unknown()).max(64).optional(),
   lookSettings: z.record(z.string().max(120), z.strictObject({ direction: z.string().max(600), anchorId: z.uuid().nullable(), styleId: z.uuid().nullable() })).optional(),
 });
 export function createProject(scene: SceneDocument | null = createDocument()): ProjectDocument {
@@ -48,8 +49,8 @@ export function parseProject(text: string, recoverInterrupted = true): ProjectDo
       operation.asset = asset;
     }
   }
-  const value = projectSchema.parse(raw), content = validateProjectContent({ name: value.name, scenes: value.scenes, ...(value.assets ? { assets: value.assets } : {}) });
-  const { assets: _rawAssets, ...metadata } = value;
+  const value = projectSchema.parse(raw), content = validateProjectContent({ name: value.name, scenes: value.scenes, ...(value.assets ? { assets: value.assets } : {}), ...(value.scripts ? {scripts:value.scripts} : {}) });
+  const { assets: _rawAssets, scripts: _rawScripts, ...metadata } = value;
   const project: ProjectDocument = { ...metadata, ...content };
   const active = project.scenes.find(scene => scene.id === project.activeSceneId);
   if ((project.activeSceneId !== null && !active) || (project.activeShotId !== null && !active?.shots.some(shot => shot.id === project.activeShotId)))

@@ -31,8 +31,8 @@ export function topDownCamera(bounds: THREE.Box3, aspect = 1): THREE.Orthographi
 }
 
 /** Render on demand into a disposable target. The live canvas and camera stay intact. */
-export function renderSceneSnapshot(renderer: THREE.WebGLRenderer, scene: THREE.Scene, shotCamera: THREE.PerspectiveCamera, objects: SnapshotObject[], view: SceneView, time: number, cameraId: string | null = 'camera',measureVisible=false,frameBounds?:ImageBounds): SceneSnapshot {
-  const width = 1024, height = view === 'top_down' ? 1024 : 576;
+export function renderSceneSnapshot(renderer: THREE.WebGLRenderer, scene: THREE.Scene, shotCamera: THREE.PerspectiveCamera, objects: SnapshotObject[], view: SceneView, time: number, cameraId: string | null = 'camera',measureVisible=false,frameBounds?:ImageBounds,imageOptions?:{width:number;height:number;type:'image/webp';quality:number}): SceneSnapshot {
+  const width = imageOptions?.width ?? 1024, height = imageOptions?.height ?? (view === 'top_down' ? 1024 : 576);
   scene.updateMatrixWorld(true);
   const bounds = new THREE.Box3();
   for (const item of objects) bounds.union(new THREE.Box3().setFromObject(item.root));
@@ -90,7 +90,7 @@ export function renderSceneSnapshot(renderer: THREE.WebGLRenderer, scene: THREE.
     ctx.fillStyle = '#fbfcf7ee'; ctx.fillRect(16, height - 39, width - 32, 24); ctx.fillStyle = '#52634a';
     ctx.fillText(`Time ${time.toFixed(2)}s · Orthographic · Layout at this frame; lower objects may be occluded`, 27, height - 22);
   }
-  const dataUrl = canvas.toDataURL('image/png');
+  const dataUrl = canvas.toDataURL(imageOptions?.type ?? 'image/png', imageOptions?.quality);
   if (dataUrl.length > 1_600_100) throw new Error('The captured image is too large. Simplify the scene and try again.');
   return { view, time, width, height, dataUrl, bounds: mapBounds,...(visibleBoxes?{visibleBoxes}:{}) };
 }

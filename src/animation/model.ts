@@ -6,7 +6,7 @@ const axes = ['x', 'y', 'z'] as const;
 export type AnimationAxis = typeof axes[number];
 export type VectorProperty = 'position' | 'rotation' | 'scale' | 'pivot';
 export type JointPropertyPath = `jointAngles.${string}`;
-export type PropertyPath = `${VectorProperty}.${AnimationAxis}` | 'fov' | JointPropertyPath;
+export type PropertyPath = `${VectorProperty}.${AnimationAxis}` | 'fov' | 'followPath.progress' | JointPropertyPath;
 export type Interpolation = 'linear' | 'constant' | 'smooth' | 'quaternion';
 export interface PropertyKey {
   time: number;
@@ -23,7 +23,7 @@ export interface PropertyAnimation {
 }
 
 const paths = [...(['position', 'rotation', 'scale', 'pivot'] as const).flatMap(group => axes.map(axis => `${group}.${axis}` as PropertyPath)), 'fov'] as PropertyPath[];
-const pathSet = new Set<string>(paths);
+const pathSet = new Set<string>([...paths,'followPath.progress']);
 /** Keep the complete evaluated ID: modifier copies contain both '~' and '.'. */
 export function isJointProperty(path: string): path is JointPropertyPath {
   return path.startsWith('jointAngles.') && path.length <= 2060 && /^[A-Za-z0-9_-]+(?:~[A-Za-z0-9_-]+\.(?:[xyz]+|[1-9][0-9]*))*$/.test(path.slice(12))
@@ -52,6 +52,7 @@ export function frameAtTime(time: number, fps: number): number { return Math.rou
 export function timeAtFrame(frame: number, fps: number): number { return frame / fps; }
 
 function limits(path: PropertyPath): [number, number] {
+  if (path === 'followPath.progress') return [0,1];
   if (path === 'fov') return [10, 120];
   if (isJointProperty(path)) return [-360, 360];
   if (path.startsWith('rotation.')) return [-360000, 360000];
@@ -233,7 +234,7 @@ export function setKeyInterpolation(animation: PropertyAnimation, paths: Propert
 }
 
 /** Keep a reviewed performance in the same position/rotation curves used by manual keys. */
-export function keepRecordedTake(animation: PropertyAnimation, id: string, frames: { time: number; transform: Transform }[], duration: number): PropertyAnimation {
+export function keepRecordedTake(animation: PropertyAnimation, id: string, frames: { time: number; transform: Transform; joints?:Record<string,number> }[], duration: number, options: { recordScale?: boolean } = {}): PropertyAnimation {
   if (!takeId.safeParse(id).success || animation.takes.some(take => take.id === id) || animation.takes.length >= 100) throw new Error('Invalid or duplicate take ID.');
   if (frames.length < 2 || frames.length > 3602 || !Number.isFinite(duration) || duration <= 0 || duration > 60) throw new Error('Invalid recording.');
   const start = frames[0].time, end = frames[frames.length - 1].time;
@@ -248,6 +249,15 @@ export function keepRecordedTake(animation: PropertyAnimation, id: string, frame
       return { time: frame.time, value, interpolation: group === 'rotation' ? 'quaternion' : 'linear', ...(orientation ? { orientation: [...orientation] as Vec3 } : {}), take: id };
     });
     next.curves[path] = [...current, ...recorded].sort((a, b) => a.time - b.time);
+  }
+  const jointIds=[...new Set(frames.flatMap(frame=>Object.keys(frame.joints??{})))];
+  for(const jointId of jointIds){
+    const path=jointProperty(jointId),current=(next.curves[path]??[]).filter(key=>key.time<start-1e-8||key.time>end+1e-8);
+    const recorded=frames.map(frame=>{const value=frame.joints?.[jointId];if(value===undefined)throw new Error('Every recorded frame must include the same joints.');assertCanPut(emptyAnimation(),path,frame.time,value);return {time:frame.time,value,interpolation:'linear' as const,take:id};});
+    if(current.length+recorded.length>3602)throw new Error('Too many joint keys.');next.curves[path]=[...current,...recorded].sort((a,b)=>a.time-b.time);
+  }
+  if(options.recordScale!==false&&frames.some(frame=>frame.transform.scale.some((v,i)=>v!==frames[0].transform.scale[i])))for(const [i,path] of propertyPaths('scale').entries()){
+    const current=(next.curves[path]??[]).filter(key=>key.time<start-1e-8||key.time>end+1e-8);if(current.length+frames.length>3602)throw new Error('Too many scale keys.');next.curves[path]=[...current,...frames.map(frame=>({time:frame.time,value:frame.transform.scale[i],interpolation:'linear' as const,take:id}))].sort((a,b)=>a.time-b.time);
   }
   // An overwritten take can have surviving samples on both sides. Keep each
   // surviving section separately draggable, including any legacy scale keys.

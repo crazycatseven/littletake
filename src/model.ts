@@ -9,6 +9,7 @@ import { componentsSchema } from './components/model.ts';
 import { samplesSchema } from './performance/motion.ts';
 import { evaluateTransform, emptyAnimation, evaluateAnimatedTransform, evaluateProperty, isJointProperty, migrateMotionTrack, propertyPaths, validateAnimation, type PropertyAnimation, type PropertyPath } from './animation/model.ts';
 import { sceneLookSchema } from './scene-edit/look.ts';
+import { pathSchema } from './motion-paths/model.ts';
 
 
 const KINDS: readonly PrimitiveKind[] = ['cube', 'sphere', 'cylinder', 'cone', 'plane', 'human'];
@@ -254,7 +255,7 @@ export function validateDocument(value: unknown): SceneDocument {
     return { format: 'LittleTake.scene', version: 3, id: 'scene-1', name: old.name, duration: old.duration, objects: old.objects,
       cameras: [camera], shots: [createShot(camera, `shot-${shotIndex}`, old.duration, 'Shot 1')] };
   }
-  const doc = record(value, ['format', 'version', 'id', 'name', 'duration', 'objects', 'cameras', 'shots'], 'scene', ['fps','look']);
+  const doc = record(value, ['format', 'version', 'id', 'name', 'duration', 'objects', 'cameras', 'shots'], 'scene', ['fps','look','paths']);
   if (doc.format !== 'LittleTake.scene' || (doc.version !== 2 && doc.version !== 3)) fail('scene', 'unsupported format or version');
   const legacy = doc.version === 2;
   const duration = number(doc.duration, 1, 60, 'scene.duration');
@@ -328,8 +329,12 @@ export function validateDocument(value: unknown): SceneDocument {
       cameras.push({ id, name: `${shot.name.slice(0, 110)} camera`, ...framing }); shot.cameraId = id;
     }
   }
+  const paths = doc.paths === undefined ? undefined : list(doc.paths,100,'scene.paths').map(value=>pathSchema.parse(value));
+  for(const path of paths??[])identifier(path.id,'scene.paths.id');
+  for(const object of objects){const follow=object.components?.find(c=>c.type==='followPath');if(follow?.type==='followPath'&&follow.pathId&&!paths?.some(p=>p.id===follow.pathId))fail(object.id,'follow path must belong to this scene');if(object.animation?.curves['followPath.progress']?.length&&!follow)fail(object.id,'path progress animation requires Follow Path');}
+  if(cameras.some(camera=>camera.animation?.curves['followPath.progress']?.length))fail('scene.cameras','cameras cannot animate path progress');
   validateParents([...objects,...cameras]);
-  return { format: 'LittleTake.scene', version: 3, id: identifier(doc.id, 'scene.id', false), name: text(doc.name, 120, 'scene.name'), duration, ...(doc.fps !== undefined ? {fps: doc.fps as 24 | 30} : {}), objects, cameras, shots, ...(doc.look !== undefined ? {look:sceneLookSchema.parse(doc.look)} : {}) };
+  return { format: 'LittleTake.scene', version: 3, id: identifier(doc.id, 'scene.id', false), name: text(doc.name, 120, 'scene.name'), duration, ...(doc.fps !== undefined ? {fps: doc.fps as 24 | 30} : {}), objects, cameras, shots, ...(paths ? {paths} : {}), ...(doc.look !== undefined ? {look:sceneLookSchema.parse(doc.look)} : {}) };
 }
 
 export function serializeDocument(doc: SceneDocument): string { return JSON.stringify(validateDocument(doc), null, 2); }

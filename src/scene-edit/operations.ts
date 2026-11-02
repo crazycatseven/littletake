@@ -13,6 +13,7 @@ import { solveSpatial } from '../spatial/methods.ts';
 import { reparentScene } from '../placement/transforms.ts';
 import { descendants, sceneEntities, localTransform, worldTransform } from '../placement/hierarchy.ts';
 import { jointProperty, putKey, replacePropertyKeys, setKeyInterpolation, type PropertyPath } from '../animation/model.ts';
+import { scriptOperationSchema, isScriptOperation, applyScriptOperation } from '../scripts/operations.ts';
 import { eulerDegrees } from '../rotation.ts';
 
 const vector = (min: number, max: number) => z.array(z.number().min(min).max(max)).length(3) as unknown as z.ZodType<Vec3>;
@@ -40,6 +41,7 @@ const shotFields = { id, name, cameraId: id, start: z.number().min(0).max(60), d
 // Historical chat receipts keep their original proposed framing; this is never offered to the model.
 export const legacyShotOperationSchema = z.strictObject({ type: z.literal('add_shot'), sceneId: id, shot: z.strictObject({ ...cameraFields, ...shotFields }) });
 export const operationSchema = z.union([
+  ...scriptOperationSchema.options,
   ...spatialOperationSchema.options,
   z.strictObject({ type: z.literal('instantiate_asset'), sceneId: id, id, name, asset: assetSchema, transform, track: track.nullable() }),
   z.strictObject({ type: z.literal('set_asset'), sceneId:id,id,asset:assetSchema }),
@@ -102,6 +104,7 @@ export function applyProjectOperations(source: ProjectContent, operations: Scene
   if (!Number.isFinite(time) || time < 0 || time > 60) throw new Error('Invalid scene time.');
   const parsed = z.array(operationSchema).max(64).parse(operations);
   for (const [index, operation] of parsed.entries()) {
+    if(isScriptOperation(operation)){applyScriptOperation(project,operation);continue;}
     if (operation.type === 'add_scene') {
       if (project.scenes.some(scene => scene.id === operation.sceneId)) throw new Error(`Operation ${index + 1} (add_scene): Scene ID ${operation.sceneId} already exists. Edit that scene using its existing ID instead of adding it again.`);
       project.scenes.push({ ...createEmptyScene(operation.sceneId, operation.name), duration: operation.duration }); continue;

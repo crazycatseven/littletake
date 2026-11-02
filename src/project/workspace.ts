@@ -1,14 +1,15 @@
 import { newId } from "../id.ts";
 import './workspace.css';
-import { createProject, parseProject, serializeProject, PROJECT_STORAGE_KEY, type ProjectDocument } from './storage';
-import { EDIT_HEARTBEAT_MS, type ProjectRoom, type ProjectOutput } from './room';
-import { projectCache } from './cache';
+import { createProject, parseProject, serializeProject, type ProjectDocument } from './storage';
+import { EDIT_HEARTBEAT_MS, type ProjectRoom, type ProjectOutput, type WorkspaceInfo, type ProjectSummary, type ProjectCoverFrame, type ProjectCover } from './room';
+import { retireBrowserProjects } from './cache';
 import { projectRequestContext } from './client';
-import { projectArchive } from './archive';
-import { referenceWorkspace } from '../reference/store';
+import { projectArchive, readProjectArchive } from './archive';
 import { copyText } from '../clipboard';
+import { handoffPath, type HandoffReceipt } from '../look/handoff';
+import { loadProjectCovers, retryProjectCover } from './gallery';
+import { coverDue, projectCoverFrame, coverVisual, validateCover, type CoverAttachment } from './cover';
 
-interface RecentProject { code: string; name: string; updatedAt: number; scenes: number; objects: number }
 interface WorkspaceOptions {
   project(): ProjectDocument;
   open(project: ProjectDocument): void;
@@ -17,8 +18,11 @@ interface WorkspaceOptions {
   beforeSwitch(): boolean;
   result?(output: ProjectOutput, data: Blob): void;
   recoverBrowserSave?(): void;
+  mode?(workspace: WorkspaceInfo): void;
+  notice?(message: string): void;
+  preview(preview: ProjectCoverFrame): string | null;
+  previewReady(): boolean;
 }
-const RECENTS = 'littletake.projects.recent.v1', MIGRATED = 'littletake.projects.migrated.v1';
 const escape = (value: string) => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
 export class Workspace {
   room: ProjectRoom | null = null;
@@ -26,7 +30,9 @@ export class Workspace {
   private readonly page = newId();
   private readonly home = document.createElement('dialog');
   private readonly share = document.createElement('dialog');
+  private readonly cloudDialog = document.createElement('dialog');
   private pending: ProjectDocument | null = null;
+  private draftVersion: number | undefined;
   private saving: Promise<void> | null = null;
   private failed = false;
   private conflict = false;
@@ -36,6 +42,25 @@ export class Workspace {
   private readonly sessionReady: Promise<void>;
   private creation: { id: string; project: ProjectDocument; sourceCode?: string } | null = null;
   private savedText: string | null = null;
+  private listed: ProjectSummary[] | null = null;
+  private coverSaving: Promise<void> | null = null;
+  private coverAbort?: AbortController;
+  private coverAttemptAt = 0;
+  private coverOnOpen = false;
+  private lastInput = 0;
+  private readonly heldPointers = new Set<number>();
+  private projectSearch = '';
+  private projectSort = 'recent';
+  private gallerySource: 'cloud' | 'downloads' = 'cloud';
+  private homeGeneration = 0;
+  private workspace: WorkspaceInfo = { mode: 'cloud', cloudAvailable: false };
+  private migrationError = '';
+  private readonly pendingOutputs = new Map<string, { room: ProjectRoom; output: ProjectOutput; data: Blob; base: number }>();
+  private readonly outputWrites = new Map<string, Promise<void>>();
+  private browserRecoveryId?: string;
+  private autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
+  private firstPendingAt = 0;
+  private uploading = false;
   constructor(private readonly options: WorkspaceOptions) {
     this.lease = sessionStorage.getItem('littletake.edit-session') ?? newId();
     sessionStorage.setItem('littletake.edit-session', this.lease);
@@ -49,67 +74,81 @@ export class Workspace {
     this.sessionReady = new Promise(resolve => { channel.postMessage({ type: 'check', lease: this.lease, page }); setTimeout(() => { if (sharedLease) { this.lease = newId(); sessionStorage.setItem('littletake.edit-session', this.lease); } resolve(); }, 100); });
     this.home.className = 'projects-dialog'; this.home.setAttribute('aria-label', 'Projects');
     this.share.className = 'project-share-dialog'; this.share.setAttribute('aria-label', 'Share project');
-    document.body.append(this.home, this.share);
+    this.cloudDialog.className = 'project-cloud-dialog'; this.cloudDialog.setAttribute('aria-label', 'Cloud projects');
+    document.body.append(this.home, this.share, this.cloudDialog);
     this.home.addEventListener('cancel', event => { if (!this.room) event.preventDefault(); });
-    this.home.addEventListener('click', event => { const button = (event.target as HTMLElement).closest<HTMLElement>('[data-project-action]'); if (button) void this.action(button.dataset.projectAction!, button.dataset.code); });
+    this.home.addEventListener('click', event => { const button = (event.target as HTMLElement).closest<HTMLElement>('[data-project-action]'); if (button?.dataset.projectAction === 'retry-preview') retryProjectCover(button.closest<HTMLElement>('[data-project-cover]')!); else if (button) void this.action(button.dataset.projectAction!, button.dataset.code, button.dataset.projectId); });
     this.home.addEventListener('submit', event => { event.preventDefault(); const form = event.target as HTMLFormElement; void this.submit(form); });
     this.timer = setInterval(() => void this.refresh(), 5000);
-    window.addEventListener('online', () => void this.retry());
-    window.addEventListener('pagehide', () => { this.options.stop(); channel.close(); if (this.room?.editing === 'you') void this.api({ action: 'release' }, this.room.code, true).catch(() => {}); });
+    window.addEventListener('online', () => { if (this.autosave) void this.retry(); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) void this.flush().catch(() => {}); });
+    window.addEventListener('pointerdown', event => { this.heldPointers.add(event.pointerId); this.lastInput = Date.now(); }, true);
+    for (const name of ['pointerup', 'pointercancel'] as const) window.addEventListener(name, event => { this.heldPointers.delete(event.pointerId); this.lastInput = Date.now(); }, true);
+    for (const name of ['keydown', 'input', 'wheel']) window.addEventListener(name, () => { this.lastInput = Date.now(); }, { capture: true, passive: true });
+    window.addEventListener('blur', () => this.heldPointers.clear());
+    window.addEventListener('pagehide', () => { this.coverAbort?.abort(); this.options.stop(); channel.close(); clearTimeout(this.autoSaveTimer); if ((!this.autosave || !this.hasUnsaved) && this.room?.editing === 'you') void this.api({ action: 'release' }, this.room.code, true).catch(() => {}); });
   }
-  get canEdit() { return this.room?.editing === 'you' && !this.conflict; }
-  get hasUnsaved() { return Boolean(this.pending || this.failed || this.saving); }
-  private async api(body?: unknown, code?: string, keepalive = false): Promise<ProjectRoom> {
+  get canEdit() { return this.room !== null; }
+  get hasUnsaved() { return Boolean(this.pending || this.failed || this.saving || this.pendingOutputs.size); }
+  get hasUnsafeChanges() { return Boolean(this.pending || this.saving || this.pendingOutputs.size || this.creation || this.uploading); }
+  private get autosave() { return this.workspace.mode === 'cloud'; }
+  private get remoteGallery() { return this.canUpload && this.gallerySource === 'cloud'; }
+  get canUpload() { return this.workspace.mode === 'local' && this.workspace.cloudAvailable; }
+  get isUploading() { return this.uploading; }
+  private async api(body?: unknown, code?: string, keepalive = false, reconnect = true): Promise<ProjectRoom> {
     const response = await fetch('/api/projects' + (code ? '?code=' + encodeURIComponent(code) : ''), {
       method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', 'x-littletake-edit-lease': this.lease, 'x-littletake-edit-page': this.page }, ...(body ? { body: JSON.stringify(body) } : {}), cache: 'no-store', keepalive,
     });
     const value = await response.json().catch(() => ({}));
-    if (!response.ok) throw Object.assign(new Error(value.error?.message ?? 'The local project service is unavailable. Your changes are kept on this device.'), { code: value.error?.code ?? 'unavailable' });
+    if (!response.ok && reconnect && code && value.error?.code === 'edit_lease_lost' && ['save', 'heartbeat'].includes((body as { action?: string })?.action ?? '')) {
+      await this.api({ action: 'claim' }, code);
+      return this.api(body, code, keepalive, false);
+    }
+    if (!response.ok) throw Object.assign(new Error(value.error?.message ?? 'The project service is unavailable. Keep this page open and retry saving.'), { code: value.error?.code ?? 'unavailable' });
     return value;
   }
-  private recents(): RecentProject[] { try { const value = JSON.parse(localStorage.getItem(RECENTS) ?? '[]'); return Array.isArray(value) ? value.filter(item => typeof item.code === 'string' && typeof item.name === 'string' && Number.isFinite(item.updatedAt)) : []; } catch { return []; } }
-  private remember(room: ProjectRoom) {
-    const value = { code: room.code, name: room.project.name, updatedAt: room.updatedAt, scenes: room.project.scenes.length, objects: room.project.scenes.reduce((n, scene) => n + scene.objects.length, 0) };
-    try { localStorage.setItem(RECENTS, JSON.stringify([value, ...this.recents().filter(item => item.code !== room.code)].slice(0, 100))); } catch { /* A full recent-project index must not stop a durable server save. */ }
+  async ensureSession(room = this.room) {
+    if (!room) throw new Error('Open a project first.');
+    if (room === this.room && Date.now() - this.lastHeartbeat < EDIT_HEARTBEAT_MS) return;
+    const next = await this.api({ action: 'heartbeat' }, room.code);
+    room.leaseExpiresAt = next.leaseExpiresAt;
+    if (room === this.room) this.lastHeartbeat = Date.now();
   }
-  async start(legacy: ProjectDocument | null, legacyError = '') {
+  async start() {
     await this.sessionReady;
-    const code = new URL(location.href).searchParams.get('project');
     try {
-      const pending = await projectCache.draft('create', this.lease);
-      if (pending?.dirty && pending.creation) { this.creation = { ...pending.creation, project: pending.project }; await this.create(pending.project, pending.creation.sourceCode); if (legacy && serializeProject(legacy) === serializeProject(pending.project)) localStorage.setItem(MIGRATED, '1'); return; }
-      if (code) { await this.join(code); return; }
-      if (legacyError) { this.showHome(); this.error(legacyError); this.home.querySelector('.projects-error')!.insertAdjacentHTML('afterend', '<button data-project-action="recover-browser">Download previous browser save</button>'); return; }
-      if (legacy && !localStorage.getItem(MIGRATED)) { await this.create(legacy); localStorage.setItem(MIGRATED, '1'); return; }
+      const response = await fetch('/api/projects?workspace=1'); if (!response.ok) throw new Error('The workspace is unavailable. Reconnect to open your saved projects.');
+      this.workspace = await response.json(); this.options.mode?.(this.workspace);
+      try { this.browserRecoveryId = await retireBrowserProjects(this.lease, this.page); }
+      catch (error) { this.migrationError = (error as Error).message; }
+      const code = new URL(location.href).searchParams.get('project');
+      if (code) { await this.join(code); if (this.migrationError) this.reportError(this.migrationError); return; }
       this.showHome();
     } catch (error) { this.showHome(); this.error((error as Error).message); }
   }
   private notify() {
     const readOnly = !this.canEdit;
-    const text = this.conflict ? 'Save conflict · your draft is kept on this device' : this.failed ? 'Offline · changes kept on this device' : readOnly ? 'Viewing · read only' : this.pending || this.saving ? 'Saving…' : 'Saved on this computer';
-    this.options.state(text, readOnly, this.failed || this.conflict);
+    const text = this.conflict ? 'A newer version is saved. Keep this page open; download your changes or save a copy to continue.' : this.failed ? (this.autosave ? 'Saving failed. Keep this page open; changes have not reached the workspace. Saving will retry automatically.' : 'Upload failed. Keep this page open and retry uploading, or export your project.') : this.migrationError;
+    this.options.state(text, readOnly, Boolean(text));
   }
   private async activate(room: ProjectRoom) {
-    this.options.stop(); this.room = room; this.lastHeartbeat = Date.now(); this.failed = false; this.conflict = false;
+    this.coverAttemptAt = 0; this.coverOnOpen = room.cover?.savedVersion !== room.savedVersion;
+    this.options.stop(); clearTimeout(this.autoSaveTimer); this.pending = null; this.draftVersion = undefined; this.firstPendingAt = 0; this.room = room; this.lastHeartbeat = Date.now(); this.failed = false; this.conflict = false;
     this.savedText = serializeProject(room.project);
-    projectRequestContext({ code: room.code, lease: this.lease, page: this.page });
-    const draft = await projectCache.draft(room.code, this.lease) ?? (room.editing === 'you' ? (await projectCache.drafts(room.code))[0] : undefined);
-    if (draft?.dirty) {
-      if (serializeProject(draft.project) === serializeProject(room.project)) { await projectCache.saveDraft({ ...draft, savedVersion: room.savedVersion, dirty: false }); }
-      else if (room.editing === 'you' && draft.savedVersion === room.savedVersion) { room.project = draft.project; this.pending = draft.project; }
-      else { this.conflict = true; room.project = draft.project; this.pending = draft.project; }
-    }
-    room.project = parseProject(serializeProject(room.project), room.editing === 'you');
+    projectRequestContext({ code: room.code, lease: this.lease, page: this.page }, this);
+    // Another page may still be running the saved conversation.
+    room.project = parseProject(serializeProject(room.project), false);
     const url = new URL(location.href); url.searchParams.set('project', room.code); history.replaceState(null, '', url);
-    referenceWorkspace(this);
-    this.options.open(room.project); this.remember(room); this.home.close(); this.notify();
+    this.options.open(room.project);
+    const editor = document.getElementById('app'); if (editor) { editor.removeAttribute('data-opening'); editor.inert = false; }
+    document.getElementById('workspaceOpening')?.remove();
+    this.home.close(); this.notify();
     if (this.pending && !this.conflict) void this.flush().catch(() => {});
   }
   async join(code: string) {
     if (this.room && !await this.leave()) throw new Error('Finish saving the current project before switching.');
-    const clean = code.replace(/[-\s]/g, '').toUpperCase(); let room: ProjectRoom;
-    try { room = await this.api({ action: 'claim' }, clean); }
-    catch (error) { if ((error as { code?: string }).code !== 'editor_present') throw error; room = await this.api(undefined, clean); }
+    const clean = code.replace(/[-\s]/g, '').toUpperCase();
+    const room = await this.api({ action: 'claim' }, clean);
     await this.activate(room);
   }
   async create(project: ProjectDocument = createProject(null), sourceCode?: string) {
@@ -117,38 +156,45 @@ export class Workspace {
     if (this.room && !await this.leave()) throw new Error('Finish saving the current project before switching.');
     if (this.creation && serializeProject(this.creation.project) !== serializeProject(project)) throw new Error('Recover the pending project before creating another one.');
     this.creation ??= { id: newId(), project, ...(sourceCode ? { sourceCode } : {}) };
-    await projectCache.saveDraft({ id: `create:${this.lease}`, code: 'create', lease: this.lease, savedVersion: 0, project, dirty: true, creation: { id: this.creation.id, ...(sourceCode ? { sourceCode } : {}) } });
+    this.notify();
     let room = await this.api({ action: 'create', id: this.creation.id, project, ...(sourceCode ? { sourceCode } : {}) });
-    if (room.editing !== 'you') try { room = await this.api({ action: 'claim' }, room.code); } catch (error) { if ((error as { code?: string }).code !== 'editor_present') throw error; }
-    await projectCache.saveDraft({ id: `create:${this.lease}`, code: 'create', lease: this.lease, savedVersion: 0, project, dirty: false }); this.creation = null;
+    if (room.editing !== 'you') room = await this.api({ action: 'claim' }, room.code);
+    this.creation = null; this.listed = null;
     await this.activate(room);
   }
   save(project: ProjectDocument) {
     if (!this.room || !this.canEdit) return;
+    if (!this.saving && serializeProject(project) === this.savedText) { this.pending = null; this.draftVersion = undefined; clearTimeout(this.autoSaveTimer); this.notify(); return; }
     if (!this.pending && serializeProject(project) === this.savedText) return;
+    if (this.pending && serializeProject(project) === serializeProject(this.pending)) return;
+    if (!this.pending) this.draftVersion = this.room.savedVersion;
     this.pending = structuredClone(project);
-    void projectCache.saveDraft({ id: `${this.room.code}:${this.lease}`, code: this.room.code, lease: this.lease, savedVersion: this.room.savedVersion, project: this.pending, dirty: true }).catch(() => {});
     this.notify();
-    void this.flush().catch(() => {});
+    if (!this.autosave || this.conflict) return;
+    this.firstPendingAt ||= Date.now(); clearTimeout(this.autoSaveTimer);
+    this.autoSaveTimer = setTimeout(() => void this.flush().catch(() => {}), Math.min(650, Math.max(0, 2000 - (Date.now() - this.firstPendingAt))));
   }
-  async flush(): Promise<void> {
+  async flush(manual = false): Promise<void> {
+    if (!this.autosave && !manual) return;
+    if (this.conflict) throw new Error('A newer version is saved. Download your changes or save a new project.');
+    clearTimeout(this.autoSaveTimer); this.firstPendingAt = 0;
     if (this.saving) return this.saving;
     if (!this.pending || !this.room || !this.canEdit) return;
     const room = this.room;
     this.saving = (async () => {
-      while (this.pending && this.room === room && this.canEdit) {
+      while (this.pending && this.room === room && !this.conflict) {
         const project = this.pending;
-        try { await projectCache.saveDraft({ id: `${room.code}:${this.lease}`, code: room.code, lease: this.lease, savedVersion: room.savedVersion, project, dirty: true }); } catch { /* The server can still save when the browser cache is full. */ }
         try {
-          const saved = await this.api({ action: 'save', savedVersion: room.savedVersion, project }, room.code);
+          const saved = await this.api({ action: 'save', savedVersion: this.draftVersion ?? room.savedVersion, project }, room.code);
           this.savedText = serializeProject(project);
-          room.savedVersion = saved.savedVersion; room.updatedAt = saved.updatedAt; room.leaseExpiresAt = saved.leaseExpiresAt;
+          room.savedVersion = saved.savedVersion; room.contentVersion = Math.max(room.contentVersion ?? 0, saved.contentVersion ?? 0); room.updatedAt = saved.updatedAt; room.leaseExpiresAt = saved.leaseExpiresAt;
+          this.mergeCover(room, saved.cover);
           if (this.pending === project) this.pending = null;
-          this.failed = false; this.remember({ ...room, project });
-          if (!this.pending) await projectCache.saveDraft({ id: `${room.code}:${this.lease}`, code: room.code, lease: this.lease, savedVersion: room.savedVersion, project, dirty: false }).catch(() => {});
+          this.draftVersion = this.pending ? saved.savedVersion : undefined;
+          this.failed = false; this.listed = null;
         } catch (error) {
           this.failed = true;
-          if (['save_conflict', 'edit_lease_lost', 'editor_present'].includes((error as { code?: string }).code ?? '')) { this.conflict = true; this.options.stop(); }
+          if ((error as { code?: string }).code === 'save_conflict') { this.conflict = true; this.options.stop(); }
           throw error;
         }
       }
@@ -157,144 +203,332 @@ export class Workspace {
   }
   async retry() {
     if (!this.room) return;
-    try { if (this.conflict) { const next = await this.api(undefined, this.room.code); if (next.savedVersion !== this.room.savedVersion) throw new Error('A newer version is saved. Download your changes or save a new project.'); Object.assign(this.room, await this.api({ action: 'claim' }, this.room.code)); this.conflict = false; } await this.flush(); for (const cached of await projectCache.outputs(this.room.code)) if (cached.pending) { const { updatedAt: _at, ...metadata } = cached.output; await this.putOutput(metadata, cached.data); } this.failed = false; this.notify(); }
+    try {
+      if (this.failed || this.conflict) {
+        const room = this.room, next = await this.api({ action: 'claim' }, room.code);
+        if (this.room !== room) return;
+        if (this.pending && next.savedVersion !== (this.draftVersion ?? room.savedVersion) && serializeProject(next.project) !== serializeProject(this.pending)) {
+          this.conflict = true; this.options.stop(); throw new Error('A newer version is saved. Download your changes or save a new project.');
+        }
+        // Reconnecting must not replace this page's draft or advance its save baseline.
+        room.leaseExpiresAt = next.leaseExpiresAt; this.conflict = false; this.lastHeartbeat = Date.now();
+      }
+      await this.flush();
+      if (this.autosave) await this.flushOutputs(this.room);
+      this.failed = false; this.notify();
+    }
     catch (error) { this.failed = true; this.notify(); this.error((error as Error).message); }
   }
   private async refresh() {
     if (!this.room || this.refreshing || this.home.open) return; this.refreshing = true; const room = this.room;
     try {
-      if (this.canEdit) {
-        if (this.failed) { await this.retry(); return; }
-        if (Date.now() - this.lastHeartbeat >= EDIT_HEARTBEAT_MS) { const next = await this.api({ action: 'heartbeat' }, room.code); room.leaseExpiresAt = next.leaseExpiresAt; this.lastHeartbeat = Date.now(); }
-        if (this.pending && this.failed) await this.flush();
-      } else if (!this.conflict) {
-        const next = await this.api(undefined, room.code);
-        if (this.room !== room) return;
-        if (next.savedVersion !== room.savedVersion) { this.room = next; this.options.open(next.project); }
-        else Object.assign(room, { editing: next.editing, outputs: next.outputs });
-      }
-      this.failed = false;
-    } catch (error) { if (this.room === room) { this.failed = true; if ((error as { code?: string }).code === 'edit_lease_lost') { this.conflict = true; this.options.stop(); } } }
+      await this.ensureSession(room);
+      if (this.conflict) return;
+      if (this.autosave && (this.failed || [...this.pendingOutputs.values()].some(entry => entry.room.id === room.id))) { await this.retry(); return; }
+    } catch { if (this.room === room) this.failed = true; }
     finally { this.refreshing = false; this.notify(); }
+    void this.updateCover();
+  }
+  private mergeCover(room: ProjectRoom, incoming: ProjectCover | null | undefined) {
+    if (incoming && (!room.cover || incoming.updatedAt > room.cover.updatedAt || (incoming.updatedAt === room.cover.updatedAt && incoming.savedVersion > room.cover.savedVersion))) room.cover = incoming;
+  }
+  private async updateCover(force = false, manual = false): Promise<void> {
+    if (!this.autosave && !manual) return;
+    if (this.coverSaving) { if (!force) return; await this.coverSaving; }
+    const room = this.room, now = Date.now();
+    if (!room || !this.canEdit || this.hasUnsaved || !this.savedText || document.hidden || !this.options.previewReady()) return;
+    if (!force && (this.heldPointers.size > 0 || now - this.lastInput < 1500)) return;
+    if (!coverDue(room.cover, room.savedVersion, now, this.coverAttemptAt, force || this.coverOnOpen)) return;
+    const project: ProjectDocument = JSON.parse(this.savedText), version = room.savedVersion;
+    const controller = new AbortController(); this.coverAbort = controller;
+    this.coverAttemptAt = now; this.coverOnOpen = false;
+    this.coverSaving = (async () => {
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      try {
+        const source = this.options.preview(projectCoverFrame(project));
+        const data = source ? await (await fetch(source)).blob() : new Blob([], { type: 'image/webp' });
+        validateCover(new Uint8Array(await data.arrayBuffer()));
+        if (controller.signal.aborted || document.hidden || this.room !== room || !this.canEdit) return;
+        await this.ensureSession(room);
+        const response = await fetch(`/api/projects?code=${encodeURIComponent(room.code)}&cover=1&version=${version}`, {
+          method: 'POST', headers: { 'Content-Type': 'image/webp', 'x-littletake-edit-lease': this.lease, 'x-littletake-edit-page': this.page }, body: data, signal: controller.signal,
+        });
+        if (!response.ok) return; // A stale or failed optional cover never blocks saving the project.
+        const saved = await response.json();
+        this.mergeCover(room, saved.cover); room.contentVersion = Math.max(room.contentVersion ?? 0, saved.contentVersion);
+        this.listed = null; if (!source) this.coverAttemptAt = 0;
+      } catch { /* Keep the previous server image and retry at the next checkpoint. */ }
+      finally { clearTimeout(timeout); }
+    })();
+    try { await this.coverSaving; } finally { this.coverSaving = null; }
   }
   private async leave(): Promise<boolean> {
+    if (this.uploading) { this.options.notice?.('Wait for the upload to finish before switching projects.'); return false; }
     if (!this.options.beforeSwitch()) return false;
     this.options.stop();
-    if (this.conflict && this.pending) { this.options.state('Keep your changes by downloading them or saving a new project before switching.', true, true); return false; }
-    try { await this.flush(); }
+    if (!this.autosave && this.hasUnsaved && !await this.confirmLocalLeave()) return false;
+    if (this.autosave && this.conflict && this.hasUnsaved) { this.options.state('Keep your changes by downloading them or saving a new project before switching.', false, true); return false; }
+    try {
+      await this.flush();
+      if (this.autosave && this.room) await this.flushOutputs(this.room);
+    }
     catch { this.options.state('Save failed. Retry or download your changes before switching projects.', false, true); return false; }
+    await this.updateCover(true);
     if (this.room?.editing === 'you') try { await this.api({ action: 'release' }, this.room.code); } catch { /* The saved document is already durable; a disconnected lease expires. */ }
-    this.room = null; this.pending = null; projectRequestContext(null); return true;
+    if (!this.autosave && this.room) for (const [key, entry] of this.pendingOutputs) if (entry.room === this.room) this.pendingOutputs.delete(key);
+    this.room = null; this.pending = null; this.draftVersion = undefined; projectRequestContext(null); return true;
   }
   async showProjects() {
     if (this.room && !await this.leave()) return;
     const url = new URL(location.href); url.searchParams.delete('project'); history.replaceState(null, '', url); this.showHome();
   }
   async newProject() { await this.showProjects(); if (this.home.open) await this.action('new'); }
-  private showHome() {
-    this.home.innerHTML = `<header class="projects-heading"><a class="brand" href="/">LittleTake</a><span>LOCAL WORKSPACE</span></header>
-      <div class="projects-welcome"><div><small>YOUR FILM STARTS HERE</small><h1>A place for every little take.</h1><p>Build a set, shape the action, and keep your projects on this computer.</p></div><button class="primary-button" data-project-action="new">＋ New project</button></div>
-      <div class="projects-toolbar"><h2>Recent projects <span>${this.recents().length}</span></h2><div><button data-project-action="import">Import project</button><button data-project-action="join">Join with a code</button></div></div>
-      <section class="project-cards">${this.recents().map(item => `<article><button class="project-card-open" data-project-action="open" data-code="${escape(item.code)}"><div class="project-card-art"><span>▱</span><small>${item.scenes} SCENES · ${item.objects} OBJECTS</small></div><h3>${escape(item.name)}</h3><p>Saved ${new Date(item.updatedAt).toLocaleDateString()} · ${escape(this.formatCode(item.code))}</p></button><button class="project-copy-button" data-project-action="copy" data-code="${escape(item.code)}">Duplicate</button></article>`).join('') || '<div class="projects-empty"><span>◇</span><h3>Your next scene starts here</h3><p>Create a project or import an existing LittleTake save.</p><button data-project-action="new">Create your first project</button></div>'}</section>
-      ${this.creation ? '<button data-project-action="recover">Recover pending project</button>' : ''}<p class="projects-error" role="alert" hidden></p><footer>Projects, assets and conversations are saved by this local LittleTake server.</footer>`;
+  private showHome(load = true) {
+    const generation = ++this.homeGeneration;
+    this.home.innerHTML = `<header class="projects-heading"><a class="brand" href="/">LittleTake</a><span>GALLERY</span><nav>${this.canUpload ? `<button data-project-action="${this.remoteGallery ? 'downloads' : 'cloud'}">${this.remoteGallery ? 'Downloaded projects' : 'Cloud projects'}</button>` : ''}<button data-project-action="join">Join with a code</button><button data-project-action="import">Import project</button><button class="primary-button" data-project-action="new">＋ New project</button></nav></header>
+      <div class="projects-welcome"><div><h1>${this.remoteGallery ? 'Cloud projects' : this.autosave ? 'Projects' : 'Downloaded projects'}</h1><p>${this.autosave ? 'A little preview of what you’re making.' : 'Open a local copy to edit. Upload manually to replace the cloud project.'}</p></div><span class="projects-count"></span></div>
+      <div class="projects-toolbar"><label class="project-search"><span aria-hidden="true">⌕</span><input type="search" aria-label="Search projects" placeholder="Search projects…" value="${escape(this.projectSearch)}" /></label><label class="project-sort">Sort by<select aria-label="Sort projects"><option value="recent" ${this.projectSort === 'recent' ? 'selected' : ''}>Last edited</option><option value="name" ${this.projectSort === 'name' ? 'selected' : ''}>Name A–Z</option></select></label></div>
+      <section class="project-cards" aria-label="Projects"></section>
+      ${this.creation ? '<button data-project-action="recover">Retry creating project</button>' : ''}${this.browserRecoveryId ? '<a class="project-recovery-link" href="/api/projects?browserRecovery=' + this.browserRecoveryId + '">Download previous browser data backup</a>' : ''}<p class="projects-error" role="alert" hidden></p><footer>${this.autosave ? 'Projects, assets and conversations are stored on the cloud server.' : 'Local editing has no autosave. Upload to cloud or export a project file before leaving.'}</footer>`;
     if (!this.home.open) this.home.showModal();
+    document.getElementById('workspaceOpening')?.remove();
+    this.renderProjectCards();
+    this.home.querySelector<HTMLInputElement>('.project-search input')!.oninput = event => { this.projectSearch = (event.target as HTMLInputElement).value; this.renderProjectCards(); };
+    this.home.querySelector<HTMLSelectElement>('.project-sort select')!.onchange = event => { this.projectSort = (event.target as HTMLSelectElement).value; this.renderProjectCards(); };
+    if (this.migrationError) this.error(this.migrationError);
+    if (load) void fetch(this.remoteGallery ? '/api/cloud-projects' : '/api/projects?list=1', { cache: 'no-store' }).then(async response => {
+      const value = await response.json(); if (!response.ok || !Array.isArray(value.projects)) throw new Error('The project list could not be loaded.');
+      if (!this.home.open || generation !== this.homeGeneration) return;
+      this.listed = value.projects;
+      this.renderProjectCards();
+    }).catch(() => { if (this.home.open && generation === this.homeGeneration) this.error('The workspace could not be reached. Reconnect to load your saved projects.'); });
+  }
+  private renderProjectCards() {
+    const grid = this.home.querySelector<HTMLElement>('.project-cards'); if (!grid) return;
+    const projects = (this.listed ?? []).filter(item => item.name.toLowerCase().includes(this.projectSearch.trim().toLowerCase()))
+      .sort((a, b) => this.projectSort === 'name' ? a.name.localeCompare(b.name) : b.updatedAt - a.updatedAt);
+    const count = this.home.querySelector<HTMLElement>('.projects-count');
+    if (count) count.textContent = this.listed ? `${projects.length} ${projects.length === 1 ? 'project' : 'projects'}` : '';
+    const placeholder = '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="m9 21 38-7 8 30-38 6Z"/><path d="m9 21 8 29M23 18l-2-7M40 15l-2-6"/></svg>';
+    grid.innerHTML = this.listed === null ? '<div class="projects-empty" role="status">Loading projects…</div>' : projects.map(item => `<article data-project-cover data-code="${escape(item.code)}" data-preview-state="${item.cover?.hasImage ? 'loading' : 'empty'}"><button class="project-card-open" data-project-action="${this.remoteGallery ? 'open-cloud' : 'open'}" data-project-id="${escape(item.id)}" data-code="${escape(item.code)}" aria-label="Open project ${escape(item.name)}"><div class="project-card-art"><img alt="Preview of ${escape(item.name)}" decoding="async" loading="lazy" width="640" height="360" ${item.cover?.hasImage ? `data-cover-url="/api/${this.remoteGallery ? 'cloud-projects' : 'projects'}?cover=1&amp;code=${escape(item.code)}&amp;v=${item.cover.updatedAt}"` : ''} /><div class="project-cover-placeholder">${placeholder}<span data-preview-label>${item.cover?.hasImage ? 'Loading preview…' : item.objects && !item.cover ? 'Preview not available yet' : 'Your next idea goes here'}</span></div><small>${item.scenes} ${item.scenes === 1 ? 'scene' : 'scenes'}</small><span class="project-open-arrow" aria-hidden="true">↗</span></div><h3>${escape(item.name)}</h3><p>Edited ${new Date(item.updatedAt).toLocaleDateString()} · ${escape(this.formatCode(item.code))}</p></button><button class="project-preview-retry" data-project-action="retry-preview" aria-label="Retry preview for ${escape(item.name)}">↻</button>${this.remoteGallery ? '' : `<button class="project-copy-button" data-project-action="copy" data-code="${escape(item.code)}">Duplicate</button>`}</article>`).join('') || (this.projectSearch ? '<div class="projects-empty"><h3>No projects found</h3><p>Try another project name.</p><button data-project-action="clear-search">Clear search</button></div>' : '<div class="projects-empty"><span>◇</span><h3>Your next scene starts here</h3><p>Create a project or import an existing LittleTake save.</p><button data-project-action="new">Create your first project</button></div>');
+    loadProjectCovers(grid);
   }
   private error(message: string) { const element = this.home.querySelector<HTMLElement>('.projects-error'); if (element) { element.textContent = message; element.hidden = false; } }
-  private async action(action: string, code?: string) {
+  private async action(action: string, code?: string, id?: string) {
     try {
       if (action === 'open' && code) await this.join(code);
+      if (action === 'open-cloud' && id) await this.openCloud(id);
+      if (action === 'cloud' || action === 'downloads') { this.gallerySource = action; this.listed = null; this.showHome(); }
       if (action === 'recover' && this.creation) await this.create(this.creation.project, this.creation.sourceCode);
       if (action === 'recover-browser') this.options.recoverBrowserSave?.();
       if (action === 'copy' && code) { const source = await this.api(undefined, code); const project = parseProject(serializeProject(source.project)); project.name = `${project.name.slice(0, 110)} copy`; await this.create(project, code); }
       if (action === 'new' || action === 'join') {
-        this.home.querySelector('.projects-welcome')!.innerHTML = action === 'new' ? `<form data-create><small>NEW PROJECT</small><h1>Make room for an idea.</h1><label>Project name<input name="name" maxlength="120" value="Untitled project" required autofocus></label><label class="project-starter"><input name="starter" type="checkbox"> Include a starter scene</label><div><button type="button" data-project-action="back">Back</button><button class="primary-button">Create project</button></div></form>` : `<form data-join><small>JOIN A PROJECT</small><h1>Enter the project code.</h1><p>One person edits at a time. Everyone else can view the scene.</p><label>Project code<input name="code" placeholder="ABCD-EFGH-JKLM" maxlength="32" required autofocus></label><div><button type="button" data-project-action="back">Back</button><button class="primary-button">Join project</button></div></form>`;
+        this.homeGeneration++;
+        this.home.querySelector('.projects-welcome')!.innerHTML = action === 'new' ? `<form data-create><small>NEW PROJECT</small><h1>Make room for an idea.</h1><label>Project name<input name="name" maxlength="120" value="Untitled project" required autofocus></label><label class="project-starter"><input name="starter" type="checkbox"> Include a starter scene</label><div><button type="button" data-project-action="back">Back</button><button class="primary-button">Create project</button></div></form>` : `<form data-join><small>JOIN A PROJECT</small><h1>Enter the project code.</h1><p>${this.canUpload ? 'Download a cloud project for local editing. Changes upload only when you choose.' : 'One person edits at a time. Everyone else can view the scene.'}</p><label>Project code<input name="code" placeholder="ABCD-EFGH-JKLM" maxlength="32" required autofocus></label><div><button type="button" data-project-action="back">Back</button><button class="primary-button">${this.canUpload ? 'Download project' : 'Join project'}</button></div></form>`;
         this.home.querySelector<HTMLInputElement>('form input')?.focus();
       }
       if (action === 'back') this.showHome();
+      if (action === 'clear-search') { this.projectSearch = ''; this.home.querySelector<HTMLInputElement>('.project-search input')!.value = ''; this.renderProjectCards(); }
       if (action === 'import') document.querySelector<HTMLInputElement>('#openFile')?.click();
-    } catch (error) { this.error((error as Error).message); }
+    } catch (error) { this.renderProjectCards(); this.error((error as Error).message); }
   }
   private async submit(form: HTMLFormElement) {
     const button = form.querySelector<HTMLButtonElement>('.primary-button')!; button.disabled = true;
-    try { const data = new FormData(form); if (form.hasAttribute('data-join')) await this.join(String(data.get('code'))); else { const project = createProject(data.has('starter') ? undefined : null); project.name = String(data.get('name')).trim(); await this.create(project); } }
-    catch (error) { this.error((error as Error).message); } finally { button.disabled = false; }
+    try { const data = new FormData(form); if (form.hasAttribute('data-join')) { const code = String(data.get('code')); if (this.canUpload) await this.openCloud(code, false, true); else await this.join(code); } else { const project = createProject(data.has('starter') ? undefined : null); project.name = String(data.get('name')).trim(); await this.create(project); } }
+    catch (error) { this.renderProjectCards(); this.error((error as Error).message); } finally { button.disabled = false; }
   }
   reportError(message: string) { if (!this.room && !this.home.open) this.showHome(); if (this.home.open) this.error(message); else this.options.state(message, !this.canEdit, true); }
   private formatCode(code: string) { return code.match(/.{1,4}/g)?.join('-') ?? code; }
   showShare() {
     if (!this.room) return; const room = this.room;
-    this.share.innerHTML = `<header><h2>${this.canEdit ? 'Share your project' : 'Viewing this project'}</h2><button data-close aria-label="Close share">✕</button></header><p>One editor, a shared view of the whole set.</p><small>PROJECT CODE</small><strong>${this.formatCode(room.code)}</strong><label>Project link<input readonly value="${escape(location.href)}"></label><p data-share-status>${this.canEdit ? 'You are editing. Others join as viewers.' : room.editing === 'available' ? 'The editing seat is available.' : 'Someone else is editing. Your view follows saved changes.'}</p><div><button data-copy>Copy link</button><button class="primary-button" data-seat>${this.canEdit ? 'Release editing' : 'Start editing'}</button></div>`;
-    this.share.querySelector<HTMLButtonElement>('[data-seat]')!.disabled = !this.canEdit && room.editing !== 'available';
+    if (!this.autosave) { this.transferDialog('Local editing', 'Upload this project to cloud before sharing it. Local edits are not saved automatically.'); return; }
+    this.share.innerHTML = `<header><h2>Share your project</h2><button data-close aria-label="Close share">✕</button></header><p>Anyone with this link can open and edit the project.</p><small>PROJECT CODE</small><strong>${this.formatCode(room.code)}</strong><label>Project link<input readonly value="${escape(location.href)}"></label><label class="project-identity">Project ID<input readonly value="${room.id}"></label><p data-share-status></p><div><button class="primary-button" data-copy>Copy link</button></div>`;
     this.share.querySelector('[data-close]')!.addEventListener('click', () => this.share.close());
     this.share.querySelector('[data-copy]')!.addEventListener('click', async () => { try { await copyText(location.href, this.share); this.share.querySelector('[data-share-status]')!.textContent = 'Link copied'; } catch { this.share.querySelector('input')!.select(); } });
-    this.share.querySelector('[data-seat]')!.addEventListener('click', async () => {
-      try { this.options.stop(); await this.flush(); const next = await this.api({ action: this.canEdit ? 'release' : 'claim' }, room.code); this.share.close(); await this.activate(next); }
-      catch (error) { this.share.querySelector('[data-share-status]')!.textContent = (error as Error).message; }
-    });
     this.share.showModal();
   }
+  private async cloudRequest(body?: { action: 'open' | 'upload'; id?: string; code?: string; keepLocal?: boolean; overwrite?: boolean }) {
+    const response = await fetch('/api/cloud-projects', { method: body ? 'POST' : 'GET', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'x-littletake-edit-lease': this.lease, 'x-littletake-edit-page': this.page }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const value = await response.json().catch(() => ({}));
+    if (!response.ok) throw Object.assign(new Error(value.error?.message ?? 'The cloud could not be reached. Your local project is retained.'), { code: value.error?.code });
+    return value;
+  }
+  private transferDialog(title: string, message: string, actions: { label: string; run(): Promise<void> }[] = []) {
+    const dialog = this.cloudDialog;
+    dialog.innerHTML = `<header><h2>${escape(title)}</h2><button data-close aria-label="Close cloud projects">✕</button></header><p>${escape(message)}</p><div class="cloud-project-list"></div><div class="cloud-project-actions">${actions.map((action, index) => `<button data-transfer="${index}"${index === actions.length - 1 ? ' class="primary-button"' : ''}>${escape(action.label)}</button>`).join('')}</div><p class="projects-error" role="alert" hidden></p>`;
+    dialog.querySelector('[data-close]')!.addEventListener('click', () => dialog.close());
+    dialog.querySelectorAll<HTMLButtonElement>('[data-transfer]').forEach(button => button.addEventListener('click', async () => {
+      const buttons = [...dialog.querySelectorAll<HTMLButtonElement>('button')]; buttons.forEach(item => item.disabled = true);
+      try { await actions[Number(button.dataset.transfer)].run(); }
+      catch (error) { const element = dialog.querySelector<HTMLElement>('.projects-error')!; element.textContent = (error as Error).message; element.hidden = false; }
+      finally { buttons.forEach(item => item.disabled = false); }
+    }));
+    if (!dialog.open) dialog.showModal();
+  }
+  private confirmLocalLeave(): Promise<boolean> {
+    return new Promise(resolve => {
+      this.transferDialog('Unsaved local changes', 'Local editing has no autosave. Upload to cloud or export a project file before leaving to keep your changes.', [
+        { label: 'Discard and leave', run: async () => { resolve(true); this.cloudDialog.close(); } },
+        { label: 'Keep editing', run: async () => { this.cloudDialog.close(); } },
+      ]);
+      this.cloudDialog.addEventListener('close', () => resolve(false), { once: true });
+    });
+  }
+  private async openCloud(identifier: string, keepLocal = false, byCode = false) {
+    if (this.room && !await this.leave()) throw new Error('Finish saving the current project before switching.');
+    try {
+      const room = await this.cloudRequest({ action: 'open', ...(byCode ? { code: identifier } : { id: identifier }), ...(keepLocal ? { keepLocal: true } : {}) });
+      await this.activate(room); this.cloudDialog.close(); this.listed = null;
+      this.options.notice?.('Downloaded for local editing · Upload to cloud when ready');
+    } catch (error) {
+      if ((error as { code?: string }).code !== 'local_conflict') throw error;
+      this.transferDialog('Keep your local changes', (error as Error).message, [{ label: 'Keep local copy and open cloud', run: () => this.openCloud(identifier, true, byCode) }]);
+    }
+  }
+  async saveNow() { if (this.autosave) await this.flush(); else if (this.canUpload) await this.uploadToCloud(); else await this.download(); }
+  async uploadToCloud(overwrite = false) {
+    if (!this.canUpload || this.uploading) return;
+    if (!this.room || !this.canEdit) throw new Error('Open a project before uploading it.');
+    if (!this.options.beforeSwitch()) return;
+    this.options.stop();
+    this.uploading = true; this.notify();
+    try {
+      await this.flush(true);
+      await this.flushOutputs(this.room);
+      await this.updateCover(true, true);
+      await this.ensureSession();
+      const room = this.room, value = await this.cloudRequest({ action: 'upload', id: room.id, ...(overwrite ? { overwrite: true } : {}) });
+      if (this.room === room) room.cloud = value.cloud;
+      this.failed = false; this.listed = null;
+      this.options.notice?.('Uploaded to cloud');
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (['cloud_conflict', 'cloud_mismatch', 'cloud_missing'].includes(code ?? '')) {
+        this.transferDialog('Cloud project has changed', code === 'cloud_conflict' ? 'Someone changed this project since you downloaded it. Replace the cloud project with your local version, or upload a separate copy.' : (error as Error).message, [
+          { label: 'Upload as a new project', run: async () => { this.cloudDialog.close(); await this.saveCopy(); await this.uploadToCloud(); } },
+          ...(code === 'cloud_conflict' ? [{ label: 'Replace cloud version', run: async () => { this.cloudDialog.close(); await this.uploadToCloud(true); } }] : []),
+        ]);
+      } else this.transferDialog('Upload could not finish', (error as Error).message, [{ label: 'Try again', run: async () => { this.cloudDialog.close(); await this.uploadToCloud(); } }]);
+    } finally { this.uploading = false; this.notify(); }
+  }
   async putOutput(output: Omit<ProjectOutput, 'updatedAt'>, data: Blob, target = this.room): Promise<ProjectOutput> {
-    if (!target || (target === this.room && !this.canEdit)) throw new Error('Start editing before saving a result.');
-    const room = target, stored = { ...output, updatedAt: Date.now() };
-    await projectCache.saveOutput({ id: `${room.code}:${output.id}`, code: room.code, output: stored, data, pending: true });
-    room.outputs = [stored, ...room.outputs.filter(item => item.id !== output.id)];
-    let value: ProjectOutput;
-    try { const response = await fetch(`/api/projects?code=${encodeURIComponent(room.code)}&output=1`, { method: 'POST', headers: { 'x-littletake-edit-lease': this.lease, 'x-littletake-edit-page': this.page, 'x-littletake-output': encodeURIComponent(JSON.stringify(output)) }, body: data });
-      const result = await response.json(); if (!response.ok) throw new Error(result.error?.message ?? 'The result is kept on this device but has not reached the local server.'); value = result;
-    } catch (error) { if (this.room === room) { this.failed = true; this.notify(); } throw error; }
-    await projectCache.saveOutput({ id: `${room.code}:${output.id}`, code: room.code, output: value, data, pending: false });
-    room.outputs = [value, ...room.outputs.filter(item => item.id !== value.id)]; return value;
+    if (!target || (!this.autosave && target !== this.room) || (target === this.room && !this.canEdit)) throw new Error('Open a project before saving a result.');
+    const stored = { ...output, updatedAt: Date.now() }, key = `${target.code}:${output.id}`;
+    const base = this.pendingOutputs.get(key)?.base ?? target.outputs.find(item => item.id === output.id)?.updatedAt ?? 0;
+    this.pendingOutputs.set(key, { room: target, output: stored, data, base });
+    target.outputs = [stored, ...target.outputs.filter(item => item.id !== output.id)]; this.notify();
+    if (this.autosave) await this.writeOutput(key); return target.outputs.find(item => item.id === output.id)!;
+  }
+  private async writeOutput(key: string): Promise<void> {
+    if (this.conflict) throw new Error('A newer version is saved. Download your changes or save a new project.');
+    const writing = this.outputWrites.get(key); if (writing) return writing;
+    const promise = (async () => {
+      let current;
+      try {
+        while ((current = this.pendingOutputs.get(key))) {
+          const { room, data, base, output: { updatedAt: _at, ...metadata } } = current;
+          await this.ensureSession(room);
+          const response = await fetch(`/api/projects?code=${encodeURIComponent(room.code)}&output=1`, { method: 'POST', headers: { 'x-littletake-edit-lease': this.lease, 'x-littletake-edit-page': this.page, 'x-littletake-output': encodeURIComponent(JSON.stringify(metadata)), 'x-littletake-output-version': String(base) }, body: data });
+          const value = await response.json(); if (!response.ok) throw Object.assign(new Error(value.error?.message ?? 'The result has not reached the workspace. Keep this page open and retry.'), { code: value.error?.code });
+          if (this.pendingOutputs.get(key) === current) { this.pendingOutputs.delete(key); room.outputs = [value, ...room.outputs.filter(item => item.id !== value.id)]; }
+          else { const queued = this.pendingOutputs.get(key); if (queued) queued.base = value.updatedAt; }
+        }
+      } catch (error) { this.failed = true; if ((error as { code?: string }).code === 'output_conflict') { this.conflict = true; this.options.stop(); } throw error; }
+    })().finally(() => { this.outputWrites.delete(key); this.notify(); });
+    this.outputWrites.set(key, promise); return promise;
+  }
+  private async flushOutputs(room: ProjectRoom) {
+    for (const [key, entry] of this.pendingOutputs) if (entry.room.id === room.id) await this.writeOutput(key);
   }
   async output(id: string, room = this.room): Promise<Blob> {
-    if (!room) throw new Error('Open a project first.'); const cached = await projectCache.output(room.code, id);
-    if (cached && (cached.pending || cached.output.updatedAt >= (room.outputs.find(output => output.id === id)?.updatedAt ?? 0))) return cached.data;
-    const response = await fetch(`/api/projects?code=${encodeURIComponent(room.code)}&output=${encodeURIComponent(id)}`); if (!response.ok) throw new Error('The saved result could not be opened.'); return response.blob();
+    if (!room) throw new Error('Open a project first.');
+    const pending = this.pendingOutputs.get(`${room.code}:${id}`); if (pending) return pending.data;
+    const response = await fetch(`/api/projects?code=${encodeURIComponent(room.code)}&output=${encodeURIComponent(id)}`); if (!response.ok) throw new Error('The saved result could not be opened.');
+    return response.blob();
   }
+  async publishHandoff(archive: Blob, id: string, target = this.room): Promise<HandoffReceipt> {
+    if (!target || target !== this.room || !this.canEdit) throw new Error('Open this project before publishing references.');
+    await this.flush();
+    await this.ensureSession(target);
+    const response = await fetch(`/api/handoffs?code=${encodeURIComponent(target.code)}&id=${id}`, { method: 'POST', headers: { 'Content-Type': 'application/zip', 'x-littletake-edit-lease': this.lease, 'x-littletake-edit-page': this.page }, body: archive });
+    const value = await response.json(); if (!response.ok) throw new Error(value.error?.message ?? 'References could not be published. Retry to keep the same publication.');
+    target.handoffs = [value, ...(target.handoffs ?? []).filter(item => item.id !== value.id)]; return value;
+  }
+  async withdrawHandoff(id: string) {
+    if (!this.room || !this.canEdit) throw new Error('Open the project before withdrawing a reference link.');
+    await this.ensureSession();
+    const response = await fetch(`/api/handoffs?code=${encodeURIComponent(this.room.code)}&id=${id}&revoke=1`, { method: 'POST', headers: { 'x-littletake-edit-lease': this.lease, 'x-littletake-edit-page': this.page } });
+    if (!response.ok) throw new Error((await response.json()).error?.message ?? 'The reference link could not be withdrawn.');
+    const receipt = this.room.handoffs?.find(value => value.id === id); if (receipt) receipt.revokedAt = Date.now();
+  }
+  handoffUrl(receipt: HandoffReceipt) { return new URL(handoffPath(receipt.token), location.origin).href; }
   lookSettings(sceneId: string) { return this.options.project().lookSettings?.[sceneId] ?? { direction: '', anchorId: null, styleId: null }; }
   setLookSettings(sceneId: string, value: Partial<NonNullable<ProjectDocument['lookSettings']>[string]>) {
     if (!this.canEdit) return;
     const project = this.options.project(); project.lookSettings ??= {}; project.lookSettings[sceneId] = { ...this.lookSettings(sceneId), ...value }; this.save(project);
   }
-  async importArchive(file: Blob) {
+  async importArchive(file: Blob, asCopy = false) {
+    const bundle = await readProjectArchive(file), id = asCopy ? newId() : bundle.id ?? newId();
+    if (!asCopy && bundle.id) {
+      const existing = await fetch('/api/projects?id=' + id, { cache: 'no-store' });
+      if (existing.ok) {
+        const room: ProjectRoom = await existing.json();
+        this.transferDialog('Project already exists', 'This archive has the same project ID as a saved project. Open that project or import a separate copy.', [
+          { label: 'Open existing', run: async () => { await this.join(room.code); this.cloudDialog.close(); } },
+          { label: 'Import as a copy', run: () => this.importArchive(file, true) },
+        ]); return;
+      }
+      if (existing.status !== 404) throw new Error('The project could not be checked. Retry before importing.');
+    }
     if (this.room && !await this.leave()) return;
-    const response = await fetch('/api/projects?import=1&id=' + newId(), { method: 'POST', headers: { 'x-littletake-edit-lease': this.lease, 'x-littletake-edit-page': this.page }, body: file });
+    const response = await fetch('/api/projects?import=1&id=' + id, { method: 'POST', headers: { 'x-littletake-edit-lease': this.lease, 'x-littletake-edit-page': this.page }, body: projectArchive({ ...bundle, id }) });
     const value = await response.json(); if (!response.ok) throw new Error(value.error?.message ?? 'The archive could not be imported. Your saved projects are unchanged.'); await this.activate(value);
+    this.cloudDialog.close(); this.listed = null;
   }
   async download() {
     if (!this.room) return;
     const room = this.room, project = structuredClone(this.options.project());
     try { await this.flush(); } catch { /* The archive also preserves a local draft when saving is unavailable. */ }
+    await this.updateCover(true);
+    let cover: CoverAttachment | undefined;
+    if (room.cover) try {
+      const response = await fetch('/api/projects?cover=1&code=' + encodeURIComponent(room.code));
+      if (response.ok) cover = { data: new Uint8Array(await response.arrayBuffer()), current: room.cover.savedVersion === room.savedVersion && !!this.savedText && coverVisual(project) === coverVisual(JSON.parse(this.savedText)) };
+    } catch { /* An unavailable optional image must not prevent downloading the project draft. */ }
     const metadata = new Map(room.outputs.map(output => [output.id, output]));
-    for (const cached of await projectCache.outputs(room.code)) if (cached.pending) metadata.set(cached.output.id, cached.output);
+    for (const entry of this.pendingOutputs.values()) if (entry.room.id === room.id) metadata.set(entry.output.id, entry.output);
     const outputs: { output: ProjectOutput; data: Uint8Array }[] = [];
     for (const output of metadata.values()) outputs.push({ output, data: new Uint8Array(await (await this.output(output.id, room)).arrayBuffer()) });
-    const url = URL.createObjectURL(projectArchive({ project, outputs })), link = document.createElement('a');
+    const url = URL.createObjectURL(projectArchive({ id: room.id, version: room.contentVersion, project, outputs, cover })), link = document.createElement('a');
     link.href = url; link.download = `${project.name.replace(/[^a-z0-9-_ ]/gi, '').trim() || 'LittleTake'}.littletake.zip`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   async saveCopy() {
     if (!this.room) return;
     this.options.stop(); await this.saving?.catch(() => {});
-    const project = parseProject(serializeProject(this.options.project())); project.name = project.name.slice(0, 110) + ' copy';
+    const original = serializeProject(this.options.project()), project = parseProject(original); project.name = project.name.slice(0, 110) + ' copy';
     const sourceCode = this.room.code;
-    const pendingOutputs = (await projectCache.outputs(sourceCode)).filter(output => output.pending);
+    const pendingOutputs = [...this.pendingOutputs.values()].filter(entry => entry.room.code === sourceCode);
     const room = await this.api({ action: 'create', id: newId(), project, sourceCode });
     this.pending = null; await this.activate(room);
-    for (const cached of pendingOutputs) { const { updatedAt: _at, ...metadata } = cached.output; await this.putOutput(metadata, cached.data); }
-    for (const draft of await projectCache.drafts(sourceCode)) await projectCache.saveDraft({ ...draft, dirty: false });
+    for (const entry of pendingOutputs) { const { updatedAt: _at, ...metadata } = entry.output; await this.putOutput(metadata, entry.data); this.pendingOutputs.delete(`${sourceCode}:${metadata.id}`); }
+    await this.api({ action: 'release' }, sourceCode).catch(() => {}); this.listed = null;
   }
   async showResults() {
     if (!this.room) return;
     const dialog = document.createElement('dialog'); dialog.className = 'project-results-dialog'; dialog.setAttribute('aria-label', 'Project results');
-    const outputs = [...this.room.outputs].filter(output => output.kind !== 'style-reference' && output.kind !== 'reference-media');
+    const outputs = [...this.room.outputs].filter(output => !['style-reference', 'reference-media', 'diagnostic', 'asset-draft'].includes(output.kind));
     dialog.innerHTML = `<header><div><small>PROJECT RESULTS</small><h2>${escape(this.options.project().name)}</h2></div><button data-close aria-label="Close results">✕</button></header><p>Look frames, video briefs and reference analyses are kept with this project.</p><div class="project-results-list">${outputs.map(output => `<button data-output="${output.id}"><span>${output.kind === 'look-frame' ? '▧' : output.kind === 'video-brief' ? '▤' : '◇'}</span><div><strong>${escape(output.name)}</strong><small>${escape(output.kind.replaceAll('-', ' '))} · ${new Date(output.updatedAt).toLocaleString()}</small></div><span>↗</span></button>`).join('') || '<div class="projects-empty">No results yet. Open a shot’s Look panel or analyze a reference clip to begin.</div>'}</div><div class="project-result-preview" hidden></div><p class="projects-error" hidden role="alert"></p>`;
+    const urls: string[] = [];
     dialog.querySelector('[data-close]')!.addEventListener('click', () => dialog.close());
-    dialog.addEventListener('close', () => dialog.remove());
+    dialog.addEventListener('close', () => { urls.forEach(url => URL.revokeObjectURL(url)); dialog.remove(); });
     dialog.addEventListener('click', async event => {
       const id = (event.target as HTMLElement).closest<HTMLElement>('[data-output]')?.dataset.output; if (!id) return;
       try {
         const output = outputs.find(value => value.id === id)!, data = await this.output(id);
         if (output.kind === 'reference-analysis') { dialog.close(); this.options.result?.(output, data); return; }
-        const value = JSON.parse(await data.text()), preview = dialog.querySelector<HTMLElement>('.project-result-preview')!; preview.hidden = false; preview.replaceChildren();
+        const preview = dialog.querySelector<HTMLElement>('.project-result-preview')!; preview.hidden = false; preview.replaceChildren();
+        if (output.kind === 'final-video') { const url = URL.createObjectURL(data); urls.push(url); const video = document.createElement('video'); video.src = url; video.controls = true; video.style.width = '100%'; const link = document.createElement('a'); link.href = url; link.download = output.name + (output.mime === 'video/webm' ? '.webm' : '.mp4'); link.textContent = 'Download video'; preview.append(video, link); return; }
+        const value = JSON.parse(await data.text());
         if (output.kind === 'look-frame') { const image = new Image(); image.src = value.image; image.alt = output.name; preview.append(image); const link = document.createElement('a'); link.href = value.image; link.download = output.name + '.png'; link.textContent = 'Download image'; preview.append(link); }
         else { const text = document.createElement('p'); text.textContent = value.brief.prompt; preview.append(text); }
       } catch (error) { const message = dialog.querySelector<HTMLElement>('.projects-error')!; message.hidden = false; message.textContent = (error as Error).message; }

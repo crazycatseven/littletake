@@ -116,7 +116,7 @@ export class XRRecording {
     const current = animationFor(this.before) ?? emptyAnimation();
     let n = 1; while (current.takes.some(take => take.id === `xr-take-${n}`)) n++;
     this.result = { ...structuredClone(this.before), track: null,
-      animation: keepRecordedTake(current, `xr-take-${n}`, this.processed, this.duration) };
+      animation: keepRecordedTake(current, `xr-take-${n}`, this.processed, this.duration, { recordScale: false }) };
     this.mode = 'review'; this.time = this.start;
   }
   cancelGrip(): void {

@@ -24,7 +24,7 @@ Demo input: **The Grand Budapest Hotel — Interview with Zero**, source 0:33–
 
 Desktop scope: mouse/keyboard authoring, text prompts and reference clips.
 
-**Local development:** Projects, embedded assets, conversations and generated results are saved by the local Node server. One person edits a project while others join by code to view it. Cloud deployment is deferred for this version.
+**Storage:** Projects, generated results, conversations and reusable assets use one persistent application data directory. The production Node entry point serves the editor and APIs from a server with a durable disk. One shared workspace is supported; account separation remains deferred. See [application deployment](server/app/README.md).
 
 ### AI Understanding
 
@@ -44,14 +44,14 @@ Desktop scope: mouse/keyboard authoring, text prompts and reference clips.
 | **P0** | **Desktop editor** | Mouse/keyboard tools for direct scene editing. | Done |
 | **P0** | **AI scene editing** | Saved Muse conversations; build sets from an empty project and preview edits across scenes, objects, cameras and shots. | Done |
 | **P0** | **Motion & camera authoring** | Property keyframes for transforms, camera FOV, pivot offsets and articulated parts; manual movement recording and independent camera moves. | Done |
-| **P0** | **Local project workspace** | Recent projects, code sharing, one editing seat, independent conversations, SQLite autosave and portable project archives. | Done |
+| **P0** | **Local project workspace** | Server project lists, code sharing, one editing seat, independent conversations, SQLite autosave and portable project archives. | Done |
 | **P1** | **Advanced timing authoring** | Refine timing, sequencing and synchronization across actions and cameras. | Todo |
 
 ### Generation
 
 | P | Module | Scope | Status |
 | --- | --- | --- | --- |
-| **P0** | **Muse Video generation** | Combine proxy previs and creative prompts to guide final video generation; validate Muse Video reference-input and API support. | Todo |
+| **P0** | **Muse Video handoff** | Publish fixed shot references, prompts and previs for an official Muse conversation; import finished video. Public deployment and Muse reference ingestion still need validation. | Partial |
 | **P0** | **Video brief & package** | Muse Spark reads a shot's look frames, blocking and camera timing and writes an image-to-video prompt with timed beats; one click downloads brief, frames, previs WebM and a manifest for any video model. | Done |
 | **P0** | **Look-frame generation** | Muse Image renders finished film stills from clean previs frames with the shot composition locked; the first approved frame anchors the look of later frames and shots. | Partial |
 
@@ -79,7 +79,7 @@ Desktop scope: mouse/keyboard authoring, text prompts and reference clips.
 Deferred Todo:
 
 - [ ] Multi-account support: sign-in, per-account project management and private asset libraries.
-- [ ] Durable cloud asset storage and synchronization.
+- [ ] Deploy persistent application storage and migrate local projects.
 
 ## Development
 
@@ -108,6 +108,8 @@ npm run dev
 
 Vercel deploys `main` to production and creates previews for other branches and pull requests.
 
+`npm run build && npm start` runs the production editor and persistent APIs together. Shot **Look → Create Muse link** publishes an immutable read-only reference page for a user to submit in Muse. **Import finished video** saves returned MP4/WebM output with its shot. Public sharing requires an externally reachable HTTPS deployment. See [server setup, migration and verification](server/app/README.md).
+
 The studio includes six primitives, transform tools, an independent shot preview, editable property keyframes, local saves, JSON and PNG/WebM export, reference-video import and conversational Muse scene editing. The in-app **Shortcuts** panel lists navigation controls.
 
 **Parenting:** drag an object or camera onto another Hierarchy row to make it a child; drop on the root strip to detach. Multi-selection moves the selected roots together. The Inspector's **Parent** field uses the same operation. Reparenting keeps the current world pose and existing motion; parent movement, rotation and scale then affect its children. Duplicate and delete include descendants, and Undo restores the entire edit. Parents and local animation are saved with the scene. Combinations of non-uniform scale and rotation that cannot preserve an animated pose are rejected without changing the scene. Prefab Mode supports the same drag-to-parent and drop-to-origin flow for source parts; generated modifier copies are edited through their source.
@@ -116,9 +118,11 @@ The studio includes six primitives, transform tools, an independent shot preview
 
 **Shot Export:** the preview panel's **Export** button opens a frozen scene snapshot. Still image exports a PNG at the current scene time; Video exports the current shot's time range as a silent WebM at 24 or 30 fps. Both support 1920×1080 and 1280×720 and omit editor overlays. Frames are evaluated at exact scene times independently of encoding speed. Cancel discards the unfinished file; completed output can be previewed and downloaded. Export does not change the scene or playhead. Video encoding requires WebCodecs on **localhost or HTTPS**; an unsupported browser or insecure remote address shows an explanation. PNG remains available. Implementation lives in `src/shot-export/`; browser and file verification is recorded in [editor basics verification](docs/verification/editor-basics.md).
 
-The local workspace stores multiple projects. Each project contains multiple physical scenes and multiple Muse conversations. Each conversation has separate messages and a saved draft; all conversations work on the same project. The scene and shot selectors choose the current context; each message records its scene, shot and selection. Use the conversation title to switch chats and **+** to start a new one. **Muse / Inspector** switches the right panel. Refresh restores the project, including chat history. An interrupted response is saved for an explicit retry.
+The workspace stores multiple projects, each with a stable UUID. Local deployments save edits automatically to local SQLite; **Projects → Open from cloud** downloads a cloud project, and the header's **Upload to cloud** icon explicitly publishes local changes. The hosted site saves edits automatically to its cloud database. Normal editing has no save-status text. See [application storage and connection setup](server/app/README.md) for configuration and conflict behavior.
 
-**Export project** includes every scene, camera, shot, conversation and referenced asset definition. Scene exports containing assets are portable single-scene project files. **Open scene / project** restores a project, or adds a standalone scene to the current project. The scene menu also provides **Export current scene** and **New empty project** (downloads the existing project first). New scenes start empty; Muse can propose a complete set from a description. v1 scene/project files migrate automatically, including camera motion and chat receipts. Reusable assets live in the local server library; cloud sync remains planned. Clearing browser storage removes recent-project shortcuts and unsent drafts; saved projects remain in the local server and can be reopened by code. Export a project to keep a portable copy.
+Each project contains multiple physical scenes and multiple Muse conversations. Each conversation has separate messages and a saved draft; all conversations work on the same project. The scene and shot selectors choose the current context; each message records its scene, shot and selection. Use the conversation title to switch chats and **+** to start a new one. **Muse / Inspector** switches the right panel. Refresh restores the project, including chat history. An interrupted response is saved for an explicit retry.
+
+**Export project** includes every scene, camera, shot, conversation and referenced asset definition. Scene exports containing assets are portable single-scene project files. **Open scene / project** restores a project, or adds a standalone scene to the current project. The scene menu also provides **Export current scene** and **New empty project** (downloads the existing project first). New scenes start empty; Muse can propose a complete set from a description. v1 scene/project files migrate automatically, including camera motion and chat receipts. Reusable libraries stay on their workspace; referenced asset definitions travel with each project. Saved projects belong to the running service; changing browsers or clearing site data does not remove them. Export a project to keep a portable copy.
 
 The saved model uses **Project → Scenes**, and each scene owns **Objects, Cameras and Shots**. **Assets / Scenes** lists the current project's scenes, with open, new and undoable delete actions; deleting a scene keeps reusable library assets. Cameras own their transform, field of view and motion; each shot references one camera and a range of scene time. **Add Shot** reuses the selected camera, then the active shot's camera, then the scene's first camera; it creates a camera only when none exists. Shots sharing a camera also share its framing and motion. Use **Duplicate shot and camera** for independent framing. Remove or reassign a camera's shots before deleting it. Actors, props and cameras use absolute scene seconds. Playback runs the whole scene and switches cameras at shot boundaries; overlapping ranges use the most recently started shot. Changing a scene's duration preserves action timing and rejects ranges that would no longer fit.
 
@@ -128,7 +132,7 @@ Each Muse turn replays that conversation's user/assistant history with the lates
 
 Scene editing uses JSON output with a supplied schema, followed by strict local schema validation and an atomic project preview. Each request includes the current scene/entity IDs and actual object counts. Explicit Chinese/English object totals such as “最多 10 个物体”, “剩 9 个物体”, “at most 10 objects” and “exactly 3 objects” are bound to scenes and checked against the full proposed result, including floors and people but excluding cameras/shots and internal asset parts. A compound asset instance counts as one object. Missing or failed checks receive the same single correction attempt. These are per-request constraints; implicit counts in a list of props and arbitrary natural-language constraints are not deterministic checks.
 
-**Download diagnostics** exports this conversation's messages/application receipts and each request's original input, model request, raw output, parsed proposal, native tool calls/results and validation/provider errors, including rejected correction attempts. Inputs are saved to IndexedDB before inference; responses are saved before showing a preview. Records survive refresh on this browser and origin, independently of project localStorage. Headers and API credentials are never included. Export diagnostics separately from **Export project** to retain them outside this browser; clearing site data removes both stores.
+**Download diagnostics** exports this conversation's messages/application receipts and each request's original input, model request, raw output, parsed proposal, native tool calls/results and validation/provider errors, including rejected correction attempts. Inputs are saved as project outputs on the running service before inference; responses are saved before showing a preview. Records survive refresh and a change of browser, and travel with project archives. Headers and API credentials are never included. Diagnostics can also be downloaded separately.
 
 For video analysis, copy `.env.example` to `.env.local` and set `MODEL_API_KEY` and `MUSE_MODEL`. Vite serves the same `/api/reference` handler locally that Vercel runs in production. Model credentials are server-side environment variables.
 
@@ -140,10 +144,14 @@ Every revision is rendered against the same original pixels before approval. Pai
 
 ### Local project workspace
 
-Use Node.js 24 or newer and run `npm run dev`. **Projects** opens recent projects, creates a blank or starter project, imports a save, or joins a project code. A previous browser save is migrated once and its original data is retained. Project names can be edited in the header. Recent projects belong to the current browser; another browser joins using the code or link in **Share**. No account is required.
+The hosted website is the main workspace: projects, assets, conversations and results save automatically to the cloud. **Projects** opens the Gallery with one cover per project, name search and sorting; click a card to enter the editor. No account is required. **Share** provides a code or link.
+
+For local editing, use Node.js 24 or newer and run `run.bat` or `npm run dev` with `LITTLETAKE_MODE=local` and `LITTLETAKE_CLOUD_URL=https://littletake.crazycat.ai`. The Gallery shows cloud projects first; opening one downloads its snapshot to the local service. **Downloaded projects** lists those copies. Local edits, conversations, results and covers have **no autosave**. **Upload to cloud** or Ctrl/Cmd S manually uploads the current content under the same project ID; **Export project** keeps a portable file. Leaving without uploading warns before discarding changes. When the cloud version changed, choose **Replace cloud version** to overwrite it; an active cloud editor blocks replacement. The browser does not maintain a persistent project cache.
+
+The editor's browser renders 640 × 360 WebP covers from the saved active scene at its shot's start, or an overview without a camera. The project service stores covers in SQLite and includes them in backups, copies, archives and cloud transfers. Gallery viewers load shared images without rendering scenes. Hosted projects refresh changed covers when returning to Gallery and at most every five minutes while idle; missing or stale covers refresh on opening the editor. Local covers refresh only during manual upload. Closing the page keeps the last uploaded image. Names and conversations do not trigger new images.
 
 `server/projects/` stores project documents, rendered results and cumulative reference-call budgets in `.littletake/projects.sqlite`. Used asset definitions, all scenes, cameras, shots, property animation and conversations belong to the project document. Look directions, style references, anchor frames, look images, video briefs and reference-analysis checkpoints survive reopening. **Results** opens saved generated work and interrupted analyses. Completed analysis steps are retained; continuing always requires an explicit action. Closing the page cancels its active analysis and rendering.
-One editor holds a 90-second lease, renewed every 20 seconds. Other participants view saved changes. Closing normally releases the seat; each page has its own identifier so a delayed old-page request cannot release or save over a reloaded page. Version checks reject stale documents. Browser IndexedDB retains unsent drafts and outputs during a connection failure. Retrying a create or save uses the original request identity. Saving is checked before switching projects; conflicts can be downloaded or preserved as a new project.
+One editor holds a 90-second lease, renewed every 20 seconds. Other participants view saved changes. Closing normally releases the seat; each page has its own identifier so a delayed old-page request cannot release or save over a reloaded page. Version checks reject stale documents. Unsent changes remain in page memory during a connection failure; keep the page open until saving succeeds, or export a copy. Retrying a create or save uses the original request identity. Hosted projects flush before switching; local editing asks before discarding unsaved changes. A manual upload first stages its snapshot locally, so a failed transfer can be retried without losing that version.
 
 **Export project** downloads a `.littletake.zip` containing the document and all saved outputs. **Import project** restores that archive as a separate project. Older scene/project JSON files remain supported. Project documents are limited to 20 MB, each output to 64 MB, and an archive to 250 MB. Import validation and writes are atomic. Corrupt archives cannot replace an existing project. The SQLite online backup API includes committed WAL data.
 
@@ -161,6 +169,10 @@ Verification: `node --import tsx --test server/projects/rooms.test.ts src/projec
 
 The editor currently exports a hand-off for image-to-video generation. In **Look**, **Write video brief** sends up to three frames of the shot (look frames when rendered, otherwise previs) with its camera poses, field of view and each framed subject's screen side, depth and in-shot motion to Muse Spark (`/api/brief`). It returns one prompt paragraph, a camera line, timed beats and things to avoid. **Download package** saves a ZIP with `brief.md`, `manifest.json`, every look and previs still and `previs.webm` (when the browser can encode WebM). Direct video generation is not integrated.
 
+### Project script components
+
+Muse can write, check and attach reusable JavaScript controllers. Script parameters appear in Inspector; control and recording use the existing performance workflow. Definitions save with the project and support checked hot reload. See [script authoring, storage and runtime](src/scripts/README.md).
+
 ### Asset library and modeling expert
 
 The local reusable library uses stable prefab IDs and atomic file writes. Project documents embed the definitions they use; independent instances keep their placement, components and root/joint animation. The asset workshop and bounded expert share the same recipe and rendering implementation as the scene.
@@ -175,7 +187,7 @@ Reference-frame segmentation uses `SAM_PROVIDER=cloud` by default. A prepared lo
 
 Muse conversations accept an original image or clip through **+ Reference**. Loading a clip in **Video or sketch** shares it with the active conversation as well. The browser selects up to six candidates using cuts, sharpness and temporal coverage, retaining decoded timestamps. Muse inspects the contact sheet, reads chosen originals with `read_reference_frame`, and calls `segment_reference` for a short noun concept. It can use `request_reference_frame` to ask for up to two additional timestamps before continuing. These are original reference pixels, separate from rendered scene views.
 
-Original reference media and segmentation observations are saved with their conversation in the project, with a project-scoped IndexedDB cache. Previous browser-only references are copied into the active project without deleting the originals. The portable project archive includes this media and supports later timestamp requests after import on another browser. Legacy JSON exports do not include media; request diagnostics contain the frames used for that request. Each user turn allows at most four new SAM attempts across frame and scene-view follow-ups, including failures. Matching cached observations are reused; provider failures are not automatically retried. SAM returns 2D masks and composition measurements; it does not establish depth or metric layout.
+Original reference media and segmentation observations are saved with their conversation as project outputs on the running service. Previous browser-only content is archived on the service before the old browser records are cleared. The portable project archive includes this media and supports later timestamp requests after import on another browser. Legacy JSON exports do not include media; request diagnostics contain the frames used for that request. Each user turn allows at most four new SAM attempts across frame and scene-view follow-ups, including failures. Matching cached observations are reused; provider failures are not automatically retried. SAM returns 2D masks and composition measurements; it does not establish depth or metric layout.
 
 Agent safeguards apply to one task, not a cumulative development quota: the director stops after two consecutive tool rounds with no new successful observation, with twelve shared Muse calls per backend request. Completed observations and ready assets survive a stop; scene edits remain a reviewable proposal. Development verification records calls and errors without a lifetime call ceiling.
 

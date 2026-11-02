@@ -1,0 +1,5 @@
+{$LITTLETAKE_DOMAIN} {
+    encode zstd gzip
+    reverse_proxy app:8080
+    header Referrer-Policy same-origin
+}
