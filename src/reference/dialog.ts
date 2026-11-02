@@ -150,7 +150,7 @@ export class ReferenceDialog {
       // Cut detection runs in the background on the local file; analysis waits for it only briefly.
       // Its own controller: starting an analysis must not cancel detection of the same clip.
       this.cuts = detectCuts(this.objectURL, video.duration, this.cutsController!.signal);
-      void this.cuts.then(cuts => { if (operation === this.operation && cuts.length) this.find('#referenceMetadata').textContent = `${metadata} · ${cuts.length} cut${cuts.length === 1 ? '' : 's'} at ${cuts.map(at => at.toFixed(1) + 's').join(', ')}`; });
+      void this.cuts.then(cuts => { if (operation === this.operation && cuts.length) this.find('#referenceMetadata').textContent = `${metadata} · ${cuts.length + 1} shots, cut at ${cuts.map(at => at.toFixed(1) + 's').join(', ')} · every shot is rebuilt`; });
       this.emptyReport('Ready to analyze', 'Muse will estimate the visible objects, their motion and the camera.');
     } catch (error) {
       if (operation !== this.operation) return;
@@ -211,7 +211,7 @@ export class ReferenceDialog {
       this.showTracks(draft);
       const animated = draft.scene.objects.filter(item => item.track).length;
       this.find('#referenceState').textContent = 'DRAFT READY';
-      this.find('#referenceReport').innerHTML = `<div class="reference-draft-summary"><h3>${escapeHTML(draft.scene.name)}</h3><p>${escapeHTML(draft.summary)}</p><div class="reference-output-tags"><span>${draft.scene.objects.length} objects</span><span>${animated} moving</span><span>${shotCamera(draft.scene,draft.scene.shots[0]?.id??null)?.track ? 'Moving camera' : 'Fixed camera'}</span></div></div><ul class="reference-object-list">${draft.scene.objects.map(item => `<li><span class="reference-kind">${escapeHTML(item.kind)}</span><span>${escapeHTML(item.name)}</span></li>`).join('')}</ul>${draft.assumptions.length ? `<div class="reference-assumptions"><h4>Estimated / simplified</h4><ul>${draft.assumptions.map(item => `<li>${escapeHTML(item)}</li>`).join('')}</ul></div>` : ''}`;
+      this.find('#referenceReport').innerHTML = `<div class="reference-draft-summary"><h3>${escapeHTML(draft.scene.name)}</h3><p>${escapeHTML(draft.summary)}</p><div class="reference-output-tags"><span>${draft.scene.objects.length} objects</span><span>${animated} moving</span>${draft.scene.shots.length > 1 ? `<span>${draft.scene.shots.length} shots</span><span>${draft.scene.cameras.filter(camera => camera.track).length} moving cameras</span>` : `<span>${shotCamera(draft.scene,draft.scene.shots[0]?.id??null)?.track ? 'Moving camera' : 'Fixed camera'}</span>`}</div></div><ul class="reference-object-list">${draft.scene.objects.map(item => `<li><span class="reference-kind">${escapeHTML(item.kind)}</span><span>${escapeHTML(item.name)}</span></li>`).join('')}</ul>${draft.assumptions.length ? `<div class="reference-assumptions"><h4>Estimated / simplified</h4><ul>${draft.assumptions.map(item => `<li>${escapeHTML(item)}</li>`).join('')}</ul></div>` : ''}`;
     } catch (error) {
       if (operation !== this.operation) return;
       this.showError((error as Error).message); this.emptyReport('Analysis did not finish', 'Your current scene is unchanged. You can try again.');

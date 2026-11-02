@@ -109,8 +109,10 @@ export function groundReferenceDraft(draft: ReferenceDraft, input: VideoReferenc
   // Tracks continue across hard cuts while the draft only rebuilds the first shot, so a clip with cuts keeps Muse's
   // placement and timing and shows the tracks for review only.
   const hasCuts = !input.video.cuts?.length && draft.assumptions.some(note => /\bcuts?\b|multiple shots|several shots/i.test(note));
-  const placedNames: string[] = [], timedNames: string[] = [], unplaced: string[] = [];
+  const placedNames: string[] = [], timedNames: string[] = [], unplaced: string[] = [], continuing: string[] = [];
   for (const { track, person } of hasCuts ? [] : pairs) {
+    // Every shot is rebuilt, so motion that carries on past the first cut keeps Muse's whole-clip timing.
+    if (input.video.cuts?.length && person.track && person.track.start + person.track.duration > shotEnd + .05) { continuing.push(person.name); continue; }
     const samples = track.samples, grounded = samples.filter(sample => sample.ground).length / samples.length >= .7;
     const mode: Mode | null = grounded ? 'ground' : moving(camera) ? null : 'image';
     const motion = mode ? movement(samples, mode) : null;
@@ -138,6 +140,7 @@ export function groundReferenceDraft(draft: ReferenceDraft, input: VideoReferenc
   if (placedNames.length) notes.push(`Placed ${placedNames.join(', ')} on the floor at their tracked foot points.`);
   if (timedNames.length) notes.push(`Movement timing from tracking: ${timedNames.join('; ')}.`);
   if (unplaced.length) notes.push(`${unplaced.join(', ')} moved in the footage, but their feet were not visible enough to place the move.`);
+  if (continuing.length) notes.push(`${continuing.join(', ')} keep${continuing.length === 1 ? 's' : ''} Muse's timing because the movement continues past the first cut.`);
   const reviewTracks: ReferenceTrack[] = tracks.map((track, index) => {
     const pair = pairs.find(item => item.track === track), boxes: ReferenceTrack['boxes'] = [];
     let last = -Infinity;

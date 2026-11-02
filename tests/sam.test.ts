@@ -103,6 +103,16 @@ test('detected cuts limit tracking to the first shot instead of disabling it', (
   assert.doesNotMatch(result.assumptions.at(-1)!, /review only/);
 });
 
+test('in a multi-shot draft, motion that continues past the first cut keeps Muse timing', () => {
+  const base = draft(), bellboy = base.scene.objects.find(item => item.name === 'Bellboy')!;
+  // Muse's whole-clip move runs from 1 s to 4.5 s, beyond the cut at 2.5 s.
+  bellboy.track = { start: 1, duration: 3.5, from: structuredClone(bellboy.transform), to: { ...structuredClone(bellboy.transform), position: [2, 0, -1] } };
+  const before = structuredClone(bellboy.track);
+  const result = groundReferenceDraft(base, { ...input(), video: { ...input().video, cuts: [2.5] } }, walkTracks());
+  assert.deepEqual(result.scene.objects.find(item => item.name === 'Bellboy')!.track, before);
+  assert.match(result.assumptions.at(-1)!, /Bellboy keeps Muse's timing because the movement continues past the first cut/);
+});
+
 test('clips with cuts keep Muse placement and show tracks for review only', () => {
   const withCuts = { ...draft(), assumptions: ['Clip contains multiple cuts; only the FIRST shot is reconstructed.'] };
   const result = groundReferenceDraft(withCuts, input(), walkTracks());

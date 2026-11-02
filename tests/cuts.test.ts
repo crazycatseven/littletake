@@ -31,7 +31,7 @@ test('a continuous shot with camera motion has no cuts, and close spikes count o
   assert.deepEqual(findCuts([], []), []);
 });
 
-test('reference input keeps valid cuts in order and tells Muse the first shot', async () => {
+test('reference input keeps valid cuts in order and asks Muse for every shot', async () => {
   assert.deepEqual(parseReferenceInput(input([5.5, 1.9, 1.9, 0.05, 11.95])).video.cuts, [1.9, 5.5]);
   assert.equal('cuts' in parseReferenceInput(input([])).video, false);
   assert.throws(() => parseReferenceInput(input(['1'])), { code: 'invalid_input' });
@@ -39,5 +39,6 @@ test('reference input keeps valid cuts in order and tells Muse the first shot', 
   const seen: StructuredRequest[] = [];
   const provider: AIProvider = { name: 'Meta', model: 'test', async generateObject(request) { seen.push(request); throw new Error('stop'); } };
   await assert.rejects(analyzeReference(parseReferenceInput(input([1.9, 5.5])), provider));
-  assert.match((seen[0].content[0] as { text: string }).text, /Hard cuts detected at 1\.90, 5\.50 s\. The first shot runs from 0 to 1\.90 s/);
+  assert.match((seen[0].content[0] as { text: string }).text, /3 shots: shot 1 0\.00–1\.90 s; shot 2 1\.90–5\.50 s; shot 3 5\.50–12\.00 s/);
+  assert.equal(seen[0].schemaName, 'littletake_reference_shots'); assert.match(seen[0].instructions, /exactly one camera per shot/);
 });

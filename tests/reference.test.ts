@@ -161,3 +161,53 @@ test('the API stages an image without starting SAM video tracking', async () => 
   assert.equal(response.status, 200); assert.equal((await response.json()).scene.duration, 5); assert.equal(tracked, 0);
   assert.equal((await handler(request(sketch('data:image/png;base64,' + Buffer.from('fake').toString('base64'))))).status, 400);
 });
+
+const shotsProposal = () => ({
+  name: 'Lobby exchange', summary: 'A guest crosses to the desk; three shots cover it.', assumptions: ['Depth is estimated.'],
+  objects: [
+    { name: 'Guest', kind: 'human', transform: { position: [-3, 0, 0], rotation: [0, 90, 0], scale: [1, 1, 1] },
+      keys: [{ time: 1, transform: { position: [-3, 0, 0], rotation: [0, 90, 0], scale: [1, 1, 1] } }, { time: 4, transform: { position: [0, 0, 0], rotation: [0, 90, 0], scale: [1, 1, 1] } },
+        { time: 7, transform: { position: [1.5, 0, -.5], rotation: [0, 120, 0], scale: [1, 1, 1] } }] },
+    { name: 'Desk', kind: 'cube', transform: { position: [2.5, .55, -.5], rotation: [0, 0, 0], scale: [2.6, 1.1, .8] }, keys: [] },
+  ],
+  shots: [
+    { camera: { position: [0, 1.7, 8], target: [0, 1, 0], fov: 40, motion: null } },
+    { camera: { position: [-4, 1.5, 3], target: [0, 1.2, 0], fov: 35, motion: { start: 2, duration: 9, from: { position: [-4, 1.5, 3], target: [0, 1.2, 0] }, to: { position: [-2, 1.5, 3], target: [1, 1.2, 0] } } } },
+    { camera: { position: [4, 1.6, 2], target: [1.5, 1.4, -.5], fov: 30, motion: null } },
+  ],
+});
+
+test('a clip with cuts becomes one shared set with a camera and shot per cut, and motion continuous across cuts', async () => {
+  const { sceneFromMultiShotProposal } = await import('../server/reference/draft.ts');
+  const { scene, assumptions } = sceneFromMultiShotProposal(shotsProposal(), 9, [2.5, 6]);
+  assert.deepEqual(scene.shots.map(shot => [shot.cameraId, shot.start, shot.duration]), [['camera-1', 0, 2.5], ['camera-2', 2.5, 3.5], ['camera-3', 6, 3]]);
+  assert.equal(scene.cameras.length, 3);
+  // The second camera's move is clamped into its own shot instead of running across the cut.
+  const move = scene.cameras[1].track!;
+  assert.equal(move.start, 2.5); assert.equal(move.start + move.duration, 6);
+  const guest = scene.objects[0];
+  assert.equal(guest.track!.start, 1); assert.equal(guest.track!.duration, 6); assert.equal(guest.track!.samples!.length, 1);
+  assert.deepEqual(evaluateTransform(guest, 4).position, [0, 0, 0]);
+  assert.ok(Math.abs(evaluateTransform(guest, 5.5).position[0] - .75) < 1e-9, 'keeps moving through the cut at 6 s');
+  assert.equal(scene.objects[1].track, null);
+  assert.deepEqual(parseDocument(serializeDocument(scene)), scene);
+  assert.equal(assumptions.length, 1);
+
+  // Fewer cameras than detected shots: the last camera covers the rest, and the draft says so.
+  const short = { ...shotsProposal(), shots: shotsProposal().shots.slice(0, 2) };
+  const reused = sceneFromMultiShotProposal(short, 9, [2.5, 6]);
+  assert.deepEqual(reused.scene.cameras[2].transform, reused.scene.cameras[1].track!.from);
+  assert.match(reused.assumptions.at(-1)!, /2 cameras for 3 detected shots/);
+  for (const mutate of [(value: ReturnType<typeof shotsProposal>) => { value.objects[0].keys[2].time = 30; }, (value: ReturnType<typeof shotsProposal>) => { value.shots[0].camera.target = [0, 1.7, 8]; }]) {
+    const value = shotsProposal(); mutate(value);
+    assert.throws(() => sceneFromMultiShotProposal(value, 9, [2.5, 6]), (error: unknown) => error instanceof AIError && error.code === 'invalid_scene');
+  }
+});
+
+test('the API rebuilds every shot of a clip with cuts', async () => {
+  const handler = createReferenceHandler({ MODEL_API_KEY: 'test-key' }, () => ({ name: 'Test', model: 'test', async generateObject(request) { assert.equal(request.schemaName, 'littletake_reference_shots'); return shotsProposal(); } }), () => null);
+  const response = await handler(request({ ...input(), video: { ...input().video, duration: 9, cuts: [2.5, 6] } }));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.scene.shots.length, 3); assert.equal(body.scene.cameras.length, 3);
+});
