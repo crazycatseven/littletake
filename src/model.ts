@@ -2,6 +2,8 @@ import { validateParents } from './placement/hierarchy.ts';
 export { evaluateTransform } from './animation/model.ts';
 import { Euler, MathUtils, Matrix4, Quaternion, Vector3 } from 'three';
 import { z } from 'zod';
+import { applyChanges, changesBetween, type Change } from './project/changes.ts';
+import { newId } from './id.ts';
 
 import type { MotionTrack, PrimitiveKind, SceneDocument, SceneEntity, SceneObject, SceneCamera, Shot, Transform, Vec3 } from './types.ts';
 import { assetReferenceSchema, jointAnglesSchema, migrateAssetValue } from './assets/model.ts';
@@ -235,8 +237,7 @@ export function shotAtTime(scene: SceneDocument, time: number): Shot | undefined
 /** Create the first shot in an empty scene, or explicitly duplicate a shot with its own camera. */
 export function addIndependentShot(scene: SceneDocument, source?: Shot): Shot {
   if (scene.shots.length >= 100 || scene.cameras.length >= MAX_CAMERAS) throw new Error('Scene camera or shot limit reached.');
-  const ids = new Set([...scene.objects, ...scene.cameras, ...scene.shots].map(item => item.id));
-  const next = (prefix: string) => { let n = 1; while (ids.has(`${prefix}-${n}`)) n++; const id = `${prefix}-${n}`; ids.add(id); return id; };
+  const next = (prefix: string) => `${prefix}-${newId()}`;
   const original = source ? shotCamera(scene, source.id) : undefined;
   if (source && !original) throw new Error('Shot camera is missing.');
   const camera = original ? structuredClone(original) : createCamera(next('camera'), `Camera ${scene.cameras.length + 1}`);
@@ -344,27 +345,31 @@ export function parseDocument(json: string): SceneDocument {
 }
 
 export class History<T extends object = SceneDocument> {
-  private past: T[] = [];
-  private future: T[] = [];
+  private past: Change[][] = [];
+  private future: Change[][] = [];
+  private current!: T;
   constructor(initial: T) { this.reset(initial); }
-  get canUndo(): boolean { return this.past.length > 1; }
+  get canUndo(): boolean { return this.past.length > 0; }
   get canRedo(): boolean { return this.future.length > 0; }
   commit(doc: T): void {
-    this.future = [];
-    if (JSON.stringify(this.past[this.past.length - 1]) === JSON.stringify(doc)) return;
-    this.past.push(structuredClone(doc));
-    if (this.past.length > 100) this.past.shift();
+    const changes = changesBetween(this.current, doc); if (!changes.length) return;
+    this.future = []; this.past.push(changes); this.current = structuredClone(doc);
+    if (this.past.length > 99) this.past.shift();
   }
   undo(): T | null {
     if (!this.canUndo) return null;
-    this.future.push(this.past.pop()!);
-    return structuredClone(this.past[this.past.length - 1]);
+    return this.travel(this.past, this.future);
   }
   redo(): T | null {
     if (!this.canRedo) return null;
-    const doc = this.future.pop()!;
-    this.past.push(doc);
-    return structuredClone(doc);
+    return this.travel(this.future, this.past);
   }
-  reset(doc: T): void { this.past = [structuredClone(doc)]; this.future = []; }
+  private travel(from: Change[][], to: Change[][]): T {
+    const inverse = from.pop()!.slice().reverse().map(change => ({ ...change, before: change.after, after: change.before, guard: true })).sort((a, b) => Number(!!a.order) - Number(!!b.order));
+    const next = applyChanges(this.current, inverse);
+    to.push(changesBetween(this.current, next)); this.current = next; return structuredClone(next);
+  }
+  /** Remote edits update the current state, but never become this user's undo steps. */
+  receive(doc: T): void { this.current = structuredClone(doc); }
+  reset(doc: T): void { this.current = structuredClone(doc); this.past = []; this.future = []; }
 }

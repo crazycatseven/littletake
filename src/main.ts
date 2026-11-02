@@ -84,9 +84,10 @@ const app = $('#app');
 app.innerHTML = `
 <header class="app-header">
   <a class="brand" href="/" aria-label="LittleTake Studio"><span class="brand-mark">L</span><span>LittleTake</span></a>
+  <button class="projects-link" data-action="projects" title="Back to projects">${icon('folder')}<span>Projects</span></button>
   <div class="project-title"><input id="projectName" aria-label="Project name" maxlength="120"/></div>
   <div class="history-actions"><button class="icon-button" data-action="undo" aria-label="Undo" title="Undo · Ctrl Z">${icon('undo')}</button><button class="icon-button" data-action="redo" aria-label="Redo" title="Redo · Ctrl Shift Z">${icon('redo')}</button></div>
-  <div class="header-actions"><button data-action="reference">${icon('camera')}<span>Video or sketch</span></button><button class="primary-button" data-action="export">${icon('download')}<span>Export project</span></button><details class="studio-menu" id="sceneMenu"><summary aria-label="Scene menu" title="Scene menu">${icon('more')}</summary><div class="menu-content"><button data-action="open">${icon('folder')}Open scene / project</button><button data-action="export-scene">${icon('download')}Export current scene</button><button data-action="top-view">${icon('eye')}Layout snapshot</button><button data-action="new-project">${icon('plus')}New project</button><button data-action="save">${icon('save')}Save locally<kbd>⌘ / Ctrl S</kbd></button><button data-action="shortcuts">${icon('help')}Keyboard shortcuts</button></div></details></div>
+  <div class="header-actions"><button data-action="project-results" title="Saved videos and film stills">Renders</button><button data-action="share-project" title="Share project link">Share</button><button class="icon-button" data-action="upload-cloud" title="Upload to cloud" aria-label="Upload to cloud" hidden>${icon('upload')}</button><button class="primary-button" data-action="export-shot" title="Render the current shot as a video or still image">${icon('camera')}<span>Render</span></button><details class="studio-menu" id="sceneMenu"><summary aria-label="Project menu" title="Project menu">${icon('more')}</summary><div class="menu-content"><button data-action="open">${icon('folder')}Open scene / project</button><button data-action="export">${icon('download')}Export project</button><button data-action="export-scene">${icon('download')}Export current scene</button><button data-action="reference">${icon('camera')}Scene from video or sketch</button><button data-action="top-view">${icon('eye')}Layout snapshot</button><button data-action="new-project">${icon('plus')}New project</button><button data-action="save">${icon('save')}Save locally<kbd>⌘ / Ctrl S</kbd></button><button data-action="shortcuts">${icon('help')}Keyboard shortcuts</button></div></details></div>
 </header>
 <div class="storage-warning" id="storageWarning" role="alert" hidden><span></span><button data-action="export-project">Download your changes</button><button data-action="recover-storage" hidden>Download saved data</button><button data-action="open">Open project</button><button data-action="reload">Reload</button></div>
 <main class="workspace">
@@ -170,7 +171,7 @@ const entity = (id = selection.active): SceneEntity | undefined => sceneEntity(d
 const copyPose = (pose: Transform): Transform => structuredClone(pose);
 const num = (value: number) => Number(value.toFixed(3));
 const timecode = (value: number) => `${Math.floor(value / 60).toString().padStart(2,'0')}:${Math.floor(value % 60).toString().padStart(2,'0')}.${Math.floor((value % 1)*100).toString().padStart(2,'0')}`;
-function nextId(prefix:string,items:{id:string}[]){let n=1;while(items.some(item=>item.id===prefix+'-'+n))n++;return prefix+'-'+n;}
+function nextId(prefix:string,_items:{id:string}[]){return prefix+'-'+newId();}
 function visibleScene(){return editPreview?.scenes.find(scene=>scene.id===previewSceneId)??(editPreview?emptyView:doc);}
 function activeShot(){return visibleScene().shots.find(shot=>shot.id===(editPreview?previewShotId:project.activeShotId));}
 function syncDocument(){
@@ -197,6 +198,40 @@ function openProject(next:ProjectDocument){
   sceneEditor?.session.replaceBook(next.conversations);if(sceneEditor)project.conversations=sceneEditor.session.book;
   renderAll();persist();
   synchronizeAssets(libraryAssets);void assetsPanel?.refresh();
+}
+function receiveProject(next:ProjectDocument):boolean {
+  if(!sceneEditor)return false;
+  const active=document.activeElement;
+  if(transformEdit||pendingFieldDoc||liveFieldEdit||performanceSession||assetEditor||xrRecording||unkeyed.size)return false;
+  const input=active instanceof HTMLInputElement?active:null;
+  if(input&&(!input.validity.valid||input.type==='number'&&input.value===''||input.matches('[data-component-field]:not([data-component-field="offset"]),[data-placement],[data-script-param]')&&input.value!==input.defaultValue))return false;
+  const field=input?.id?'#'+CSS.escape(input.id):input?.getAttribute('aria-label')?'input[aria-label="'+CSS.escape(input.getAttribute('aria-label')!)+'"]':null;
+  const caret=input?.selectionStart??null;
+  const contentChanged=serializeContent(projectContent(project))!==serializeContent(projectContent(next));
+  if(contentChanged){
+    try{validateProjectContent(projectContent(next));}catch{return false;}
+  }
+  const previousRevision=project.revision;
+  sceneEditor.session.receiveBook(next.conversations);
+  project={...next,conversations:sceneEditor.session.book};
+  syncDocument();
+  if(!contentChanged)sceneEditor.session.receiveRevision(previousRevision,project.revision);
+  if(contentChanged){
+    history.receive(projectContent(project));sceneEditor.sceneChanged();renderAll();
+    if(input&&field){
+      if(input.closest('#inspector'))renderInspector(true);
+      const replacement=document.querySelector<HTMLInputElement>(field);
+      if(replacement){
+        if(replacement.id==='projectName')replacement.value=project.name;
+        if(replacement.id==='sceneName')replacement.value=doc.name;
+        replacement.focus({preventScroll:true});
+        if(caret!==null)replacement.setSelectionRange(caret,caret);
+      }
+    }
+  }
+  // Publish only local Muse status/revision changes caused by receiving this state.
+  if(contentChanged||previousRevision!==project.revision)queueMicrotask(persist);
+  sceneEditor.refreshConversation();return true;
 }
 function synchronizeAssets(assets:AssetDefinition[]):number {
   libraryAssets=assets;
@@ -282,9 +317,12 @@ function renderNavigation(){
   sceneEditor?.refreshContext();
 }
 function status(message: string) { $('#statusText').textContent = message; clearTimeout(statusTimer); statusTimer=setTimeout(()=>$('#statusText').textContent='Ready',5000); }
+let liveSaveTimer:ReturnType<typeof setTimeout>|undefined;
 function persist() {
+  clearTimeout(liveSaveTimer);liveSaveTimer=undefined;
   workspace?.save(project);
 }
+function persistLive(){liveSaveTimer??=setTimeout(()=>{liveSaveTimer=undefined;workspace?.save(project);},100);}
 function changed(message?: string) { project.revision++;sceneEditor?.sceneChanged(); if(liveFieldEdit){pendingFieldDoc=structuredClone(projectContent(project));clearTimeout(fieldCommitTimer);fieldCommitTimer=setTimeout(flushFieldEdit,450);}else{flushFieldEdit();history.commit(projectContent(project));} renderAll(); persist(); if(message)status(message); }
 function pause() { const wasPlaying=playing; playing=false; renderTransport(); if(wasPlaying){renderInspector();syncStage();} }
 function select(id: string | null) { selectIds(id ? [id] : [], 'replace'); }
@@ -416,7 +454,7 @@ function renderTime() {
   const doc=visibleScene(), shot=activeShot();
   const camera=shotCamera(doc,shot?.id??null)??doc.cameras.find(item=>item.id===selection.active)??doc.cameras[0];
   $('#shotFrameStatus').textContent=shot?(time<shot.start||time>shot.start+shot.duration?'Outside shot range':camera?.name+' · 16:9'):camera?camera.name+' · Preview':'No camera';
-  $<HTMLButtonElement>('[data-action="export-shot"]').disabled=!shot||!!editPreview||!!performanceSession||[...unkeyed.keys()].some(key=>key.startsWith(`${doc.id}|`));
+  document.querySelectorAll<HTMLButtonElement>('[data-action="export-shot"]').forEach(button=>{button.disabled=!shot||!!editPreview||!!performanceSession||[...unkeyed.keys()].some(key=>key.startsWith(`${doc.id}|`));button.title=shot?'Render the current shot as a video or still image':'Add a shot to render';});
   $<HTMLButtonElement>('[data-action="look-frames"]').disabled=!shot||!!editPreview||!!performanceSession;
   document.querySelectorAll<HTMLElement>('[data-current-time]').forEach(node=>node.textContent=timecode(time)); document.querySelectorAll<HTMLElement>('[data-end-time]').forEach(node=>node.textContent=timecode(doc.duration));
   const fraction=time/doc.duration*100;
@@ -526,8 +564,8 @@ function renderPendingChanges(item:SceneEntity):void {
   const pending=[...unkeyed.entries()].filter(([key,draft])=>key.startsWith(`${doc.id}|${item.id}|`)&&Math.abs(draft.time-time)<1e-6);
   if(pending.length)$('#inspector').insertAdjacentHTML('beforeend',pending.map(([key])=>`<div class="pending-animation">Unkeyed ${esc(key.split('|')[2])} · <button data-discard-draft="${esc(key)}">Discard</button></div>`).join(''));
 }
-function renderInspector() {
-  if(!performanceSession && !editPreview && document.activeElement instanceof HTMLInputElement && $('#inspector').contains(document.activeElement)) return;
+function renderInspector(force=false) {
+  if(!force && !performanceSession && !editPreview && document.activeElement instanceof HTMLInputElement && $('#inspector').contains(document.activeElement)) return;
   const inspectedDoc=visibleScene(),item=sceneEntity(inspectedDoc,selection.active);
   $('#inspector').inert=Boolean(editPreview)||!workspace?.canEdit;
   const path=selectedMotionPath();if(path){selectedPathPoint=Math.min(selectedPathPoint,path.points.length-1);$('#inspector').innerHTML=pathInspector(path,selectedPathPoint,playing||!!editPreview||!!performanceSession||!workspace?.canEdit,selectedPathPart);return;}
@@ -610,8 +648,8 @@ function duplicate() {
   try{pause();flushFieldEdit();const result=duplicateHierarchy(doc,selection.ids,time);Object.assign(doc,result.scene);selection.set(result.ids);if(doc.cameras.some(camera=>result.ids.includes(camera.id)))project.activeShotId=null;changed('Selection and children duplicated');}catch(error){status((error as Error).message);}
 }
 
-function nextObjectIndex(){for(let index=1;;index++)if(!sceneEntity(doc,`object-${index}`))return index;}
-function nextObjectId(){return `object-${nextObjectIndex()}`;}
+function nextObjectIndex(){let index=doc.objects.length+1;while(doc.objects.some(item=>item.name.endsWith(' '+index)))index++;return index;}
+function nextObjectId(){return `object-${newId()}`;}
 function insertAsset(asset:AssetDefinition,pose:Transform){
   if(!workspace?.canEdit)return;
   if(editPreview||performanceSession||storageError)return;
@@ -712,7 +750,7 @@ function drawMotionRoute(existing?:MotionPath){
 function chooseTool(next:ToolMode){tool=next;stage?.setTool(tool);renderSelection();}
 function chooseAxis(next:Axis|null){axis=next;stage?.setAxis(axis);renderSelection();}
 function togglePlay(){if(playing)pause();else{const take=performanceSession?.draft,start=take?.start??0,end=take?take.start+take.duration:visibleScene().duration;if(time>=end-0.001||time<start)time=start;playing=true;followTimelineShot();lastFrame=performance.now();renderTransport();syncStage();}}
-function restore(next:ProjectContent|null){if(!next)return;stage?.cancelPath();pause();replaceContent(next);project.revision++;sceneEditor?.sceneChanged();renderAll();persist();}
+function restore(next:ProjectContent|null){if(!next)return;stage?.cancelPath();pause();try{replaceContent(next);}catch(error){history.receive(projectContent(project));status((error as Error).message);return;}project.revision++;workspace?.save(project,true);sceneEditor?.sceneChanged();renderAll();persist();}
 function exportScene(){if(!project.activeSceneId){status('Add a scene before exporting it');return;}const portable=doc.objects.some(o=>o.asset)?{...createProject(doc),assets:project.assets?.filter(a=>doc.objects.some(o=>o.asset?.id===a.id))}:null;const blob=new Blob([portable?serializeProject(portable):serializeDocument(doc)],{type:'application/json'}),url=URL.createObjectURL(blob),anchor=document.createElement('a');anchor.href=url;anchor.download=`${doc.name.replace(/[^a-z0-9-_ ]/gi,'').trim()||'LittleTake'}.json`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('Scene exported');}
 function downloadProject(_saved=false){if(workspace?.room){void workspace.download().catch(error=>status((error as Error).message));return;}const text=serializeProject(project);const url=URL.createObjectURL(new Blob([text],{type:'application/json'})),anchor=document.createElement('a');anchor.href=url;anchor.download=`${project.name.replace(/[^a-z0-9-_ ]/gi,'').trim()||'LittleTake'}.project.json`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 
@@ -775,7 +813,7 @@ function editSelection(updates:PoseUpdate[],phase:TransformPhase,wholeMotion:Tra
   if(phase==='cancel'){
     for(const before of edit.before){const item=entity(before.id);if(item){delete item.animation;Object.assign(item,before);}}
     unkeyed.clear();for(const [key,value] of edit.drafts)unkeyed.set(key,value);
-    transformEdit=null;renderAll();return true;
+    transformEdit=null;clearTimeout(liveSaveTimer);liveSaveTimer=undefined;workspace?.save(project,true);renderAll();return true;
   }
   if(phase==='end'){
     transformEdit=null;if(edit.changed)changed('Selection transform updated');else{renderTimeline();renderInspector();syncStage();}return true;
@@ -783,13 +821,13 @@ function editSelection(updates:PoseUpdate[],phase:TransformPhase,wholeMotion:Tra
   const beforeStep=updates.map(update=>entity(update.id)).filter((item):item is SceneEntity=>!!item).map(item=>structuredClone(item)),draftsBeforeStep=new Map(unkeyed);
   try {
     updates.forEach(update=>transformSchema.parse(update.transform));
-    if(edit.wholeMotion){const replacements=transformSelection(edit.before,updates,edit.time,edit.wholeMotion);for(const replacement of replacements){const item=entity(replacement.id);if(!item)throw new Error('An object was removed during this edit.');delete item.animation;Object.assign(item,replacement);}edit.changed=JSON.stringify(replacements)!==JSON.stringify(edit.before);syncStage();renderInspector();return true;}
+    if(edit.wholeMotion){const replacements=transformSelection(edit.before,updates,edit.time,edit.wholeMotion);for(const replacement of replacements){const item=entity(replacement.id);if(!item)throw new Error('An object was removed during this edit.');delete item.animation;Object.assign(item,replacement);}edit.changed=JSON.stringify(replacements)!==JSON.stringify(edit.before);persistLive();syncStage();renderInspector();return true;}
     for(const update of updates){const item=entity(update.id);if(!item)throw new Error('An object was removed during this edit.');const before=displayedPose(item);
       for(const group of ['position','rotation','scale'] as const)for(const [index,axis] of ['x','y','z'].entries()){
         const value=update.transform[group][index];if(Math.abs(before[group][index]-value)>1e-8)editProperty(item,`${group}.${axis}` as PropertyPath,value);
       }
     }
-    edit.changed=JSON.stringify(updates.map(update=>entity(update.id)))!==JSON.stringify(edit.before);
+    edit.changed=JSON.stringify(updates.map(update=>entity(update.id)))!==JSON.stringify(edit.before);persistLive();
     syncStage();renderInspector();return true;
   } catch(error) {for(const before of beforeStep){const item=entity(before.id);if(item){delete item.animation;Object.assign(item,before);}}unkeyed.clear();for(const [key,value] of draftsBeforeStep)unkeyed.set(key,value);status(error instanceof Error?error.message:'The transform was cancelled.');return false; }
 }
@@ -797,7 +835,7 @@ function editSelection(updates:PoseUpdate[],phase:TransformPhase,wholeMotion:Tra
 try {
   $('.viewport-heading .transform-tools').insertAdjacentHTML('afterend','<div id="placementTools"></div>');
   $('.stage-panel').insertAdjacentHTML('beforeend','<div id="hiddenCount" class="hidden-count" hidden></div>');
-  $('.shot-heading h2').insertAdjacentHTML('afterend','<button class="shot-export-button" data-action="export-shot" title="Export the current shot as an image or video">'+icon('download')+'Export</button><button class="shot-export-button" data-action="look-frames" title="Render finished film stills of this shot with Muse Image">'+icon('camera')+'Look</button>');
+  $('.shot-heading h2').insertAdjacentHTML('afterend','<button class="shot-export-button" data-action="export-shot" title="Render the current shot as a video or still image">'+icon('camera')+'Render</button><button class="shot-export-button" data-action="look-frames" title="Render finished film stills of this shot with Muse Image">'+icon('camera')+'Look</button>');
   stage=new Stage({viewport:$('#viewport'),preview:$('#preview'),onSelect:selectIds,onStatus:message=>$('#viewHint').textContent=message,onTransform:editSelection,onPathOpen:id=>openMotionPath(id),onPathSelect:(index,part)=>{selectedPathPoint=index;selectedPathPart=part;renderInspector();syncStage();},onPathChange:(_id,index,phase)=>changePathPoint(index,phase),
     onFrame:tick,
     canEnterXR:()=>!assetEditor&&!editPreview&&!performanceSession&&!storageError&&!unkeyed.size&&!document.querySelector('dialog[open]'),
@@ -902,7 +940,7 @@ app.addEventListener('click',event=>{
   if(target.dataset.visibilityId){const item=doc.objects.find(item=>item.id===target.dataset.visibilityId);if(item){const ids=selection.ids.includes(item.id)?selection.ids:[item.id];if(effectivelyHidden(doc,item.id))showHierarchy(ids);else setHidden(ids,true);}return;}
   if(target.dataset.tool){chooseTool(target.dataset.tool as ToolMode);return;}
   if(target.dataset.axis){chooseAxis(axis===target.dataset.axis?null:target.dataset.axis as Axis);return;}
-  if(target.dataset.add){ensureScene();if(doc.objects.length>=100){status('This scene supports up to 100 objects');return;}pause();const item=createObject(target.dataset.add as Exclude<PrimitiveKind,'asset'>,nextObjectIndex());doc.objects.push(item);selection.active=item.id;time=0;setLibraryTab('objects');changed(`${item.name} added`);return;}
+  if(target.dataset.add){ensureScene();if(doc.objects.length>=100){status('This scene supports up to 100 objects');return;}pause();const item=createObject(target.dataset.add as Exclude<PrimitiveKind,'asset'>,nextObjectIndex());item.id=nextObjectId();doc.objects.push(item);selection.active=item.id;time=0;setLibraryTab('objects');changed(`${item.name} added`);return;}
   if(target.dataset.color){const item=entity();if(item && 'color' in item){item.color=target.dataset.color;changed();}return;}
   switch(target.dataset.action){
     case 'create-motion-path':drawMotionRoute();break;
@@ -921,7 +959,7 @@ app.addEventListener('click',event=>{
     case 'hide-selection':setHidden(selection.ids,true);break;
     case 'show-selection':showHierarchy(selection.ids);break;
     case 'show-all':setHidden(doc.objects.map(item=>item.id),false);break;
-    case 'export-shot':{const shot=activeShot();if(shot){pause();flushFieldEdit();try{openShotExport(stage.createShotRenderer(shot.cameraId),shot,time);}catch(error){status((error as Error).message);}}break;}
+    case 'export-shot':{const shot=activeShot();if(shot&&workspace){pause();flushFieldEdit();try{openShotExport(stage.createShotRenderer(shot.cameraId),shot,time,workspace);}catch(error){status((error as Error).message);}}break;}
     case 'look-frames':{const shot=activeShot();if(shot&&workspace){pause();flushFieldEdit();try{openLookFrames(stage.createShotRenderer(shot.cameraId),shot,time,workspace);}catch(error){status((error as Error).message);}}break;}
     case 'edit-asset':{const item=entity();if(item&&'asset' in item&&item.asset){const asset=project.assets?.find(a=>a.id===item.asset!.id);if(asset)openAssetEditor(asset);}break;}
     case 'save-asset':saveSelectionAsset();break;
@@ -1172,13 +1210,13 @@ async function openAssetEditor(asset:AssetDefinition) {
   }});}catch(error){status(error instanceof Error?error.message:'Could not open asset editor');}
 }
 window.addEventListener('focus',()=>{void assetsPanel?.refresh();});
-$('.header-actions').insertAdjacentHTML('afterbegin','<button data-action="projects">'+icon('folder')+'<span>Projects</span></button><button data-action="project-results">Results</button><button data-action="share-project" title="Share project link">Share</button><button class="icon-button" data-action="upload-cloud" title="Upload to cloud" aria-label="Upload to cloud" hidden>'+icon('upload')+'</button>');
 $('#storageWarning').insertAdjacentHTML('beforeend','<button data-action="retry-save">Retry save</button><button data-action="save-copy">Save as new project</button>');
 workspace = new Workspace({
   project:()=>project,
   preview:frame=>{if(!stage)throw new Error('Scene previews are unavailable.');return stage.captureProjectPreview(frame);},
   previewReady:()=>!!stage?.canCaptureProjectCover&&!playing&&!performanceSession&&!assetEditor&&!editPreview&&!unkeyed.size&&!document.querySelector('dialog[open]'),
   open:openProject,
+  receive:receiveProject,
   stop:()=>{pause();flushFieldEdit();sceneEditor?.session.cancel('The project session stopped. Completed work is kept.');referenceDialog.contextChanged();document.querySelectorAll<HTMLDialogElement>('.look-dialog[open]').forEach(dialog=>dialog.close());},
   beforeSwitch:()=>{flushFieldEdit();if(unkeyed.size||performanceSession||assetEditor){status('Finish the current edit or recording before switching projects');return false;}persist();return true;},
   result:(_output,data)=>{void data.text().then(text=>referenceDialog.restore(JSON.parse(text))).catch(error=>status((error as Error).message));},

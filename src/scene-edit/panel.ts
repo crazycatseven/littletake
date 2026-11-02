@@ -156,6 +156,7 @@ export class SceneEditPanel {
     if (message.role !== 'user' || !['failed', 'stopped'].includes(message.status)) return body;
     return body + `<div class="chat-${message.status === 'failed' ? 'error' : 'stopped'}">${esc(message.detail || 'Response interrupted. Your message is saved.')}${message === this.session.active.messages.at(-1) ? `<button type="button" data-retry="${esc(message.id)}" ${this.session.busy ? 'disabled' : ''}>Retry response</button>` : ''}</div>`;
   }
+  refreshConversation() { this.render(); }
   private render() {
     const thread = this.session.active, switched = this.renderedThread !== thread.id;
     this.query('.conversation-title').textContent = thread.title;

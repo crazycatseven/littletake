@@ -9,10 +9,12 @@ import { copyText } from '../clipboard';
 import { handoffPath, type HandoffReceipt } from '../look/handoff';
 import { loadProjectCovers, retryProjectCover } from './gallery';
 import { coverDue, projectCoverFrame, coverVisual, validateCover, type CoverAttachment } from './cover';
+import { ProjectCollaboration } from './collaboration';
 
 interface WorkspaceOptions {
   project(): ProjectDocument;
   open(project: ProjectDocument): void;
+  receive(project: ProjectDocument): boolean;
   stop(): void;
   state(message: string, readOnly: boolean, problem: boolean): void;
   beforeSwitch(): boolean;
@@ -58,9 +60,9 @@ export class Workspace {
   private readonly pendingOutputs = new Map<string, { room: ProjectRoom; output: ProjectOutput; data: Blob; base: number }>();
   private readonly outputWrites = new Map<string, Promise<void>>();
   private browserRecoveryId?: string;
-  private autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
-  private firstPendingAt = 0;
   private uploading = false;
+  private collaboration: ProjectCollaboration | null = null;
+  private collaborationError = '';
   constructor(private readonly options: WorkspaceOptions) {
     this.lease = sessionStorage.getItem('littletake.edit-session') ?? newId();
     sessionStorage.setItem('littletake.edit-session', this.lease);
@@ -86,11 +88,11 @@ export class Workspace {
     for (const name of ['pointerup', 'pointercancel'] as const) window.addEventListener(name, event => { this.heldPointers.delete(event.pointerId); this.lastInput = Date.now(); }, true);
     for (const name of ['keydown', 'input', 'wheel']) window.addEventListener(name, () => { this.lastInput = Date.now(); }, { capture: true, passive: true });
     window.addEventListener('blur', () => this.heldPointers.clear());
-    window.addEventListener('pagehide', () => { this.coverAbort?.abort(); this.options.stop(); channel.close(); clearTimeout(this.autoSaveTimer); if ((!this.autosave || !this.hasUnsaved) && this.room?.editing === 'you') void this.api({ action: 'release' }, this.room.code, true).catch(() => {}); });
+    window.addEventListener('pagehide', () => { this.coverAbort?.abort(); this.options.stop(); this.collaboration?.stop(); channel.close(); if ((!this.autosave || !this.hasUnsaved) && this.room?.editing === 'you') void this.api({ action: 'release' }, this.room.code, true).catch(() => {}); });
   }
   get canEdit() { return this.room !== null; }
-  get hasUnsaved() { return Boolean(this.pending || this.failed || this.saving || this.pendingOutputs.size); }
-  get hasUnsafeChanges() { return Boolean(this.pending || this.saving || this.pendingOutputs.size || this.creation || this.uploading); }
+  get hasUnsaved() { return Boolean(this.collaboration?.dirty || this.pending || this.failed || this.saving || this.pendingOutputs.size); }
+  get hasUnsafeChanges() { return Boolean(this.collaboration?.dirty || this.pending || this.saving || this.pendingOutputs.size || this.creation || this.uploading); }
   private get autosave() { return this.workspace.mode === 'cloud'; }
   private get remoteGallery() { return this.canUpload && this.gallerySource === 'cloud'; }
   get canUpload() { return this.workspace.mode === 'local' && this.workspace.cloudAvailable; }
@@ -100,7 +102,7 @@ export class Workspace {
       method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', 'x-littletake-edit-lease': this.lease, 'x-littletake-edit-page': this.page }, ...(body ? { body: JSON.stringify(body) } : {}), cache: 'no-store', keepalive,
     });
     const value = await response.json().catch(() => ({}));
-    if (!response.ok && reconnect && code && value.error?.code === 'edit_lease_lost' && ['save', 'heartbeat'].includes((body as { action?: string })?.action ?? '')) {
+    if (!response.ok && reconnect && code && value.error?.code === 'edit_lease_lost' && ['save', 'edit', 'heartbeat'].includes((body as { action?: string })?.action ?? '')) {
       await this.api({ action: 'claim' }, code);
       return this.api(body, code, keepalive, false);
     }
@@ -128,21 +130,43 @@ export class Workspace {
   }
   private notify() {
     const readOnly = !this.canEdit;
-    const text = this.conflict ? 'A newer version is saved. Keep this page open; download your changes or save a copy to continue.' : this.failed ? (this.autosave ? 'Saving failed. Keep this page open; changes have not reached the workspace. Saving will retry automatically.' : 'Upload failed. Keep this page open and retry uploading, or export your project.') : this.migrationError;
+    const text = this.collaborationError || (this.conflict ? 'A newer version is saved. Keep this page open; download your changes or save a copy to continue.' : this.failed ? (this.autosave ? 'Saving failed. Keep this page open; changes have not reached the workspace. Saving will retry automatically.' : 'Upload failed. Keep this page open and retry uploading, or export your project.') : this.migrationError);
     this.options.state(text, readOnly, Boolean(text));
   }
   private async activate(room: ProjectRoom) {
+    this.collaboration?.stop(); this.collaboration = null; this.collaborationError = '';
     this.coverAttemptAt = 0; this.coverOnOpen = room.cover?.savedVersion !== room.savedVersion;
-    this.options.stop(); clearTimeout(this.autoSaveTimer); this.pending = null; this.draftVersion = undefined; this.firstPendingAt = 0; this.room = room; this.lastHeartbeat = Date.now(); this.failed = false; this.conflict = false;
+    this.options.stop(); this.pending = null; this.draftVersion = undefined; this.room = room; this.lastHeartbeat = Date.now(); this.failed = false; this.conflict = false;
     this.savedText = serializeProject(room.project);
     projectRequestContext({ code: room.code, lease: this.lease, page: this.page }, this);
     // Another page may still be running the saved conversation.
     room.project = parseProject(serializeProject(room.project), false);
+    if (this.autosave) {
+      this.collaboration = new ProjectCollaboration(room, {
+        send: edit => this.api(edit, room.code),
+        watch: async (version, signal) => {
+          const response = await fetch(`/api/projects?code=${encodeURIComponent(room.code)}&since=${version}`, { signal, cache: 'no-store' });
+          if (response.status === 204) return null;
+          if (!response.ok) throw new Error('Connection interrupted. Keep this page open; collaboration will reconnect automatically.');
+          return response.json();
+        },
+        receive: project => !this.heldPointers.size && this.options.receive(project),
+        room: next => {
+          if (this.room !== room) return;
+          room.project = next.project; room.savedVersion = next.savedVersion; room.contentVersion = next.contentVersion; room.updatedAt = next.updatedAt;
+          const pending = [...this.pendingOutputs.values()].filter(entry => entry.room === room);
+          room.outputs = [...next.outputs.filter(output => !pending.some(entry => entry.output.id === output.id)), ...pending.map(entry => entry.output)];
+          room.handoffs = next.handoffs; this.mergeCover(room, next.cover); this.savedText = serializeProject(next.project); this.listed = null;
+        },
+        state: error => { if(this.room!==room)return;this.collaborationError = error instanceof TypeError ? 'Connection interrupted. Keep this page open; your edits will sync automatically when reconnected.' : error?.message ?? ''; this.failed = !!error; this.notify(); },
+      });
+    }
     const url = new URL(location.href); url.searchParams.set('project', room.code); history.replaceState(null, '', url);
     this.options.open(room.project);
     const editor = document.getElementById('app'); if (editor) { editor.removeAttribute('data-opening'); editor.inert = false; }
     document.getElementById('workspaceOpening')?.remove();
     this.home.close(); this.notify();
+    this.collaboration?.start();
     if (this.pending && !this.conflict) void this.flush().catch(() => {});
   }
   async join(code: string) {
@@ -162,22 +186,20 @@ export class Workspace {
     this.creation = null; this.listed = null;
     await this.activate(room);
   }
-  save(project: ProjectDocument) {
+  save(project: ProjectDocument, guard = false) {
     if (!this.room || !this.canEdit) return;
-    if (!this.saving && serializeProject(project) === this.savedText) { this.pending = null; this.draftVersion = undefined; clearTimeout(this.autoSaveTimer); this.notify(); return; }
+    if (this.collaboration) { this.collaboration.observe(project, guard); this.notify(); return; }
+    if (!this.saving && serializeProject(project) === this.savedText) { this.pending = null; this.draftVersion = undefined; this.notify(); return; }
     if (!this.pending && serializeProject(project) === this.savedText) return;
     if (this.pending && serializeProject(project) === serializeProject(this.pending)) return;
     if (!this.pending) this.draftVersion = this.room.savedVersion;
     this.pending = structuredClone(project);
     this.notify();
-    if (!this.autosave || this.conflict) return;
-    this.firstPendingAt ||= Date.now(); clearTimeout(this.autoSaveTimer);
-    this.autoSaveTimer = setTimeout(() => void this.flush().catch(() => {}), Math.min(650, Math.max(0, 2000 - (Date.now() - this.firstPendingAt))));
   }
   async flush(manual = false): Promise<void> {
+    if (this.collaboration) { await this.collaboration.flush(); this.notify(); return; }
     if (!this.autosave && !manual) return;
     if (this.conflict) throw new Error('A newer version is saved. Download your changes or save a new project.');
-    clearTimeout(this.autoSaveTimer); this.firstPendingAt = 0;
     if (this.saving) return this.saving;
     if (!this.pending || !this.room || !this.canEdit) return;
     const room = this.room;
@@ -204,7 +226,7 @@ export class Workspace {
   async retry() {
     if (!this.room) return;
     try {
-      if (this.failed || this.conflict) {
+      if (!this.collaboration && (this.failed || this.conflict)) {
         const room = this.room, next = await this.api({ action: 'claim' }, room.code);
         if (this.room !== room) return;
         if (this.pending && next.savedVersion !== (this.draftVersion ?? room.savedVersion) && serializeProject(next.project) !== serializeProject(this.pending)) {
@@ -276,6 +298,7 @@ export class Workspace {
     await this.updateCover(true);
     if (this.room?.editing === 'you') try { await this.api({ action: 'release' }, this.room.code); } catch { /* The saved document is already durable; a disconnected lease expires. */ }
     if (!this.autosave && this.room) for (const [key, entry] of this.pendingOutputs) if (entry.room === this.room) this.pendingOutputs.delete(key);
+    this.collaboration?.stop(); this.collaboration = null; this.collaborationError = '';
     this.room = null; this.pending = null; this.draftVersion = undefined; projectRequestContext(null); return true;
   }
   async showProjects() {
@@ -324,7 +347,7 @@ export class Workspace {
       if (action === 'copy' && code) { const source = await this.api(undefined, code); const project = parseProject(serializeProject(source.project)); project.name = `${project.name.slice(0, 110)} copy`; await this.create(project, code); }
       if (action === 'new' || action === 'join') {
         this.homeGeneration++;
-        this.home.querySelector('.projects-welcome')!.innerHTML = action === 'new' ? `<form data-create><small>NEW PROJECT</small><h1>Make room for an idea.</h1><label>Project name<input name="name" maxlength="120" value="Untitled project" required autofocus></label><label class="project-starter"><input name="starter" type="checkbox"> Include a starter scene</label><div><button type="button" data-project-action="back">Back</button><button class="primary-button">Create project</button></div></form>` : `<form data-join><small>JOIN A PROJECT</small><h1>Enter the project code.</h1><p>${this.canUpload ? 'Download a cloud project for local editing. Changes upload only when you choose.' : 'One person edits at a time. Everyone else can view the scene.'}</p><label>Project code<input name="code" placeholder="ABCD-EFGH-JKLM" maxlength="32" required autofocus></label><div><button type="button" data-project-action="back">Back</button><button class="primary-button">${this.canUpload ? 'Download project' : 'Join project'}</button></div></form>`;
+        this.home.querySelector('.projects-welcome')!.innerHTML = action === 'new' ? `<form data-create><small>NEW PROJECT</small><h1>Make room for an idea.</h1><label>Project name<input name="name" maxlength="120" value="Untitled project" required autofocus></label><label class="project-starter"><input name="starter" type="checkbox"> Include a starter scene</label><div><button type="button" data-project-action="back">Back</button><button class="primary-button">Create project</button></div></form>` : `<form data-join><small>JOIN A PROJECT</small><h1>Enter the project code.</h1><p>${this.canUpload ? 'Download a cloud project for local editing. Changes upload only when you choose.' : 'Edit together. Changes appear automatically for everyone in the project.'}</p><label>Project code<input name="code" placeholder="ABCD-EFGH-JKLM" maxlength="32" required autofocus></label><div><button type="button" data-project-action="back">Back</button><button class="primary-button">${this.canUpload ? 'Download project' : 'Join project'}</button></div></form>`;
         this.home.querySelector<HTMLInputElement>('form input')?.focus();
       }
       if (action === 'back') this.showHome();
@@ -515,9 +538,15 @@ export class Workspace {
   }
   async showResults() {
     if (!this.room) return;
-    const dialog = document.createElement('dialog'); dialog.className = 'project-results-dialog'; dialog.setAttribute('aria-label', 'Project results');
-    const outputs = [...this.room.outputs].filter(output => !['style-reference', 'reference-media', 'diagnostic', 'asset-draft'].includes(output.kind));
-    dialog.innerHTML = `<header><div><small>PROJECT RESULTS</small><h2>${escape(this.options.project().name)}</h2></div><button data-close aria-label="Close results">✕</button></header><p>Look frames, video briefs and reference analyses are kept with this project.</p><div class="project-results-list">${outputs.map(output => `<button data-output="${output.id}"><span>${output.kind === 'look-frame' ? '▧' : output.kind === 'video-brief' ? '▤' : '◇'}</span><div><strong>${escape(output.name)}</strong><small>${escape(output.kind.replaceAll('-', ' '))} · ${new Date(output.updatedAt).toLocaleString()}</small></div><span>↗</span></button>`).join('') || '<div class="projects-empty">No results yet. Open a shot’s Look panel or analyze a reference clip to begin.</div>'}</div><div class="project-result-preview" hidden></div><p class="projects-error" hidden role="alert"></p>`;
+    const dialog = document.createElement('dialog'); dialog.className = 'project-results-dialog'; dialog.setAttribute('aria-label', 'Renders');
+    const outputs = [...this.room.outputs].filter(output => !['style-reference', 'reference-media', 'diagnostic', 'asset-draft'].includes(output.kind)).sort((a,b) => b.updatedAt-a.updatedAt);
+    const renders = outputs.filter(output => ['shot-render', 'look-frame', 'final-video'].includes(output.kind));
+    const notes = outputs.filter(output => !renders.includes(output));
+    const cards = (items: ProjectOutput[]) => items.map(output => {
+      const label = output.kind === 'shot-render' ? (output.mime.startsWith('video/') ? 'Video' : 'Still image') : output.kind === 'look-frame' ? 'Film still' : output.kind === 'final-video' ? 'Finished video' : output.kind === 'video-brief' ? 'Video brief' : 'Reference analysis';
+      return `<button data-output="${output.id}"><span>${output.mime.startsWith('video/') ? '▷' : renders.includes(output) ? '▧' : '▤'}</span><div><strong>${escape(output.name)}</strong><small>${label} · ${new Date(output.updatedAt).toLocaleString()}</small></div><span>↗</span></button>`;
+    }).join('');
+    dialog.innerHTML = `<header><div><small>RENDERS</small><h2>${escape(this.options.project().name)}</h2></div><button data-close aria-label="Close renders">✕</button></header><p>Your rendered videos and stills, saved with this project.</p><div class="project-results-list">${cards(renders) || '<div class="projects-empty">No renders yet. Use Render to create a video or still image from your shot.</div>'}</div>${notes.length ? `<details class="project-render-notes"><summary>Briefs & reference analyses <span>${notes.length}</span></summary><div class="project-results-list">${cards(notes)}</div></details>` : ''}<div class="project-result-preview" hidden></div><p class="projects-error" hidden role="alert"></p>`;
     const urls: string[] = [];
     dialog.querySelector('[data-close]')!.addEventListener('click', () => dialog.close());
     dialog.addEventListener('close', () => { urls.forEach(url => URL.revokeObjectURL(url)); dialog.remove(); });
@@ -527,7 +556,13 @@ export class Workspace {
         const output = outputs.find(value => value.id === id)!, data = await this.output(id);
         if (output.kind === 'reference-analysis') { dialog.close(); this.options.result?.(output, data); return; }
         const preview = dialog.querySelector<HTMLElement>('.project-result-preview')!; preview.hidden = false; preview.replaceChildren();
-        if (output.kind === 'final-video') { const url = URL.createObjectURL(data); urls.push(url); const video = document.createElement('video'); video.src = url; video.controls = true; video.style.width = '100%'; const link = document.createElement('a'); link.href = url; link.download = output.name + (output.mime === 'video/webm' ? '.webm' : '.mp4'); link.textContent = 'Download video'; preview.append(video, link); return; }
+        if (output.kind === 'shot-render' || output.kind === 'final-video') {
+          const url = URL.createObjectURL(data); urls.push(url);
+          const media = document.createElement(output.mime.startsWith('video/') ? 'video' : 'img'); media.src = url;
+          if (media instanceof HTMLVideoElement) { media.controls = true; media.preload = 'metadata'; } else media.alt = output.name;
+          const link = document.createElement('a'); link.href = url; link.download = output.name + '.' + output.mime.split('/')[1]; link.textContent = media instanceof HTMLVideoElement ? 'Download video' : 'Download image';
+          preview.append(media, link); return;
+        }
         const value = JSON.parse(await data.text());
         if (output.kind === 'look-frame') { const image = new Image(); image.src = value.image; image.alt = output.name; preview.append(image); const link = document.createElement('a'); link.href = value.image; link.download = output.name + '.png'; link.textContent = 'Download image'; preview.append(link); }
         else { const text = document.createElement('p'); text.textContent = value.brief.prompt; preview.append(text); }

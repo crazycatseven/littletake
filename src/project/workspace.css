@@ -366,6 +366,10 @@ body[data-project-readonly=true] #projectName,body[data-project-readonly=true] #
 .project-results-list {
   display:grid;
   gap:8px}
+.project-render-notes { margin-top:24px; border-top:1px solid var(--line); padding-top:16px; }
+.project-render-notes summary { cursor:pointer; color:var(--muted); font-size:12px; }
+.project-render-notes summary span { margin-left:8px; }
+.project-render-notes .project-results-list { margin-top:12px; }
 .project-results-list>button {
   display:flex;
   align-items:center;
@@ -394,7 +398,7 @@ body[data-project-readonly=true] #projectName,body[data-project-readonly=true] #
   margin-top:20px;
   padding:15px;
   border-top:1px solid var(--line)}
-.project-result-preview img {
+.project-result-preview img,.project-result-preview video {
   display:block;
   width:100%;
   max-height:440px;
@@ -422,8 +426,6 @@ body[data-project-readonly=true] #projectName,body[data-project-readonly=true] #
   .app-header .header-actions>button {
   padding-left:8px;
   padding-right:8px}
-.app-header .header-actions>button[data-action=reference] span {
-  display:none}
 .project-title {
   min-width:130px;
   max-width:210px}

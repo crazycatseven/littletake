@@ -2,22 +2,26 @@ import './dialog.css';
 import type { Shot } from '../types';
 import { exportPNG, exportVideo, videoExportIssue } from './export';
 import type { ShotRenderer } from './renderer';
+import type { Workspace } from '../project/workspace';
+import { MAX_OUTPUT_BYTES } from '../project/room';
+import { newId } from '../id';
 
 /** A dialog owns one frozen scene snapshot and releases it on close. */
-export function openShotExport(renderer: ShotRenderer, shot: Shot, time: number): void {
+export function openShotExport(renderer: ShotRenderer, shot: Shot, time: number, workspace: Workspace): void {
   shot = structuredClone(shot);
   const camera = renderer.document.cameras.find(item => item.id === shot.cameraId)!;
   const hidden = renderer.document.objects.filter(item => item.hidden).length;
   const dialog = document.createElement('dialog'); dialog.className = 'shot-export-dialog';
-  dialog.setAttribute('aria-label', 'Export shot');
-  dialog.innerHTML = `<div class="export-heading"><div><small>SHOT OUTPUT</small><h2>Export shot</h2></div><button data-close aria-label="Close export">✕</button></div>
+  dialog.setAttribute('aria-label', 'Render');
+  dialog.innerHTML = `<div class="export-heading"><div><small>VIDEO & STILLS</small><h2>Render</h2></div><button data-close aria-label="Close render">✕</button></div>
     <p data-shot class="export-subtitle"></p><div class="export-layout"><div><div class="export-preview"></div><p class="export-frame-caption"></p></div>
     <div><fieldset class="export-settings"><div class="export-tabs" role="tablist" aria-label="Output format"><button role="tab" data-format="image" aria-selected="true">Still image</button><button role="tab" data-format="video" aria-selected="false">Video</button></div>
     <label>Resolution<select aria-label="Export resolution"><option value="1920">1920 × 1080</option><option value="1280">1280 × 720</option></select></label>
     <label data-video hidden>Frame rate<select aria-label="Export frame rate"><option value="24">24 fps</option><option value="30">30 fps</option></select></label>
     <p class="export-range"></p><p class="export-exclusions">${hidden} hidden object${hidden === 1 ? '' : 's'} excluded<br>Clean camera view · no editor overlays</p></fieldset>
     <div class="export-progress" hidden><progress max="1" value="0"></progress><span role="status"></span></div><p class="export-message" role="status" aria-live="polite"></p>
-    <div class="export-actions"><button data-cancel hidden>Cancel export</button><button data-render class="primary-button">Export PNG</button><a data-download class="primary-button" hidden>Download PNG</a></div></div></div>`;
+    <div class="export-actions"><button data-cancel hidden>Cancel render</button><button data-render class="primary-button">Render still</button><a data-download class="primary-button" hidden>Download PNG</a></div></div></div>`;
+  const room = workspace.room;
   const find = <T extends HTMLElement = HTMLElement>(selector: string) => dialog.querySelector<T>(selector)!;
   find('[data-shot]').textContent = shot.name + ' · ' + camera.name;
   const preview = find('.export-preview'), settings = find<HTMLFieldSetElement>('.export-settings');
@@ -33,7 +37,7 @@ export function openShotExport(renderer: ShotRenderer, shot: Shot, time: number)
     find('[data-video]').hidden = format !== 'video';
     find('.export-range').textContent = format === 'image' ? `PNG · Frame at ${time.toFixed(2)}s` : `WebM · ${shot.duration.toFixed(2)} seconds · silent video`;
     const issue = format === 'video' ? videoExportIssue() : null;
-    const render = find<HTMLButtonElement>('[data-render]'); render.textContent = busy ? 'Rendering…' : format === 'image' ? 'Export PNG' : 'Export video'; render.disabled = busy || !!issue;
+    const render = find<HTMLButtonElement>('[data-render]'); render.textContent = busy ? 'Rendering…' : format === 'image' ? 'Render still' : 'Render video'; render.disabled = busy || !!issue;
     find('[data-cancel]').hidden = !busy;
     if (issue) find('.export-message').textContent = issue;
     dialog.querySelectorAll<HTMLButtonElement>('[data-format]').forEach(button => { const active = button.dataset.format === format; button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1; });
@@ -52,7 +56,7 @@ export function openShotExport(renderer: ShotRenderer, shot: Shot, time: number)
   find('[data-render]').onclick = async () => {
     if (busy) return;
     busy = true; controller = new AbortController(); clearResult(); update();
-    find('.export-message').textContent = 'Preparing export…'; find('.export-progress').hidden = false;
+    find('.export-message').textContent = 'Preparing render…'; find('.export-progress').hidden = false;
     find<HTMLProgressElement>('progress').value = 0; find('.export-progress span').textContent = 'Preparing…';
     const width = Number(find<HTMLSelectElement>('[aria-label="Export resolution"]').value);
     const fps = Number(find<HTMLSelectElement>('[aria-label="Export frame rate"]').value);
@@ -68,11 +72,19 @@ export function openShotExport(renderer: ShotRenderer, shot: Shot, time: number)
       const filename = (shot.name.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'shot') + (format === 'image' ? `-${time.toFixed(2)}s.png` : '.webm');
       const download = find<HTMLAnchorElement>('[data-download]'); download.href = url; download.download = filename; download.hidden = false; download.textContent = format === 'image' ? 'Download PNG' : 'Download video';
       const result = document.createElement(format === 'image' ? 'img' : 'video'); result.src = url;
-      if (result instanceof HTMLVideoElement) { result.controls = true; result.preload = 'metadata'; } else result.alt = 'Exported shot frame';
+      if (result instanceof HTMLVideoElement) { result.controls = true; result.preload = 'metadata'; } else result.alt = 'Rendered shot frame';
       preview.replaceChildren(result);
-      find('.export-message').textContent = `${filename} · ${(blob.size / 1024 / 1024).toFixed(2)} MB · ready to download`;
+      find('[data-cancel]').hidden = true; find('.export-progress').hidden = true;
+      find('.export-message').textContent = 'Adding to Renders…';
+      try {
+        if (blob.size > MAX_OUTPUT_BYTES) throw new Error('This render exceeds the 64 MB project limit. Download it to keep a copy.');
+        await workspace.putOutput({ id: newId(), kind: 'shot-render', sceneId: renderer.document.id, shotId: shot.id, name: `${shot.name} · ${format === 'image' ? time.toFixed(2) + 's still' : 'Video'}`, mime: format === 'image' ? 'image/png' : 'video/webm' }, blob, room);
+        find('.export-message').textContent = `${filename} · ${(blob.size / 1024 / 1024).toFixed(2)} MB · Added to Renders`;
+      } catch (error) {
+        find('.export-message').textContent = `Rendered, but could not save to Renders. ${(error as Error).message} Your download is still available.`;
+      }
     } catch (error) {
-      find('.export-message').textContent = controller.signal.aborted ? 'Export cancelled. No partial file was saved.' : (error as Error).message;
+      find('.export-message').textContent = controller.signal.aborted ? 'Render cancelled. No partial file was saved.' : (error as Error).message;
       if (dialog.open) { try { showFrame(); } catch {} }
     } finally {
       busy = false; find('.export-progress').hidden = true;

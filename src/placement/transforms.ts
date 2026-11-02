@@ -1,4 +1,5 @@
 import { animationFor, ensureAnimation, evaluateTransform } from '../model.ts';
+import { newId } from '../id.ts';
 import { repositionTrack, trackPoses, transformSchema } from '../performance/motion.ts';
 import { validateAnimation as validateAnimationForParent, evaluateProperty, putKey, transformAnimatedSelection } from '../animation/model.ts';
 import { Matrix4, Vector3 } from 'three';
@@ -119,8 +120,8 @@ export function reparentScene(source: SceneDocument, ids: string[], parentId: st
 export function duplicateHierarchy(source: SceneDocument, ids: string[], time: number): {scene:SceneDocument;ids:string[]} {
   const scene=structuredClone(source),nodes=sceneEntities(scene),roots=hierarchyRoots(nodes,ids),included=new Set(roots.flatMap(id=>[...descendants(nodes,id)]));
   if(scene.objects.length+scene.objects.filter(item=>included.has(item.id)).length>100||scene.cameras.length+scene.cameras.filter(item=>included.has(item.id)).length>128)throw new Error('Scene object or camera limit reached.');
-  const occupied=new Set([...nodes,...scene.shots].map(item=>item.id)),mapping=new Map<string,string>();
-  for(const item of nodes.filter(item=>included.has(item.id))){const prefix='kind' in item?'object':'camera';let i=1;while(occupied.has(prefix+'-'+i))i++;const id=prefix+'-'+i;occupied.add(id);mapping.set(item.id,id);}
+  const mapping=new Map<string,string>();
+  for(const item of nodes.filter(item=>included.has(item.id)))mapping.set(item.id,('kind' in item?'object-':'camera-')+newId());
   const worlds=sceneWorldMatrices(source,time);
   for(const original of nodes.filter(item=>included.has(item.id))){
     const item=structuredClone(original);item.id=mapping.get(original.id)!;

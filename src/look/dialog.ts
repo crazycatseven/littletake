@@ -170,7 +170,7 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number,
       const bytes = new Uint8Array(await file.slice(0, 12).arrayBuffer());
       const mime = bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3 ? 'video/webm' : String.fromCharCode(...bytes.slice(4, 8)) === 'ftyp' ? 'video/mp4' : null;
       if (!mime) throw new Error('Choose an MP4 or WebM video file.');
-      await workspace.putOutput({ id: newId(), kind: 'final-video', sceneId: doc.id, shotId: shot.id, name: shot.name + ' · ' + file.name.slice(0, 100), mime }, file, room); message('Finished video saved with this shot in Project results.');
+      await workspace.putOutput({ id: newId(), kind: 'final-video', sceneId: doc.id, shotId: shot.id, name: shot.name + ' · ' + file.name.slice(0, 100), mime }, file, room); message('Finished video added to Renders.');
     }
     catch (error) { message((error as Error).message); }
     finally { find<HTMLInputElement>('[data-video]').value = ''; }
