@@ -6,18 +6,18 @@ import { readBytes } from './api.ts';
 /** Explicit local-to-cloud transfers; ordinary project saves always use the local store. */
 export function createCloudProjectsHandler(store: ProjectRoomStore, env: Record<string, string | undefined>) {
   const origin = env.LITTLETAKE_CLOUD_URL ? new URL(env.LITTLETAKE_CLOUD_URL).origin : null;
-  if (origin && (!env.LITTLETAKE_CLOUD_PASSWORD || (!origin.startsWith('https:') && !['127.0.0.1', 'localhost', '::1'].includes(new URL(origin).hostname))))
-    throw new Error('A cloud workspace requires HTTPS and a server-side workspace password.');
+  if (origin && !origin.startsWith('https:') && !['127.0.0.1', 'localhost', '::1'].includes(new URL(origin).hostname))
+    throw new Error('A cloud workspace requires HTTPS.');
   return async (request: Request): Promise<Response> => {
     const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store' } });
     try {
-      if (!origin || !env.LITTLETAKE_CLOUD_PASSWORD) throw new ProjectRoomError('cloud_not_configured', 'Cloud access is not configured on this local server.', 503);
+      if (!origin) throw new ProjectRoomError('cloud_not_configured', 'Cloud access is not configured on this local server.', 503);
       if (!['GET', 'POST'].includes(request.method)) return new Response(null, { status: 405 });
       const url = new URL(request.url), source = request.headers.get('origin');
       if (request.method === 'POST' && source && source !== url.origin) throw new ProjectRoomError('wrong_origin', 'Open LittleTake directly to transfer a project.', 403);
       const remote = async (query: string, body?: Blob) => {
         const headers = new Headers();
-        headers.set('Authorization', 'Basic ' + Buffer.from('littletake:' + env.LITTLETAKE_CLOUD_PASSWORD).toString('base64'));
+        if (env.LITTLETAKE_CLOUD_PASSWORD) headers.set('Authorization', 'Basic ' + Buffer.from('littletake:' + env.LITTLETAKE_CLOUD_PASSWORD).toString('base64'));
         for (const name of ['x-littletake-edit-lease', 'x-littletake-edit-page']) { const value = request.headers.get(name); if (value) headers.set(name, value); }
         if (body) { headers.set('Content-Type', 'application/zip'); headers.set('Origin', origin); }
         let response: Response;

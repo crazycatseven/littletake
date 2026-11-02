@@ -9,8 +9,9 @@ import { createApplication } from './application.ts';
 const mime: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.wasm': 'application/wasm', '.onnx': 'application/octet-stream', '.mp4': 'video/mp4', '.webm': 'video/webm', '.json': 'application/json' };
 export async function startApplication(options: { env?: Record<string, string | undefined>; host?: string; port?: number; dist?: string } = {}) {
   const env = { ...process.env, ...options.env }, host = options.host ?? env.LITTLETAKE_HOST ?? '127.0.0.1';
-  const password = env.LITTLETAKE_WORKSPACE_PASSWORD, publicOrigin = env.LITTLETAKE_PUBLIC_URL;
-  if (!['127.0.0.1', 'localhost', '::1'].includes(host) && !password) throw new Error('Set LITTLETAKE_WORKSPACE_PASSWORD before exposing the shared workspace. Public reference links remain read-only.');
+  const publicWorkspace = env.LITTLETAKE_PUBLIC_WORKSPACE === '1';
+  const password = publicWorkspace ? undefined : env.LITTLETAKE_WORKSPACE_PASSWORD, publicOrigin = env.LITTLETAKE_PUBLIC_URL;
+  if (!['127.0.0.1', 'localhost', '::1'].includes(host) && !password && !publicWorkspace) throw new Error('Set LITTLETAKE_PUBLIC_WORKSPACE=1 for a workspace without login, or LITTLETAKE_WORKSPACE_PASSWORD for a private workspace.');
   if (publicOrigin && !/^https?:\/\//.test(publicOrigin)) throw new Error('LITTLETAKE_PUBLIC_URL must be an HTTP or HTTPS origin.');
   const app = await createApplication(env, env.LITTLETAKE_LOCAL_DEPTH === '1'), dist = path.resolve(options.dist ?? 'dist');
   const server = createServer(async (req, res) => {

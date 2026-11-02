@@ -2,7 +2,7 @@
 
 Node 24 serves the built editor and the same APIs used in development. One shared workspace, with one editor per project; account separation remains deferred.
 
-Local/cloud workflow: running `run.bat` or `npm run dev` starts LittleTake on the local computer. Its projects and assets live under `.littletake/` (or `LITTLETAKE_DATA_DIR`), independently of browser storage. Set `LITTLETAKE_MODE=local`, `LITTLETAKE_CLOUD_URL=https://littletake.crazycat.ai` and the server-only `LITTLETAKE_CLOUD_PASSWORD` to enable **Open from cloud** and the header's **Upload to cloud** icon. Uploading is optional; local projects can stay entirely on that computer. The hosted website (`LITTLETAKE_MODE=cloud`, also the default when `LITTLETAKE_PUBLIC_URL` is set) lists and saves cloud projects only.
+Local/cloud workflow: running `run.bat` or `npm run dev` starts LittleTake on the local computer. Its projects and assets live under `.littletake/` (or `LITTLETAKE_DATA_DIR`), independently of browser storage. Set `LITTLETAKE_MODE=local` and `LITTLETAKE_CLOUD_URL=https://littletake.crazycat.ai` to enable **Open from cloud** and the header's **Upload to cloud** icon. `LITTLETAKE_CLOUD_PASSWORD` is only needed for a private, password-protected deployment. Uploading is optional; local projects can stay entirely on that computer. The hosted website (`LITTLETAKE_MODE=cloud`, also the default when `LITTLETAKE_PUBLIC_URL` is set) lists and saves cloud projects only.
 
 The browser is the UI in either case. It does not persist project documents, project lists, media, AI diagnostics or prefab drafts. These save to the running service after a short debounce; normal editing has no save-status text. Unsent changes remain in page memory, and leaving the page warns until they are saved. During a connection failure, keep the page open and retry or download a copy. UI preferences and the editing session ID may remain in browser storage.
 
@@ -25,12 +25,12 @@ LITTLETAKE_HOST=0.0.0.0
 PORT=8080
 LITTLETAKE_DATA_DIR=/data
 LITTLETAKE_PUBLIC_URL=https://your-app.example
-LITTLETAKE_WORKSPACE_PASSWORD=<set on the server>
+LITTLETAKE_PUBLIC_WORKSPACE=1
 MODEL_API_KEY=<set on the server>
 MUSE_MODEL=muse-spark-1.3-contributor
 ```
 
-Use HTTPS at the ingress/reverse proxy. The workspace uses HTTP Basic authentication with username `littletake` and the configured shared password. This is one shared workspace, not per-account identity. Health checks and the read-only `/s/<random-token>/` pages do not require workspace authentication. Non-loopback startup fails without a workspace password.
+Use HTTPS at the ingress/reverse proxy. The hosted demo is a public shared workspace: open the project list or join with a project code, without signing in. `LITTLETAKE_PUBLIC_WORKSPACE=1` explicitly enables this mode and overrides any old shared password. Project edits and model requests still require the active editing session. A private deployment can omit public mode and set `LITTLETAKE_WORKSPACE_PASSWORD` for HTTP Basic authentication with username `littletake`. Non-loopback startup requires one of these two explicit configurations.
 
 Mount `/data` on a persistent disk. Keep one writable application instance per directory. `projects.sqlite` stores projects, conversations, reference media, diagnostics, prefab drafts, generated/imported outputs and immutable video-reference packages; `assets/` stores the reusable asset library. A fresh browser loads the project list and content from this service.
 
@@ -38,7 +38,7 @@ The deployment image is built with `docker build -f server/app/Dockerfile -t lit
 
 For the VM deployment, mount the data disk at `/srv/littletake`, put the runtime environment above in `/etc/littletake/app.env` (owner-only access), and run `docker compose -p littletake -f server/app/compose.yaml up -d --build`. The companion Caddy service serves `littletake.crazycat.ai` with automatically renewed HTTPS; point that subdomain to the VM's reserved IP. Only ports 80 and 443 are public. Application port 8080 is bound to loopback. Keep the data disk when replacing the VM, and back it up with a daily disk snapshot retained for seven days.
 
-The hosted workspace is [littletake.crazycat.ai](https://littletake.crazycat.ai). Its VM is `littletake-server` in `ai-mock-interview-488402`, zone `us-central1-a`, with a dedicated `littletake` VPC and reserved address `34.44.159.175`. The `littletake-data` disk is retained when the VM is deleted. Snapshot policy `littletake-daily` runs at 07:00 UTC and retains seven days. A separate initial migration snapshot is retained as `littletake-initial-20261101`. The cloud workspace was cleared on 2026-11-01. Its previous projects, personal assets and original Muse/dragon deliverables are preserved privately under `/srv/littletake/backups/cleared-workspace-20261101T225420Z/data`, outside the active workspace and website. The first release uses a shared workspace password, with all project members seeing the same project list.
+The hosted workspace is [littletake.crazycat.ai](https://littletake.crazycat.ai). Its VM is `littletake-server` in `ai-mock-interview-488402`, zone `us-central1-a`, with a dedicated `littletake` VPC and reserved address `34.44.159.175`. The `littletake-data` disk is retained when the VM is deleted. Snapshot policy `littletake-daily` runs at 07:00 UTC and retains seven days. A separate initial migration snapshot is retained as `littletake-initial-20261101`. The cloud workspace was cleared on 2026-11-01. Its previous projects, personal assets and original Muse/dragon deliverables are preserved privately under `/srv/littletake/backups/cleared-workspace-20261101T225420Z/data`, outside the active workspace and website. The hosted workspace uses no login; all visitors see the same project list.
 
 Migration: export each old project as a `.littletake.zip` archive, then import it on the deployed application. Export/import includes saved outputs. For an existing local service, its entire data directory can instead be transferred while it is stopped; retain the original. Back up both SQLite and the asset directory. Do not copy only the SQLite main file while a live WAL may contain committed data; `ProjectRoomStore.backupTo` uses SQLite's online backup API.
 

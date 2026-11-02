@@ -7,6 +7,8 @@ services:
     restart: unless-stopped
     init: true
     env_file: /etc/littletake/app.env
+    environment:
+      LITTLETAKE_PUBLIC_WORKSPACE: "1"
     ports:
       - "127.0.0.1:8080:8080"
     volumes:

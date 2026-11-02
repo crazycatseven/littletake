@@ -25,13 +25,17 @@ async function value<T = ProjectRoom>(response: Response, status = 200): Promise
 const error = async (response: Response, code: string) => { assert.equal(response.status, 409); assert.equal((await response.json()).error.code, code); };
 const directory = () => mkdtemp(path.join(tmpdir(), 'littletake-cloud-'));
 
-test('local edits transfer only on upload; stable project identity, scenes, assets, chats and media survive cloud download and restart', async t => {
+test('public cloud needs no login; local edits transfer only on upload and project identity, scenes, assets, chats and media survive download and restart', async t => {
   const cloudDir = await directory(), localDir = await directory(), nextDir = await directory();
-  const cloud = await startApplication({ port: 0, env: { LITTLETAKE_DATA_DIR: cloudDir, LITTLETAKE_MODE: 'cloud', LITTLETAKE_WORKSPACE_PASSWORD: password } });
-  const connection = { LITTLETAKE_MODE: 'local', LITTLETAKE_CLOUD_URL: cloud.origin, LITTLETAKE_CLOUD_PASSWORD: password };
+  const cloud = await startApplication({ port: 0, env: { LITTLETAKE_DATA_DIR: cloudDir, LITTLETAKE_MODE: 'cloud', LITTLETAKE_PUBLIC_WORKSPACE: '1', LITTLETAKE_WORKSPACE_PASSWORD: password } });
+  const connection = { LITTLETAKE_MODE: 'local', LITTLETAKE_CLOUD_URL: cloud.origin, LITTLETAKE_CLOUD_PASSWORD: '' };
   let local = await startApplication({ port: 0, env: { ...connection, LITTLETAKE_DATA_DIR: localDir } });
   const second = await startApplication({ port: 0, env: { ...connection, LITTLETAKE_DATA_DIR: nextDir } });
   t.after(async () => { await local.close(); await second.close(); await cloud.close(); });
+  const publicList = await fetch(cloud.origin + '/api/projects?list=1');
+  assert.equal(publicList.status, 200, 'public workspace overrides the old shared password');
+  assert.equal(publicList.headers.get('www-authenticate'), null, 'no native browser login prompt');
+  assert.deepEqual(await publicList.json(), { projects: [] });
   const editor = session(), other = session(), id = randomUUID(), source = createProject(); source.name = 'Hotel transfer';
   source.assets = [structuredClone(builtinAssets[0])];
   source.scenes[0].objects.push(instantiateAsset(source.assets[0], 'local-prop', [2, 0, 3], source.scenes[0].duration));
@@ -51,6 +55,12 @@ test('local edits transfer only on upload; stable project identity, scenes, asse
   assert.equal(cloud.projects.list().length, 1); assert.equal(cloud.projects.list()[0].id, id);
   assert.equal(uploaded.cloud!.origin, cloud.origin); assert.ok(uploaded.url.startsWith(cloud.origin));
   const remote = cloud.projects.getById(id);
+  const joined = await value(await fetch(cloud.origin + '/api/projects?code=' + remote.code));
+  assert.equal(joined.id, id, 'a project code opens without a login');
+  const claimed = await value(await call(cloud.origin, '/api/projects?code=' + remote.code, { action: 'claim' }, { ...editor, Authorization: '' }));
+  await error(await call(cloud.origin, '/api/projects?code=' + remote.code, { action: 'save', savedVersion: claimed.savedVersion, project: claimed.project }, { ...other, Authorization: '' }), 'edit_lease_lost');
+  assert.equal((await fetch(cloud.origin + '/api/scene-edit', { method: 'POST' })).status, 403, 'model access still requires the active project editor');
+  await value(await call(cloud.origin, '/api/projects?code=' + remote.code, { action: 'release' }, { ...editor, Authorization: '' }));
   assert.equal(serializeProject(remote.project), serializeProject(room.project));
   assert.deepEqual(cloud.projects.readOutput(remote.code, metadata.id).data, bytes);
   const previous = remote.contentVersion;
