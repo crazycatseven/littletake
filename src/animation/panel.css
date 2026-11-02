@@ -10,10 +10,10 @@
 .animation-toolbar select { font-size:10px; }
 .animation-ruler-window { min-width:0; overflow:hidden; }
 .animation-ruler-window .time-ruler { width:var(--animation-lane-width,100%); }
-.timeline-panel .timeline-rows { overflow:auto; }
-.timeline-panel .timeline-row { grid-template-columns:var(--track-label-width) var(--animation-lane-width,1fr); min-width:calc(var(--track-label-width) + var(--animation-lane-width,0px)); }
-.timeline-panel .track-label { position:sticky; left:0; z-index:5; background:var(--surface-raised); }
-.timeline-panel .track-label.selected { background:var(--selection); }
+.timeline-content .timeline-rows { overflow:auto; }
+.timeline-content .timeline-row { grid-template-columns:var(--track-label-width) var(--animation-lane-width,1fr); min-width:calc(var(--track-label-width) + var(--animation-lane-width,0px)); }
+.timeline-content .track-label { position:sticky; left:0; z-index:5; background:var(--surface-raised); }
+.timeline-content .track-label.selected { background:var(--selection); }
 .pending-animation { padding:8px 0; color:var(--warning); font-size:10px; }
 .pending-animation button { color:var(--warning); text-decoration:underline; font-size:10px; }
 .animation-axis-row .track-label { padding-left:38px; font-size:10px; }

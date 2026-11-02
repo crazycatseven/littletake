@@ -16,6 +16,7 @@ import { AssetEditor } from './assets/editor';
 import { updateAssetInstances } from './assets/edit';
 import { instantiateAsset, saveObjectAsset, linkObjectAsset } from './assets/library';
 import { createPrefabDialog } from './assets/dialog';
+import { SCENE_OBJECT_DRAG } from './assets/folders';
 import { bindHierarchyAssets, type HierarchyAssetSource } from './assets/hierarchy';
 import { evaluateAsset, type AssetDefinition } from './assets/model';
 import { bindComponents, componentInspector } from './components/inspector';
@@ -109,16 +110,21 @@ app.innerHTML = `
     <section class="inspector-panel" id="inspector" role="tabpanel" aria-labelledby="inspectorTab" hidden></section>
   </aside>
 </main>
-<section class="timeline-panel" id="timelinePanel" aria-label="Animation timeline">
-  <div class="panel-resize-handle" id="timelineResizeHandle" role="separator" aria-label="Resize timeline" aria-orientation="horizontal" aria-controls="timelinePanel" tabindex="0" title="Drag to resize · Double-click to reset"></div>
-  <div class="timeline-toolbar"><button id="timelineToggle" data-action="timeline" aria-expanded="false" aria-controls="timelineRows" title="Show or hide tracks">${icon('timeline')}Timeline<span class="timeline-chevron">⌃</span></button><div class="transport"><button data-action="rewind" class="icon-button" aria-label="Go to start">${icon('rewind')}</button><button data-action="play" id="playButton" class="play-button" aria-label="Play">${icon('play')}</button><span class="timecode" id="timecode" data-current-time>00:00.00</span><span class="timecode-separator">/</span><span class="timecode" id="endTimecode" data-end-time>00:05.00</span></div><div class="animation-toolbar"><button data-action="auto-key" id="autoKey" aria-pressed="false">● Auto Key Off</button><label>Frame <input type="number" id="animationFrame" aria-label="Current frame" min="0" step="1"/></label><select id="animationFps" aria-label="Timeline frame rate"><option value="24">24 fps</option><option value="30">30 fps</option></select><select id="animationInterpolation" aria-label="Keyframe interpolation" disabled><option value="linear">Linear</option><option value="constant">Hold</option><option value="smooth">Smooth</option><option value="quaternion">Quaternion</option></select><button data-action="duplicate-key" id="duplicateKey" disabled>Duplicate</button><button data-action="delete-key" id="deleteKey" disabled>Delete</button><button data-action="samples" id="samplesToggle" hidden>Show all samples</button></div><label class="duration-control">Duration <input type="number" id="duration" aria-label="Scene duration" min="1" max="60" step="1"/> s</label></div>
-  <div class="timeline-content" id="timelineContent"><div class="timeline-ruler-row"><div class="track-heading">SHOT / PROPERTY</div><div class="animation-ruler-window"><div id="timeRuler" class="time-ruler" role="slider" tabindex="0" aria-label="Timeline playhead" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"></div></div></div><div id="timelineRows" class="timeline-rows"></div></div>
+<section class="bottom-panel" id="bottomPanel" aria-label="Timeline and assets">
+  <div class="panel-resize-handle" id="bottomPanelResizeHandle" role="separator" aria-label="Resize bottom panel" aria-orientation="horizontal" aria-controls="bottomPanel" tabindex="0" title="Drag to resize · Double-click to reset"></div>
+  <div class="bottom-panel-toolbar">
+    <div class="bottom-panel-tabs" role="tablist" aria-label="Bottom panel"><button id="timelineTab" role="tab" data-bottom-tab="timeline" aria-selected="true" aria-controls="timelineContent">${icon('timeline')}Timeline</button><button id="assetLibraryTab" role="tab" data-bottom-tab="assets" aria-selected="false" aria-controls="assetPanel" tabindex="-1">${icon('folder')}Assets</button></div>
+    <div class="transport"><button data-action="rewind" class="icon-button" aria-label="Go to start">${icon('rewind')}</button><button data-action="play" id="playButton" class="play-button" aria-label="Play">${icon('play')}</button><span class="timecode" id="timecode" data-current-time>00:00.00</span><span class="timecode-separator">/</span><span class="timecode" id="endTimecode" data-end-time>00:05.00</span></div>
+    <div class="timeline-tools" id="timelineTools"><div class="animation-toolbar"><button data-action="auto-key" id="autoKey" aria-pressed="false">● Auto Key Off</button><label>Frame <input type="number" id="animationFrame" aria-label="Current frame" min="0" step="1"/></label><select id="animationFps" aria-label="Timeline frame rate"><option value="24">24 fps</option><option value="30">30 fps</option></select><select id="animationInterpolation" aria-label="Keyframe interpolation" disabled><option value="linear">Linear</option><option value="constant">Hold</option><option value="smooth">Smooth</option><option value="quaternion">Quaternion</option></select><button data-action="duplicate-key" id="duplicateKey" disabled>Duplicate</button><button data-action="delete-key" id="deleteKey" disabled>Delete</button><button data-action="samples" id="samplesToggle" hidden>Show all samples</button></div><label class="duration-control">Duration <input type="number" id="duration" aria-label="Scene duration" min="1" max="60" step="1"/> s</label></div>
+    <button id="bottomPanelToggle" class="icon-button" data-action="bottom-panel" aria-label="Collapse bottom panel" aria-expanded="true" aria-controls="bottomPanelBody" title="Collapse bottom panel"><span aria-hidden="true">⌄</span></button>
+  </div>
+  <div class="bottom-panel-body" id="bottomPanelBody"><div class="timeline-content" id="timelineContent" role="tabpanel" aria-labelledby="timelineTab"><div class="timeline-ruler-row"><div class="track-heading">SHOT / PROPERTY</div><div class="animation-ruler-window"><div id="timeRuler" class="time-ruler" role="slider" tabindex="0" aria-label="Timeline playhead" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"></div></div></div><div id="timelineRows" class="timeline-rows"></div></div><section id="assetPanel" role="tabpanel" aria-labelledby="assetLibraryTab" hidden></section></div>
 </section>
-<footer class="status-bar"><section id="assetPanel" aria-label="Asset manager"></section><span id="statusText" role="status">Ready</span><button data-action="shortcuts">${icon('help')}Shortcuts</button></footer>
+<footer class="status-bar"><span id="statusText" role="status">Ready</span><button data-action="shortcuts">${icon('help')}Shortcuts</button></footer>
 <input id="openFile" type="file" accept=".json,.zip,application/json,application/zip" hidden/>
 <dialog id="sceneSnapshotDialog" aria-labelledby="sceneSnapshotTitle"><div class="dialog-heading"><h2 id="sceneSnapshotTitle">Top view</h2><button data-action="close-snapshot" aria-label="Close top view">✕</button></div><img id="sceneSnapshotImage" class="scene-snapshot-image" alt="Top-down scene layout with object IDs"/><div class="snapshot-footer"><span id="sceneSnapshotInfo"></span><div><button data-action="refresh-snapshot">Refresh</button><button data-action="download-snapshot" class="primary-button">Download PNG</button></div></div></dialog>
 <dialog id="previewDialog" aria-labelledby="previewTitle"><div class="dialog-heading"><h2 id="previewTitle">Shot preview</h2><button data-action="close-preview" aria-label="Close shot preview">✕</button></div><div id="expandedPreview"></div><div class="preview-transport"><button class="play-button" data-action="play" aria-label="Play">${icon('play')}</button><span class="timecode" data-current-time></span><span class="timecode-separator">/</span><span class="timecode" data-end-time></span></div></dialog>
-<dialog id="shortcutsDialog"><div class="dialog-heading"><h2>Keyboard shortcuts</h2><button data-action="close-shortcuts" aria-label="Close shortcuts">✕</button></div><p class="muted">Editor controls.</p><dl class="shortcut-list"><dt>Orbit / pan / zoom</dt><dd>Left drag / Middle drag / Scroll</dd><dt>Fly around the scene</dt><dd>Hold right mouse + W A S D · Q / E down / up · Scroll to adjust speed · Shift to boost</dd><dt>Asset drawer</dt><dd>B · configurable in the bottom bar</dd><dt>Object controls</dt><dd>W/S forward/back · A/D turn · R record · Esc exit</dd><dt>Move / rotate / scale</dt><dd>G / R / S</dd><dt>Constrain an axis</dt><dd>X / Y / Z</dd><dt>Box select / add to selection</dt><dd>Shift drag empty space / Ctrl Shift drag</dd><dt>Multi-select in Hierarchy</dt><dd>Ctrl click / Shift click a range</dd><dt>Drop to surface</dt><dd>Double-click the green Y move handle</dd><dt>View orientation</dt><dd>Click an axis / drag the upper-right gizmo</dd><dt>Focus selection</dt><dd>F</dd><dt>Insert property key</dt><dd>Hover or focus a property · I</dd><dt>Play / pause</dt><dd>Space</dd><dt>Duplicate / delete</dt><dd>Ctrl D / Delete</dd><dt>Undo / redo</dt><dd>Ctrl Z / Ctrl Shift Z</dd><dt>Save locally</dt><dd>Ctrl S</dd></dl><p class="dialog-note">Use Key Transform for a whole pose, or key an individual property and expand its axes in the timeline.</p></dialog>
+<dialog id="shortcutsDialog"><div class="dialog-heading"><h2>Keyboard shortcuts</h2><button data-action="close-shortcuts" aria-label="Close shortcuts">✕</button></div><p class="muted">Editor controls.</p><dl class="shortcut-list"><dt>Orbit / pan / zoom</dt><dd>Left drag / Middle drag / Scroll</dd><dt>Fly around the scene</dt><dd>Hold right mouse + W A S D · Q / E down / up · Scroll to adjust speed · Shift to boost</dd><dt>Switch to Assets / Timeline</dt><dd><select id="assetShortcut" aria-label="Assets shortcut"><option value="KeyB">B (default)</option><option value="KeyG">G (replaces Move shortcut)</option><option value="none">Disabled</option></select></dd><dt>Object controls</dt><dd>W/S forward/back · A/D turn · R record · Esc exit</dd><dt>Move / rotate / scale</dt><dd>G / R / S</dd><dt>Constrain an axis</dt><dd>X / Y / Z</dd><dt>Box select / add to selection</dt><dd>Shift drag empty space / Ctrl Shift drag</dd><dt>Multi-select in Hierarchy</dt><dd>Ctrl click / Shift click a range</dd><dt>Drop to surface</dt><dd>Double-click the green Y move handle</dd><dt>View orientation</dt><dd>Click an axis / drag the upper-right gizmo</dd><dt>Focus selection</dt><dd>F</dd><dt>Insert property key</dt><dd>Hover or focus a property · I</dd><dt>Play / pause</dt><dd>Space</dd><dt>Duplicate / delete</dt><dd>Ctrl D / Delete</dd><dt>Undo / redo</dt><dd>Ctrl Z / Ctrl Shift Z</dd><dt>Save locally</dt><dd>Ctrl S</dd></dl><p class="dialog-note">Use Key Transform for a whole pose, or key an individual property and expand its axes in the timeline.</p></dialog>
 `;
 
 let project = createProject(null), storageError = '';
@@ -144,8 +150,12 @@ let assetEditor: AssetEditor | null = null;
 let performanceSession: PerformanceSession | null = null;
 let xrRecording: XRRecording | null = null;
 let storageAvailable = true;
-let timelineOpen = false;
-let timelineHeight = window.innerHeight <= 720 ? 180 : 220;
+const bottomPanelCollapsedHeight = 34;
+const defaultBottomPanelHeight = () => window.innerHeight <= 720 ? 220 : 280;
+let bottomPanelOpen = false;
+let bottomPanelHeight = defaultBottomPanelHeight();
+let bottomPanelTab: 'timeline' | 'assets' = 'timeline';
+let assetShortcut = 'KeyB';
 let autoKey = false, showAxisKeys = false, showAllSamples = false, animationZoom=1;
 let openProperties = new Set<PropertyGroup>(), selectedPropertyKey: SelectedPropertyKey | null = null;
 let selectedPathId:string|null=null,selectedPathPoint=-1,selectedPathPart:PathPart='point';
@@ -155,10 +165,13 @@ function changePathPoint(index:number,phase:import('./motion-paths/editor').Path
 let hoveredProperty: PropertyGroup | null = null;
 const unkeyed = new Map<string, {time:number;value:number}>();
 $('#animationFps').insertAdjacentHTML('afterend','<select id="animationZoom" aria-label="Timeline zoom"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select>');
-function applyTimelineZoom(){const width=$('.animation-ruler-window').clientWidth;if(width)$('#timelinePanel').style.setProperty('--animation-lane-width',`${Math.round(width*animationZoom)}px`);$('#timeRuler').style.transform=`translateX(-${$('#timelineRows').scrollLeft}px)`;}
+function applyTimelineZoom(){const width=$('.animation-ruler-window').clientWidth;if(width)$('#bottomPanel').style.setProperty('--animation-lane-width',`${Math.round(width*animationZoom)}px`);$('#timeRuler').style.transform=`translateX(-${$('#timelineRows').scrollLeft}px)`;}
 new ResizeObserver(applyTimelineZoom).observe($('.animation-ruler-window'));
 $('#timelineRows').addEventListener('scroll',()=>{$('#timeRuler').style.transform=`translateX(-${$('#timelineRows').scrollLeft}px)`;});
-try { const saved=Number(localStorage.getItem('littletake.timeline.height')); if(Number.isFinite(saved)&&saved>0)timelineHeight=saved; } catch {}
+try {
+  const saved=Number(localStorage.getItem('littletake.bottom-panel.height')??localStorage.getItem('littletake.timeline.height'));if(Number.isFinite(saved)&&saved>0)bottomPanelHeight=saved;
+  const shortcut=localStorage.getItem('littletake.assets.shortcut');if(shortcut&&['KeyB','KeyG','none'].includes(shortcut))assetShortcut=shortcut;
+} catch {}
 let libraryTab: 'objects'|'assets' = 'objects';
 let editPreview: ProjectContent | null = null;
 let previewSceneId: string | null = null, previewShotId: string | null = null;
@@ -193,7 +206,7 @@ function openProject(next:ProjectDocument){
   performanceSession?.dispose();performanceSession=null;
   stage?.cancelPath();
   pause();flushFieldEdit();sceneEditor?.session.cancel();referenceDialog.contextChanged();
-  storageError='';$('#storageWarning').hidden=true;$('.workspace').inert=false;$('#timelinePanel').inert=false;$('.app-header').inert=false;
+  storageError='';$('#storageWarning').hidden=true;$('.workspace').inert=false;$('#bottomPanel').inert=false;$('.app-header').inert=false;
   project=next;assetProjectToken=newId();selection.active=null;selectedPathId=null;time=0;syncDocument();history=new History(projectContent(project));
   sceneEditor?.session.replaceBook(next.conversations);if(sceneEditor)project.conversations=sceneEditor.session.book;
   renderAll();persist();
@@ -268,7 +281,7 @@ function switchShot(id:string){
   pause();flushFieldEdit();
   if(editPreview)previewShotId=id;
   else{sceneEditor?.session.contextChanged();project.activeShotId=id;}
-  selection.active=shot.cameraId;time=shot.start;setTimelineOpen(true);setSidePanel('inspector');
+  selection.active=shot.cameraId;time=shot.start;setBottomPanelTab('timeline');setSidePanel('inspector');
   renderNavigation();renderInspector();renderSelection();renderTime();syncStage();if(!editPreview)persist();
 }
 function addScene(){
@@ -286,7 +299,7 @@ function addShot(){
     const camera=doc.cameras.find(item=>item.id===selection.active)??shotCamera(doc,project.activeShotId)??doc.cameras[0];
     const shot=camera?createShot(camera,nextId('shot',[...doc.objects,...doc.cameras,...doc.shots]),doc.duration,'Shot '+(doc.shots.length+1)):addIndependentShot(doc);
     if(camera)doc.shots.push(shot);
-    project.activeShotId=shot.id;selection.active=shot.cameraId;time=shot.start;setTimelineOpen(true);setSidePanel('inspector');changed('Shot and camera linked · shared scene time');
+    project.activeShotId=shot.id;selection.active=shot.cameraId;time=shot.start;setBottomPanelTab('timeline');setSidePanel('inspector');changed('Shot and camera linked · shared scene time');
   }catch(error){status((error as Error).message);}
 }
 function duplicateShot(){
@@ -338,7 +351,7 @@ function selectIds(ids: string[], mode: SelectionMode, range = false) {
     if(range&&ids.length===1)selection.range(ids[0],objects,mode==='append');
     else selection.set(ids.filter(id=>objects.includes(id)),mode);
   }
-  const id=selection.active;if(id)setLibraryTab('objects');
+  const id=selection.active;
   if(previous!==id){selectedPropertyKey=null;openProperties.clear();renderTimeline();}
   if(selection.ids.length>1)pause();
   const scene=visibleScene(),camera=scene.cameras.find(item=>item.id===id);
@@ -481,20 +494,39 @@ function renderSelection() {
   ($('[data-action="redo"]') as HTMLButtonElement).disabled=!!editPreview||!history.canRedo;
 }
 function setLibraryTab(tab: 'objects'|'assets') {
-  libraryTab=tab; $('#objectsPanel').hidden=false; assetsPanel?.setOpen(tab==='assets');
-  document.querySelectorAll<HTMLButtonElement>('[data-library]').forEach(button=>{const active=button.dataset.library===tab;button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;});
+  setBottomPanelTab(tab==='assets'?'assets':'timeline');
 }
-function setTimelineOpen(open: boolean) {
-  if(open&&timelineHeight<=62)setTimelineHeight(window.innerHeight<=720?180:220);
-  timelineOpen=open; $('#timelinePanel').classList.toggle('expanded',open); $('#timelineRows').hidden=!open; $('#timelineToggle').setAttribute('aria-expanded',String(open));
-  $('#timelineResizeHandle').setAttribute('aria-valuenow',String(open?timelineHeight:62));
+function setBottomPanelTab(tab: 'timeline'|'assets') {
+  if(tab==='assets'&&performanceSession)return;
+  if(tab===bottomPanelTab&&bottomPanelOpen)return;
+  const wasOpen=bottomPanelOpen;
+  const previous=$('#'+(bottomPanelTab==='timeline'?'timelineContent':'assetPanel'));
+  if(tab!==bottomPanelTab&&previous.contains(document.activeElement))$<HTMLButtonElement>(`[data-bottom-tab="${tab}"]`).focus({preventScroll:true});
+  bottomPanelTab=tab;
+  $('#timelineContent').hidden=tab!=='timeline';$('#timelineTools').hidden=tab!=='timeline';$('#assetPanel').hidden=tab!=='assets';
+  document.querySelectorAll<HTMLButtonElement>('[data-bottom-tab]').forEach(button=>{const active=button.dataset.bottomTab===tab;button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;});
+  setBottomPanelOpen(true);
+  if(tab==='assets'&&wasOpen)void assetsPanel?.refresh();
+  if(tab==='timeline')applyTimelineZoom();
 }
-function setTimelineHeight(value: number) {
-  const max=Math.max(62,Math.floor(window.innerHeight*.7)),handle=$('#timelineResizeHandle');
-  timelineHeight=Math.round(clamp(value,62,max));$('#timelinePanel').style.setProperty('--timeline-height',`${timelineHeight}px`);
-  handle.setAttribute('aria-valuemin','62');handle.setAttribute('aria-valuemax',String(max));handle.setAttribute('aria-valuenow',String(timelineOpen?timelineHeight:62));
+function setBottomPanelOpen(open: boolean) {
+  if(open&&bottomPanelHeight<=bottomPanelCollapsedHeight)setBottomPanelHeight(defaultBottomPanelHeight());
+  const wasOpen=bottomPanelOpen,body=$('#bottomPanelBody'),toggle=$('#bottomPanelToggle');
+  if(!open&&body.contains(document.activeElement))$<HTMLButtonElement>(`[data-bottom-tab="${bottomPanelTab}"]`).focus({preventScroll:true});
+  bottomPanelOpen=open;$('#bottomPanel').classList.toggle('expanded',open);body.hidden=!open;
+  toggle.setAttribute('aria-expanded',String(open));toggle.setAttribute('aria-label',`${open?'Collapse':'Expand'} bottom panel`);toggle.title=`${open?'Collapse':'Expand'} bottom panel`;
+  toggle.firstElementChild!.textContent=open?'⌄':'⌃';
+  $('#bottomPanelResizeHandle').setAttribute('aria-valuenow',String(open?bottomPanelHeight:bottomPanelCollapsedHeight));
+  libraryTab=open&&bottomPanelTab==='assets'?'assets':'objects';
+  document.querySelectorAll<HTMLButtonElement>('[data-library]').forEach(button=>{const active=button.dataset.library===libraryTab;button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;});
+  if(open&&!wasOpen&&bottomPanelTab==='assets')void assetsPanel?.refresh();
 }
-function saveTimelineHeight() {try{localStorage.setItem('littletake.timeline.height',String(timelineHeight));}catch{}}
+function setBottomPanelHeight(value: number) {
+  const max=Math.max(bottomPanelCollapsedHeight,Math.min(Math.floor(window.innerHeight*.7),window.innerHeight-$('.app-header').offsetHeight-$('.status-bar').offsetHeight-220)),handle=$('#bottomPanelResizeHandle');
+  bottomPanelHeight=Math.round(value<=bottomPanelCollapsedHeight?bottomPanelCollapsedHeight:clamp(value,Math.min(180,max),max));$('#bottomPanel').style.setProperty('--bottom-panel-height',`${bottomPanelHeight}px`);
+  handle.setAttribute('aria-valuemin',String(bottomPanelCollapsedHeight));handle.setAttribute('aria-valuemax',String(max));handle.setAttribute('aria-valuenow',String(bottomPanelOpen?bottomPanelHeight:bottomPanelCollapsedHeight));
+}
+function saveBottomPanelHeight() {try{localStorage.setItem('littletake.bottom-panel.height',String(bottomPanelHeight));}catch{}}
 function renderOutliner() {
   const scene=visibleScene(),nodes=sceneEntities(scene);$('#objectCount').textContent=String(scene.objects.length+(scene.paths?.length??0));
   const query=$<HTMLInputElement>('#hierarchySearch').value.trim().toLowerCase(),shown=new Set<string>();
@@ -620,7 +652,7 @@ function renderTimeline() {
   if(item&&'kind' in item&&item.components?.some(c=>c.type==='followPath'))groups.unshift('followPath.progress');
   const pending=[...unkeyed.entries()].filter(([key])=>key.startsWith(`${doc.id}|`));
   const summary=item?esc(item.name):'Select an object or camera';
-  $('#timelineRows').innerHTML='<div class="timeline-group">SHOTS <span>One camera · a range of scene time</span><button data-action="add-shot" aria-label="Add shot">'+icon('plus')+'New shot</button></div>'+shots+'<div class="timeline-group">PROPERTIES <span>'+summary+'</span>'+(pending.length?'<button data-action="review-draft">'+pending.length+' unkeyed change · Review</button>':'')+'</div>'+renderPropertyRows(animation,groups,openProperties,selectedPropertyKey,doc.duration,fps(),showAllSamples,jointNames);
+  $('#timelineRows').innerHTML=shots+'<div class="timeline-group">PROPERTIES <span>'+summary+'</span>'+(pending.length?'<button data-action="review-draft">'+pending.length+' unkeyed change · Review</button>':'')+'</div>'+renderPropertyRows(animation,groups,openProperties,selectedPropertyKey,doc.duration,fps(),showAllSamples,jointNames);
   const selected=selectedPropertyKey,paths=selected?(selected.path?[selected.path]:groupPaths(selected.group)):[],key=selected?paths.flatMap(path=>animation?.curves[path]??[]).find(key=>Math.abs(key.time-selected.time)<1e-6):undefined;
   $<HTMLButtonElement>('#duplicateKey').disabled=!key;$<HTMLButtonElement>('#deleteKey').disabled=!key;
   const interpolation=$<HTMLSelectElement>('#animationInterpolation');interpolation.disabled=!key;if(key)interpolation.value=key.interpolation;
@@ -678,7 +710,7 @@ async function createObjectPrefab(source:HierarchyAssetSource,folder:string){
     if(storageError||assetProjectToken!==source.projectId||JSON.stringify(current)!==original)throw new Error('Prefab created in My Assets. The original object changed during saving, so it was not relinked.');
     replaceContent(linkObjectAsset(projectContent(project),source.sceneId,source.objectId,saved.asset));selection.active=source.objectId;
     changed('Prefab created · Current object linked · Placement and motion retained');
-    await assetsPanel?.refresh();assetsPanel?.showFolder(saved.folder);assetsPanel?.setOpen(true);
+    await assetsPanel?.refresh();assetsPanel?.showFolder(saved.folder);setBottomPanelTab('assets');
   }catch(error){status((error as Error).message);}
   finally{assetSaveBusy=false;}
 }
@@ -687,7 +719,7 @@ async function beginPerformance(record=false){
   if(item.components?.some(c=>c.type==='followPath'&&c.enabled&&c.pathId)){status('Disable Follow Path before using keyboard controls.');return;}
   const token=assetProjectToken;
   try{if(inputController(item.components)?.type==='script')await prepareScripts();if(performanceSession||token!==assetProjectToken||entity()!==item||!workspace?.canEdit)return;
-    pause();flushFieldEdit();sceneEditor?.sceneChanged();performanceSession=new PerformanceSession(item,time,doc,project.scripts??[],project.assets??[]);assetsPanel?.setOpen(false);setSidePanel('inspector');renderAll();stage?.focusCanvas();status('Control active · R records · Esc keeps position and exits');if(record)startPerformanceRecord();
+    pause();flushFieldEdit();sceneEditor?.sceneChanged();performanceSession=new PerformanceSession(item,time,doc,project.scripts??[],project.assets??[]);setBottomPanelTab('timeline');setSidePanel('inspector');renderAll();stage?.focusCanvas();status('Control active · R records · Esc keeps position and exits');if(record)startPerformanceRecord();
   }catch(error){status('Controller could not start: '+(error as Error).message);}
 }
 function applyPlacement():boolean{
@@ -700,7 +732,7 @@ function exitPerformance(){if(!performanceSession)return;if(performanceSession.m
 function discardPosition(){if(!performanceSession||performanceSession.mode!=='control')return;performanceSession.dispose();performanceSession=null;pause();renderAll();persist();synchronizeAssets(libraryAssets);status('Positioning discarded');}
 function startPerformanceRecord(){
   if(!performanceSession||performanceSession.mode!=='control')return;
-  if(!applyPlacement())return;performanceSession.start(doc.duration);time=performanceSession.time;playing=false;setTimelineOpen(true);renderAll();stage?.focusCanvas();
+  if(!applyPlacement())return;performanceSession.start(doc.duration);time=performanceSession.time;playing=false;setBottomPanelTab('timeline');renderAll();stage?.focusCanvas();
 }
 function stopPerformanceRecord(){if(!performanceSession)return;performanceSession.stop();playing=false;time=performanceSession.time;renderAll();stage?.focusCanvas();}
 function discardPerformance(retry=false){if(!performanceSession)return;playing=false;performanceSession.discard();time=performanceSession.time;renderAll();if(retry)startPerformanceRecord();else stage?.focusCanvas();}
@@ -715,6 +747,7 @@ function keepPerformance(){
 }
 function renderPerformance(){
   const session=performanceSession,active=!!session,bar=$('#performanceBar');bar.hidden=!active;
+  $<HTMLButtonElement>('#assetLibraryTab').disabled=active;
   $('.stage-panel').classList.toggle('performance-active',active);
   $('#sceneAI').inert=(active&&!session?.scriptRevision)||!workspace?.canEdit;$('#timelineContent').inert=active;$('.library-panel').inert=active;$('.app-header').inert=active;
   $<HTMLInputElement>('#duration').disabled=active||!!editPreview||doc===emptyView;$<HTMLSelectElement>('#shotSelect').disabled=active;
@@ -757,7 +790,7 @@ function downloadProject(_saved=false){if(workspace?.room){void workspace.downlo
 syncDocument();
 const referenceDialog = new ReferenceDialog(draft => {
   pause(); flushFieldEdit(); const imported=cloneDocument(draft.scene);project.assets=[...(project.assets??[]).filter(asset=>!draft.assets?.some(next=>next.id===asset.id)),...(draft.assets??[])];imported.id=nextId('scene',project.scenes);project.scenes.push(imported);project.activeSceneId=imported.id;project.activeShotId=imported.shots[0]?.id??null;selection.active=null;time=0;syncDocument();
-  setTimelineOpen(true);changed('Reference scene loaded · colors, motion and shots are editable'); persist(); stage?.resetView();
+  setBottomPanelTab('timeline');changed('Reference scene loaded · colors, motion and shots are editable'); persist(); stage?.resetView();
   void assetsPanel?.refresh();
 },(scene,time,shotId,assets,measureVisible,view='shot',frameBounds)=>stage.captureSnapshot(scene,time,view,shotId,assets,measureVisible,frameBounds),()=>workspace,async(file,video,cuts)=>{await sceneEditor?.attachReference(file,video,cuts);});
 
@@ -844,7 +877,7 @@ try {
       pause();flushFieldEdit();lastFrame=performance.now();
       if(active)sceneEditor?.session.cancel('VR opened. Retry after returning to the desktop editor.');
       app.classList.toggle('xr-presenting',active);
-      app.querySelectorAll<HTMLElement>(':scope > header,:scope > main,:scope > .timeline-panel,:scope > footer').forEach(element=>element.inert=active);
+      app.querySelectorAll<HTMLElement>(':scope > header,:scope > main,:scope > .bottom-panel,:scope > footer').forEach(element=>element.inert=active);
       persist();
     },
     onXRAction:action=>{if(xrRecording)return;if(action==='play')togglePlay();else if(workspace?.canEdit){flushFieldEdit();restore(history.undo());}},
@@ -886,7 +919,7 @@ try {
   stage.setTool(tool);
   placementPanel=new PlacementPanel($('#placementTools'),settings=>stage.setPrecision(settings),(axis,edge)=>stage.alignSelection(axis,edge));
   assetsPanel=new AssetPanel($('#assetPanel'),stage,insertAsset,()=>!!workspace?.canEdit&&!storageError&&!editPreview&&!performanceSession&&!assetEditor,asset=>openAssetEditor(asset),synchronizeAssets,(source,folder)=>void createObjectPrefab(source,folder),{list:()=>project.scenes,active:()=>project.activeSceneId,open:id=>{switchScene(id);setSidePanel('inspector');},create:addScene,remove:requestDeleteScene});assetsPanel.update(project.assets);
-  bindHierarchyAssets($('#outliner'),hierarchyAssetSource,source=>void createObjectPrefab(source,assetsPanel?.currentFolder??''),()=>{assetsPanel?.showFolder(assetsPanel.currentFolder);assetsPanel?.setOpen(true);});
+  bindHierarchyAssets($('#outliner'),hierarchyAssetSource,source=>void createObjectPrefab(source,assetsPanel?.currentFolder??''),()=>{assetsPanel?.showFolder(assetsPanel.currentFolder);setBottomPanelTab('assets');});
   bindParentingTree($('#outliner'),{
     enabled:()=>!!workspace?.canEdit&&!editPreview&&!performanceSession&&!storageError&&!playing,
     selected:()=>selection.ids,
@@ -921,11 +954,12 @@ app.addEventListener('click',event=>{
   if(stage?.presentingXR)return;
   if(assetEditor)return;
   const target=(event.target as HTMLElement).closest<HTMLElement>('button');if(!target || target.hasAttribute('disabled'))return;
+  if(target.dataset.bottomTab){setBottomPanelTab(target.dataset.bottomTab as 'timeline'|'assets');return;}
   if(target.dataset.discardDraft){unkeyed.delete(target.dataset.discardDraft);renderAll();status('Unkeyed change discarded');return;}
   if(target.dataset.keyGroup){const item=entity();if(item&&!editPreview&&!performanceSession){event.preventDefault();pause();try{keyProperty(item,target.dataset.keyGroup as PropertyGroup,true);}catch(error){status((error as Error).message);}}return;}
   if(target.dataset.keyPath){const item=entity(),path=target.dataset.keyPath as PropertyPath;if(item&&!editPreview&&!performanceSession){event.preventDefault();pause();try{const value=propertyValue(item,path),animation=ensureAnimation(item),existing=animation.curves[path]?.some(key=>Math.abs(key.time-time)<1e-6);if(existing&&!currentDraft(item,path))removePropertyKeys(animation,[path],time);else{const orientation=path.startsWith('rotation.')?displayedPose(item).rotation:undefined;putKey(animation,path,time,value,orientation);unkeyed.delete(draftId(item,path));}selectedPropertyKey=existing?null:{group:propertyGroup(path),path,time};changed('Axis key updated');}catch(error){status((error as Error).message);}}return;}
   if(target.dataset.animationToggle){const group=target.dataset.animationToggle as PropertyGroup;if(!scalarGroup(group)){openProperties.has(group)?openProperties.delete(group):openProperties.add(group);renderTimeline();renderTime();}return;}
-  if(performanceSession && !target.closest('#performanceBar,.control-component') && !(performanceSession.scriptRevision&&(target.closest('#sceneAI')||target.dataset.panel)) && !['play','timeline'].includes(target.dataset.action??''))return;
+  if(performanceSession && !target.closest('#performanceBar,.control-component') && !(performanceSession.scriptRevision&&(target.closest('#sceneAI')||target.dataset.panel)) && !['play','bottom-panel'].includes(target.dataset.action??''))return;
   target.closest<HTMLDetailsElement>('details.studio-menu')?.removeAttribute('open');
   if(target.dataset.library){setLibraryTab(target.dataset.library as 'objects'|'assets');return;}
   if(target.dataset.pathOpen){openMotionPath(target.dataset.pathOpen,target.dataset.pathEdit==='true');return;}
@@ -934,7 +968,7 @@ app.addEventListener('click',event=>{
   if(target.dataset.panel){setSidePanel(target.dataset.panel as 'muse'|'inspector');return;}
   if(target.dataset.shot){switchShot(target.dataset.shot);return;}
   if(target.dataset.select){const range=event.shiftKey&&!!target.closest('#outliner');selectIds([target.dataset.select],range?(event.ctrlKey||event.metaKey?'append':'replace'):(event.ctrlKey||event.metaKey||event.shiftKey?'toggle':'replace'),range);setSidePanel('inspector');return;}
-  if(editPreview && !['focus','reset-view','play','rewind','top-view','refresh-snapshot','timeline','expand-preview','close-preview','close-snapshot','download-snapshot'].includes(target.dataset.action??''))return;
+  if(editPreview && !['focus','reset-view','play','rewind','top-view','refresh-snapshot','bottom-panel','expand-preview','close-preview','close-snapshot','download-snapshot'].includes(target.dataset.action??''))return;
   if(target.hasAttribute('data-script-manage')||target.dataset.scriptOpen){editProjectScripts(target.dataset.scriptOpen);return;}
   if(target.dataset.scriptAttach){const item=entity();if(!workspace?.canEdit||performanceSession||!item||!('kind' in item))return;try{replaceContent(applyProjectOperations(projectContent(project),[{type:'attach_script',sceneId:doc.id,id:item.id,scriptId:target.dataset.scriptAttach,parameters:{},replaceController:false}],time));changed('Script attached · Start Control to try it');}catch(error){status((error as Error).message);}return;}
   if(target.dataset.visibilityId){const item=doc.objects.find(item=>item.id===target.dataset.visibilityId);if(item){const ids=selection.ids.includes(item.id)?selection.ids:[item.id];if(effectivelyHidden(doc,item.id))showHierarchy(ids);else setHidden(ids,true);}return;}
@@ -984,7 +1018,7 @@ app.addEventListener('click',event=>{
     case 'export':downloadProject();break;
     case 'export-scene':exportScene();break;
     case 'add-scene':addScene();break;
-    case 'open-scenes':assetsPanel?.showScenes();break;
+    case 'open-scenes':assetsPanel?.showScenes();setBottomPanelTab('assets');break;
     case 'add-camera':addCamera();break;
     case 'add-shot':addShot();break;
     case 'camera-shot':addShot();break;
@@ -1007,7 +1041,7 @@ app.addEventListener('click',event=>{
     case 'top-view':case 'refresh-snapshot':captureTopView();break;
     case 'close-snapshot':$<HTMLDialogElement>('#sceneSnapshotDialog').close();break;
     case 'download-snapshot':if(sceneSnapshot){const anchor=document.createElement('a');anchor.href=sceneSnapshot.dataUrl;anchor.download='littletake-top-view.png';anchor.click();}break;
-    case 'timeline':setTimelineOpen(!timelineOpen);break;
+    case 'bottom-panel':setBottomPanelOpen(!bottomPanelOpen);break;
     case 'expand-preview':$('#expandedPreview').appendChild($('#previewFrame'));$<HTMLDialogElement>('#previewDialog').showModal();target.setAttribute('aria-expanded','true');break;
     case 'close-preview':$<HTMLDialogElement>('#previewDialog').close();break;
     case 'shortcuts':$<HTMLDialogElement>('#shortcutsDialog').showModal();break;
@@ -1019,6 +1053,18 @@ $('#previewDialog').addEventListener('keydown',event=>{if(event.code==='Space'){
 $('#hierarchySearch').addEventListener('input',()=>{renderOutliner();renderSelection();});
 document.addEventListener('pointerdown',event=>{document.querySelectorAll<HTMLDetailsElement>('details.studio-menu[open]').forEach(menu=>{if(!menu.contains(event.target as Node))menu.open=false;});});
 $('.library-tabs').addEventListener('keydown',event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();setLibraryTab(libraryTab==='objects'?'assets':'objects');$<HTMLButtonElement>(`[data-library="${libraryTab}"]`).focus();}});
+$('.bottom-panel-tabs').addEventListener('keydown',event=>{
+  if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+  event.preventDefault();const tabs=Array.from(document.querySelectorAll<HTMLButtonElement>('[data-bottom-tab]:not(:disabled)'));
+  const index=tabs.findIndex(tab=>tab.dataset.bottomTab===bottomPanelTab);
+  const next=event.key==='Home'?0:event.key==='End'?tabs.length-1:(index+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;
+  const tab=tabs[next];if(tab){setBottomPanelTab(tab.dataset.bottomTab as 'timeline'|'assets');tab.focus({preventScroll:true});}
+});
+$('#assetLibraryTab').addEventListener('dragenter',event=>{
+  if(workspace?.canEdit&&!performanceSession&&!editPreview&&event.dataTransfer?.types.includes(SCENE_OBJECT_DRAG))setBottomPanelTab('assets');
+});
+const assetShortcutSelect=$<HTMLSelectElement>('#assetShortcut');assetShortcutSelect.value=assetShortcut;
+assetShortcutSelect.onchange=()=>{assetShortcut=assetShortcutSelect.value;try{localStorage.setItem('littletake.assets.shortcut',assetShortcut);}catch{}};
 $('.panel-tabs').addEventListener('keydown',event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();const next=$('#sceneAI').hidden?'muse':'inspector';setSidePanel(next);$<HTMLButtonElement>(`[data-panel="${next}"]`).focus();}});
 const onPropertyInput = (event: Event)=>{
   const control=event.target as HTMLInputElement;
@@ -1086,30 +1132,30 @@ $<HTMLInputElement>('#openFile').addEventListener('change',async event=>{
   }catch(error){const message=error instanceof Error?error.message:'Unable to open this scene or project.';status(message);workspace?.reportError(message);}finally{input.value='';}
 });
 
-const timelineResizeHandle=$('#timelineResizeHandle');
-let timelineResize:{y:number;height:number;savedHeight:number;open:boolean}|null=null;
-timelineResizeHandle.onpointerdown=event=>{
+const bottomPanelResizeHandle=$('#bottomPanelResizeHandle');
+let bottomPanelResize:{y:number;height:number;savedHeight:number;open:boolean}|null=null;
+bottomPanelResizeHandle.onpointerdown=event=>{
   if(event.button!==0)return;
-  timelineResize={y:event.clientY,height:$('#timelinePanel').getBoundingClientRect().height,savedHeight:timelineHeight,open:timelineOpen};
-  stage.beginViewportResize($('#viewport').clientHeight+timelineResize.height-62);
-  timelineResizeHandle.focus({preventScroll:true});timelineResizeHandle.setPointerCapture(event.pointerId);$('#timelinePanel').classList.add('resizing');event.preventDefault();
+  bottomPanelResize={y:event.clientY,height:$('#bottomPanel').getBoundingClientRect().height,savedHeight:bottomPanelHeight,open:bottomPanelOpen};
+  stage?.beginViewportResize($('#viewport').clientHeight+bottomPanelResize.height-bottomPanelCollapsedHeight);
+  bottomPanelResizeHandle.focus({preventScroll:true});bottomPanelResizeHandle.setPointerCapture(event.pointerId);$('#bottomPanel').classList.add('resizing');event.preventDefault();
 };
-timelineResizeHandle.onpointermove=event=>{
-  if(!timelineResize||Math.abs(event.clientY-timelineResize.y)<2)return;
-  setTimelineHeight(timelineResize.height+timelineResize.y-event.clientY);setTimelineOpen(timelineHeight>62);
+bottomPanelResizeHandle.onpointermove=event=>{
+  if(!bottomPanelResize||Math.abs(event.clientY-bottomPanelResize.y)<2)return;
+  setBottomPanelHeight(bottomPanelResize.height+bottomPanelResize.y-event.clientY);setBottomPanelOpen(bottomPanelHeight>bottomPanelCollapsedHeight);
 };
-timelineResizeHandle.onpointerup=()=>{if(!timelineResize)return;timelineResize=null;stage.endViewportResize();$('#timelinePanel').classList.remove('resizing');saveTimelineHeight();};
-timelineResizeHandle.onlostpointercapture=timelineResizeHandle.onpointercancel=()=>{
-  if(timelineResize){setTimelineHeight(timelineResize.savedHeight);setTimelineOpen(timelineResize.open);}
-  timelineResize=null;stage.endViewportResize();$('#timelinePanel').classList.remove('resizing');
+bottomPanelResizeHandle.onpointerup=()=>{if(!bottomPanelResize)return;bottomPanelResize=null;stage?.endViewportResize();$('#bottomPanel').classList.remove('resizing');saveBottomPanelHeight();};
+bottomPanelResizeHandle.onlostpointercapture=bottomPanelResizeHandle.onpointercancel=()=>{
+  if(bottomPanelResize){setBottomPanelHeight(bottomPanelResize.savedHeight);setBottomPanelOpen(bottomPanelResize.open);}
+  bottomPanelResize=null;stage?.endViewportResize();$('#bottomPanel').classList.remove('resizing');
 };
-timelineResizeHandle.ondblclick=()=>{setTimelineHeight(window.innerHeight<=720?180:220);setTimelineOpen(true);saveTimelineHeight();};
-timelineResizeHandle.onkeydown=event=>{
+bottomPanelResizeHandle.ondblclick=()=>{setBottomPanelHeight(defaultBottomPanelHeight());setBottomPanelOpen(true);saveBottomPanelHeight();};
+bottomPanelResizeHandle.onkeydown=event=>{
   if(!['ArrowUp','ArrowDown','Home','End'].includes(event.key))return;
-  event.preventDefault();const height=$('#timelinePanel').getBoundingClientRect().height;
-  setTimelineHeight(event.key==='Home'?62:event.key==='End'?window.innerHeight:height+(event.key==='ArrowUp'?20:-20));setTimelineOpen(timelineHeight>62);saveTimelineHeight();
+  event.preventDefault();const height=$('#bottomPanel').getBoundingClientRect().height;
+  setBottomPanelHeight(event.key==='Home'?bottomPanelCollapsedHeight:event.key==='End'?window.innerHeight:height+(event.key==='ArrowUp'?20:-20));setBottomPanelOpen(bottomPanelHeight>bottomPanelCollapsedHeight);saveBottomPanelHeight();
 };
-window.addEventListener('resize',()=>setTimelineHeight(timelineHeight));
+window.addEventListener('resize',()=>setBottomPanelHeight(bottomPanelHeight));
 
 let timelineDrag: {element:HTMLElement;id:string;kind:'shot'|'motion';mode:string;initialX:number;laneWidth:number;initialRange:{start:number;duration:number};before:ProjectContent;moved:boolean}|null=null;
 let propertyDrag: {element:HTMLElement;group:PropertyGroup;path?:PropertyPath;from:number;to:number;initialX:number;laneWidth:number;moved:boolean;take?:string;mode?:string;start?:number;end?:number}|null=null;
@@ -1166,7 +1212,8 @@ window.addEventListener('keydown',event=>{
     }catch(error){status((error as Error).message);}return;}
   }
   if(target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || document.querySelector('dialog[open]'))return;
-  if(!performanceSession&&assetsPanel?.key(event))return;
+  if(!performanceSession&&!event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&event.code===assetShortcut){event.preventDefault();if(!event.repeat)setBottomPanelTab(bottomPanelOpen&&bottomPanelTab==='assets'?'timeline':'assets');return;}
+  if(!performanceSession&&event.key==='Escape'&&bottomPanelOpen&&bottomPanelTab==='assets'){event.preventDefault();setBottomPanelTab('timeline');return;}
   const key=event.code.startsWith('Key')?event.code.slice(3).toLowerCase():event.code==='Space'?' ':event.key.toLowerCase(),mod=event.ctrlKey||event.metaKey;
   if(performanceSession){if(mod||event.altKey)return;event.preventDefault();if(key==='escape'&&!event.repeat){performanceSession.mode==='record'?stopPerformanceRecord():performanceSession.mode==='control'?exitPerformance():discardPerformance();return;}if(key==='r'&&!event.repeat){performanceSession.mode==='record'?stopPerformanceRecord():performanceSession.mode==='control'?startPerformanceRecord():undefined;return;}if(performanceSession.mode==='review'){if(key===' '&&!event.repeat)togglePlay();return;}if(['w','a','s','d','f','v','shift',' '].includes(key))performanceSession.keys.add(key);return;}
   if(mod&&key==='z'){event.preventDefault();flushFieldEdit();restore(event.shiftKey?history.redo():history.undo());return;}
@@ -1195,7 +1242,7 @@ window.addEventListener('pagehide',()=>{sceneEditor?.session.cancel('This respon
 window.addEventListener('beforeunload',event=>{if(!storageAvailable||performanceSession||unkeyed.size){event.preventDefault();event.returnValue='';}});
 async function openAssetEditor(asset:AssetDefinition) {
   if(assetEditor||editPreview||storageError||performanceSession||!workspace?.canEdit)return;
-  pause();flushFieldEdit();assetsPanel?.setOpen(false);sceneEditor?.session.cancel('Asset editing opened. The scene conversation is retained.');
+  pause();flushFieldEdit();setBottomPanelTab('timeline');sceneEditor?.session.cancel('Asset editing opened. The scene conversation is retained.');
   try{
     const owner=workspace,target=workspace.room!,draft=target.outputs.find(output=>output.kind==='asset-draft'&&output.sceneId===asset.id),initialDraft=draft?await owner.output(draft.id,target):undefined;
     const draftText=initialDraft?await initialDraft.text():undefined;
@@ -1242,7 +1289,7 @@ workspace = new Workspace({
     enforceProjectReady();
   },
 });
-const actionsWithoutProject=new Set(['projects','project-results','share-project','save-copy','retry-save','export','export-project','export-scene','export-shot','recover-storage','open','reload','play','rewind','focus','reset-view','top-view','expand-preview','close-preview','shortcuts','close-shortcuts','close-snapshot','refresh-snapshot','download-snapshot','edit-shot','open-scenes','timeline','look-frames']);
+const actionsWithoutProject=new Set(['projects','project-results','share-project','save-copy','retry-save','export','export-project','export-scene','export-shot','recover-storage','open','reload','play','rewind','focus','reset-view','top-view','expand-preview','close-preview','shortcuts','close-shortcuts','close-snapshot','refresh-snapshot','download-snapshot','edit-shot','open-scenes','bottom-panel','look-frames']);
 document.addEventListener('click',event=>{
   if(workspace?.canEdit)return;
   const action=(event.target as HTMLElement).closest<HTMLElement>('[data-action]')?.dataset.action;
@@ -1258,5 +1305,5 @@ function enforceProjectReady(){
   for(const node of [...nodes,...document.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLSelectElement>('[data-visibility-id],[data-add],#autoKey,#animationFps,#duration,.transform-tools button,#placementTools button')])if(!node.disabled){node.disabled=true;node.dataset.projectDisabled='true';}
 }
 new MutationObserver(enforceProjectReady).observe(app,{childList:true,subtree:true});
-setTimelineHeight(timelineHeight);setTimelineOpen(timelineHeight>62);renderAll();void assetsPanel?.refresh();
+setBottomPanelHeight(bottomPanelHeight);setBottomPanelOpen(bottomPanelHeight>bottomPanelCollapsedHeight);renderAll();void assetsPanel?.refresh();
 void workspace.start();

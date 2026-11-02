@@ -70,8 +70,7 @@
 .ae-status>span:first-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ae-status>span:last-child { color:var(--muted); white-space:nowrap; }
 .ae-pane .error { color:var(--error); }
-.asset-mode .timeline-panel { position:relative; }
-.asset-mode .timeline-panel>.timeline-toolbar,.asset-mode .timeline-panel>.timeline-content { opacity:.35; }
+.asset-mode .bottom-panel>.bottom-panel-toolbar,.asset-mode .bottom-panel>.bottom-panel-body { opacity:.35; }
 .ae-timeline-note { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); padding:6px 12px; border-radius:var(--radius-control); background:var(--paper); color:var(--text-secondary); font-size:11px; pointer-events:none; }
 .ae-properties,.ae-chat { scrollbar-width:thin; scrollbar-color:var(--line-strong) transparent; }
 .asset-library-entry { position:relative; }

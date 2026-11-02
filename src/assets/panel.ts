@@ -17,7 +17,6 @@ const categories:Record<string,{label:string;tags:string[]}>= {
 const categoryLabel=(tag:string|undefined)=>tag==='saved'||tag==='我的资产'?'My Assets':Object.values(categories).find(c=>c.tags.includes(tag??''))?.label??tag??'Asset';
 interface ProjectScenes { list(): SceneDocument[]; active(): string | null; open(id: string): void; create(): void; remove(id: string): void }
 export class AssetPanel {
-  private open=false;
   private filter='all';
   private folder='';
   private catalog:AssetCatalog=emptyCatalog();
@@ -29,22 +28,15 @@ export class AssetPanel {
   private refreshId=0;
   private thumbnails=new Map<string,string>();
   private renderer:THREE.WebGLRenderer|null=null;
-  private shortcut='KeyB';
   private dragged:AssetDefinition|null=null;
   private blank=document.createElement('canvas');
-  private drawer:HTMLElement;
-  private toggle:HTMLButtonElement;
   private grid:HTMLElement;
-  private resizeHandle:HTMLElement;
-  private height=0;
-  private resizeStart:{y:number;height:number}|null=null;
   private listKey='';
   private sceneKey='';
   constructor(private root:HTMLElement,private stage:Stage,private insert:(asset:AssetDefinition,pose:Transform)=>void,private enabled:()=>boolean,private edit?:(asset:AssetDefinition)=>void,private onLoaded?:(assets:AssetDefinition[])=>void,private createFromObject?:(source:{projectId:string;sceneId:string;objectId:string},folder:string)=>void,private scenes?:ProjectScenes){
     this.blank.width=this.blank.height=1;
-    try{const s=localStorage.getItem('littletake.assets.shortcut');if(s&&['KeyB','KeyG','none'].includes(s))this.shortcut=s;}catch{}
-    root.innerHTML=`<section class="asset-drawer" aria-label="Assets" aria-hidden="true" inert><header><strong>Assets <small id="assetCount"></small></strong><span>Drag into the scene · Double-click to place</span><input type="search" aria-label="Search assets" placeholder="Search characters, vehicles, props…"/><button data-assets-close aria-label="Collapse asset library">Collapse ⌄</button></header><div class="asset-body"><nav aria-label="Asset categories">${[['all','All Assets'],...Object.entries(categories).map(([key,category])=>[key,category.label]),['saved','My Assets']].map(([key,name])=>`<button data-filter="${key}">${name}</button>`).join('')}</nav><div class="asset-grid"></div></div></section><div class="asset-footer"><button aria-label="Asset drawer" aria-expanded="false" data-assets-toggle>▧ Assets <kbd></kbd> ⌃</button><details class="asset-shortcut-settings"><summary aria-label="Shortcut settings">⌨</summary><label>Asset drawer shortcut<select aria-label="Asset drawer shortcut"><option value="KeyB">B (default)</option><option value="KeyG">G (replaces Move shortcut)</option><option value="none">Disabled</option></select><small>Disabled while typing. You can also click Assets.</small></label></details></div>`;
-    this.drawer=root.querySelector('.asset-drawer')!;this.toggle=root.querySelector('[data-assets-toggle]')!;this.grid=root.querySelector('.asset-grid')!;
+    root.innerHTML=`<header class="asset-header"><strong>Assets <small id="assetCount"></small></strong><span data-asset-status>Drag into the scene · Double-click to place</span><input type="search" aria-label="Search assets" placeholder="Search characters, vehicles, props…"/></header><div class="asset-body"><nav aria-label="Asset categories">${[['all','All Assets'],...Object.entries(categories).map(([key,category])=>[key,category.label]),['saved','My Assets']].map(([key,name])=>`<button data-filter="${key}">${name}</button>`).join('')}</nav><div class="asset-grid"></div></div>`;
+    this.grid=root.querySelector('.asset-grid')!;
     root.querySelector('[data-filter="saved"]')!.remove();
     root.querySelector('nav')!.insertAdjacentHTML('afterbegin','<div class="asset-folder-tree" role="tree" aria-label="My Assets folders"></div>');
     if(scenes)root.querySelector('nav')!.insertAdjacentHTML('afterbegin','<button data-filter="scenes" aria-label="Scenes folder">▱ Scenes</button>');
@@ -59,44 +51,28 @@ export class AssetPanel {
       if((event.target as HTMLElement).closest('[data-folder-toggle]')){if(this.collapsed.has(folder))this.collapsed.delete(folder);else this.collapsed.add(folder);this.render();}
       else this.showFolder(folder);
     };
-    root.querySelector<HTMLElement>('.asset-footer')!.ondragenter=event=>{if(event.dataTransfer?.types.includes(SCENE_OBJECT_DRAG)&&this.enabled())this.setOpen(true);};
     const dropFolder=(event:DragEvent):string|undefined=>{
       const target=event.target as HTMLElement,folder=target.closest<HTMLElement>('[data-folder]')?.dataset.folder;
       return folder??(target.closest('.asset-content')&&this.filter==='saved'?this.folder:undefined);
     };
-    this.drawer.ondragover=event=>{
+    root.ondragover=event=>{
       const folder=dropFolder(event),types=event.dataTransfer?.types??[];
       if(folder===undefined||!this.enabled()||(!types.includes(SCENE_OBJECT_DRAG)&&!types.includes(LIBRARY_ASSET_DRAG)))return;
       if(types.includes(LIBRARY_ASSET_DRAG)&&this.dragged?.source==='builtin')return;
       event.preventDefault();event.dataTransfer!.dropEffect=types.includes(SCENE_OBJECT_DRAG)?'copy':'move';
       this.clearDrop();const target=(event.target as HTMLElement).closest<HTMLElement>('[data-folder]')??content;target.classList.add('asset-drop-target');
     };
-    this.drawer.ondragleave=event=>{if(!this.drawer.contains(event.relatedTarget as Node))this.clearDrop();};
-    this.drawer.ondrop=event=>{
+    root.ondragleave=event=>{if(!root.contains(event.relatedTarget as Node))this.clearDrop();};
+    root.ondrop=event=>{
       this.clearDrop();const folder=dropFolder(event);if(folder===undefined||!this.enabled())return;
       const source=event.dataTransfer?.getData(SCENE_OBJECT_DRAG),assetId=event.dataTransfer?.getData(LIBRARY_ASSET_DRAG);
       if(!source&&!assetId)return;event.preventDefault();
       if(source){try{this.createFromObject?.(JSON.parse(source),folder);}catch{this.feedback('Could not read the dragged object. Please try again.');}}
       else if(assetId)void this.moveAsset(assetId,folder);
     };
-    this.drawer.querySelector('header > span')!.setAttribute('data-asset-status','');
-    const refresh=document.createElement('button');refresh.textContent='Refresh';refresh.setAttribute('aria-label','Refresh assets');refresh.onclick=()=>void this.refresh();this.drawer.querySelector('header')!.insertBefore(refresh,this.drawer.querySelector('input'));
-    this.drawer.insertAdjacentHTML('afterbegin','<div class="panel-resize-handle asset-resize-handle" role="separator" aria-label="Resize asset library" aria-orientation="horizontal" aria-controls="assetPanel" tabindex="0" title="Drag to resize · Double-click to reset"></div>');
-    this.resizeHandle=this.drawer.querySelector('.asset-resize-handle')!;
-    try{this.height=Number(localStorage.getItem('littletake.assets.height'))||0;}catch{}
-    this.setHeight(this.height);
-    this.resizeHandle.onpointerdown=event=>{if(event.button!==0)return;this.resizeStart={y:event.clientY,height:this.drawer.getBoundingClientRect().height};this.resizeHandle.focus({preventScroll:true});this.resizeHandle.setPointerCapture(event.pointerId);this.root.classList.add('resizing');event.preventDefault();};
-    this.resizeHandle.onpointermove=event=>{if(this.resizeStart)this.setHeight(this.resizeStart.height+this.resizeStart.y-event.clientY);};
-    this.resizeHandle.onpointerup=()=>{if(!this.resizeStart)return;this.resizeStart=null;this.root.classList.remove('resizing');this.saveHeight();};
-    this.resizeHandle.onlostpointercapture=this.resizeHandle.onpointercancel=()=>{if(this.resizeStart)this.setHeight(this.resizeStart.height);this.resizeStart=null;this.root.classList.remove('resizing');};
-    this.resizeHandle.ondblclick=()=>{this.setHeight(0);this.saveHeight();};
-    this.resizeHandle.onkeydown=event=>{if(!['ArrowUp','ArrowDown','Home','End'].includes(event.key))return;event.preventDefault();this.setHeight(event.key==='Home'?0:event.key==='End'?window.innerHeight:this.height+(event.key==='ArrowUp'?20:-20));this.saveHeight();};
-    window.addEventListener('resize',()=>this.setHeight(this.height));
-    this.toggle.onclick=()=>this.setOpen(!this.open);root.querySelector<HTMLButtonElement>('[data-assets-close]')!.onclick=()=>this.setOpen(false);
+    const refresh=document.createElement('button');refresh.textContent='Refresh';refresh.setAttribute('aria-label','Refresh assets');refresh.onclick=()=>void this.refresh();root.querySelector('header')!.insertBefore(refresh,root.querySelector('input'));
     root.querySelector<HTMLInputElement>('input')!.oninput=e=>{this.query=(e.target as HTMLInputElement).value.toLowerCase();this.render();};
     root.querySelectorAll<HTMLButtonElement>('[data-filter]').forEach(b=>b.onclick=()=>{this.filter=b.dataset.filter!;this.render();});
-    const select=root.querySelector<HTMLSelectElement>('select')!;select.value=this.shortcut;this.toggle.querySelector('kbd')!.textContent=this.shortcut==='none'?'':this.shortcut.slice(-1);
-    select.onchange=()=>{this.shortcut=select.value;this.toggle.querySelector('kbd')!.textContent=this.shortcut==='none'?'':this.shortcut.slice(-1);try{localStorage.setItem('littletake.assets.shortcut',this.shortcut);}catch{}root.querySelector('details')!.open=false;this.toggle.focus();};
     this.grid.ondblclick=event=>{const card=(event.target as HTMLElement).closest<HTMLElement>('[data-asset]'),asset=this.assets.find(a=>a.id===card?.dataset.asset);if(asset&&this.enabled()){const pose=this.stage.placement(asset);if(pose)this.insert(asset,pose);}};
     this.grid.onclick=event=>{const target=event.target as HTMLElement;
       if(this.enabled()){const open=target.closest<HTMLElement>('[data-scene-open]'),remove=target.closest<HTMLElement>('[data-scene-delete]');if(open){this.scenes?.open(open.dataset.sceneOpen!);return;}if(remove){this.scenes?.remove(remove.dataset.sceneDelete!);return;}}
@@ -110,7 +86,7 @@ export class AssetPanel {
     void this.refresh();
   }
   get currentFolder():string{return this.filter==='saved'?this.folder:'';}
-  showScenes():void{this.filter='scenes';this.query='';this.root.querySelector<HTMLInputElement>('input[type="search"]')!.value='';this.setOpen(true);}
+  showScenes():void{this.filter='scenes';this.query='';this.root.querySelector<HTMLInputElement>('input[type="search"]')!.value='';this.render();}
   showFolder(folder:string):void{this.filter='saved';this.folder=folder;this.query='';this.root.querySelector<HTMLInputElement>('input[type="search"]')!.value='';this.collapsed.delete('');for(const path of this.catalog.folders)if(folder.startsWith(path+'/'))this.collapsed.delete(path);this.render();}
   private clearDrop():void{this.root.querySelectorAll('.asset-drop-target').forEach(node=>node.classList.remove('asset-drop-target'));}
   private feedback(message:string):void{this.root.querySelector('[data-asset-status]')!.textContent=message;}
@@ -122,16 +98,7 @@ export class AssetPanel {
     try{const data=await assetRequest({action:'move_asset',assetId,folder});++this.refreshId;this.catalog=assetCatalogSchema.parse(data.catalog);this.showFolder(folder);this.feedback('Asset moved · Scene references retained');}
     catch(error){this.feedback((error as Error).message);}
   }
-  private setHeight(value:number):void {
-    const min=Number.parseFloat(getComputedStyle(this.drawer).minHeight);
-    const max=Math.max(min,Math.floor(window.innerHeight*.7));
-    this.height=Math.round(Math.min(max,Math.max(min,value)));this.root.style.setProperty('--asset-drawer-height',`${this.height}px`);
-    this.resizeHandle.setAttribute('aria-valuemin',String(min));this.resizeHandle.setAttribute('aria-valuemax',String(max));this.resizeHandle.setAttribute('aria-valuenow',String(this.height));
-  }
-  private saveHeight():void {try{localStorage.setItem('littletake.assets.height',String(this.height));}catch{}}
-  setOpen(open:boolean):void {this.open=open;this.drawer.classList.toggle('is-open',open);this.drawer.inert=!open;this.drawer.setAttribute('aria-hidden',String(!open));this.toggle.setAttribute('aria-expanded',String(open));if(!open&&this.drawer.contains(document.activeElement))this.toggle.focus();if(open){this.render();void this.refresh();}}
-  key(event:KeyboardEvent):boolean {if(event.code===this.shortcut&&!event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey){event.preventDefault();if(!event.repeat)this.setOpen(!this.open);return true;}if(event.key==='Escape'&&this.open){this.setOpen(false);return true;}return false;}
-  update(saved:AssetDefinition[] = []):void {this.saved=saved;const assets=availableAssets([...this.remote,...saved.filter(a=>!this.remote.some(b=>a.id===b.id))]),key=JSON.stringify(assets),sceneKey=JSON.stringify([this.scenes?.list(),this.scenes?.active(),this.enabled()]);if(this.listKey!==key||this.sceneKey!==sceneKey){this.listKey=key;this.sceneKey=sceneKey;this.assets=assets;this.render();}this.toggle.disabled=!this.enabled();this.drawer.classList.toggle('assets-locked',!this.enabled());}
+  update(saved:AssetDefinition[] = []):void {this.saved=saved;const assets=availableAssets([...this.remote,...saved.filter(a=>!this.remote.some(b=>a.id===b.id))]),key=JSON.stringify(assets),sceneKey=JSON.stringify([this.scenes?.list(),this.scenes?.active(),this.enabled()]);if(this.listKey!==key||this.sceneKey!==sceneKey){this.listKey=key;this.sceneKey=sceneKey;this.assets=assets;this.render();}this.root.classList.toggle('assets-locked',!this.enabled());}
   async refresh():Promise<void> {
     const id=++this.refreshId;
     try{const response=await fetch('/api/assets');if(!response.ok)throw new Error('Asset service unavailable; project assets remain available');const data=await response.json(),assets:AssetDefinition[]=data.assets.map(validateAsset);if(id!==this.refreshId)return;this.remote=assets;this.catalog=assetCatalogSchema.parse(data.catalog??emptyCatalog());if(this.folder&&!this.catalog.folders.includes(this.folder))this.folder='';this.onLoaded?.(assets);this.update(this.saved);this.render();this.root.querySelector('[data-asset-status]')!.textContent=this.filter==='scenes'?'Click to open a scene · Undo restores a deleted scene':data.temporary?'Temporary cloud library · Export your project to keep used assets':'Hierarchy → folder creates a prefab · Asset → scene places it';}
