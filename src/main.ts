@@ -790,6 +790,8 @@ try {
   };
   stage.setTool(tool);
   placementPanel=new PlacementPanel($('#placementTools'),settings=>stage.setPrecision(settings),(axis,edge)=>stage.alignSelection(axis,edge));
+  // The viewport toolbar wraps on narrow screens; keep the view gizmo and shot preview below it.
+  {const heading=$('.viewport-heading');new ResizeObserver(()=>heading.parentElement!.style.setProperty('--viewport-heading-height',heading.offsetHeight+'px')).observe(heading);}
   assetsPanel=new AssetPanel($('#assetPanel'),stage,insertAsset,()=>!!workspace?.canEdit&&!storageError&&!editPreview&&!performanceSession&&!assetEditor,asset=>openAssetEditor(asset),synchronizeAssets,(source,folder)=>void createObjectPrefab(source,folder),{list:()=>project.scenes,active:()=>project.activeSceneId,open:id=>{switchScene(id);setSidePanel('inspector');},create:addScene,remove:requestDeleteScene});assetsPanel.update(project.assets);
   bindHierarchyAssets($('#outliner'),hierarchyAssetSource,source=>void createObjectPrefab(source,assetsPanel?.currentFolder??''),()=>{assetsPanel?.showFolder(assetsPanel.currentFolder);assetsPanel?.setOpen(true);});
   bindParentingTree($('#outliner'),{
