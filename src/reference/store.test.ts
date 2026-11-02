@@ -32,7 +32,7 @@ test('references and AI request history survive service restart without using br
     const owner = {
       room,
       async putOutput(output: Omit<ProjectOutput, 'updatedAt'>, data: Blob, target = room) {
-        const response = await fetch(service.origin + '/api/projects?code=' + target.code + '&output=1', { method: 'POST', headers: { ...headers, 'x-littletake-output': encodeURIComponent(JSON.stringify(output)) }, body: data });
+        const response = await fetch(service.origin + '/api/projects?code=' + target.code + '&output=1', { method: 'POST', headers: { ...headers, 'x-littletake-output': encodeURIComponent(JSON.stringify(output)), 'x-littletake-output-version': String(target.outputs.find(item => item.id === output.id)?.updatedAt ?? 0) }, body: data });
         const value: ProjectOutput = await response.json(); assert.equal(response.status, 200);
         target.outputs = [value, ...target.outputs.filter(item => item.id !== output.id)]; return value;
       },
