@@ -1172,7 +1172,7 @@ async function openAssetEditor(asset:AssetDefinition) {
   }});}catch(error){status(error instanceof Error?error.message:'Could not open asset editor');}
 }
 window.addEventListener('focus',()=>{void assetsPanel?.refresh();});
-$('.header-actions').insertAdjacentHTML('afterbegin','<button data-action="projects">'+icon('folder')+'<span>Projects</span></button><button data-action="project-results">Results</button><button data-action="share-project" title="Project code and editing access">Share</button><button class="icon-button" data-action="upload-cloud" title="Upload to cloud" aria-label="Upload to cloud" hidden>'+icon('upload')+'</button><span id="projectMode" class="project-mode" hidden></span>');
+$('.header-actions').insertAdjacentHTML('afterbegin','<button data-action="projects">'+icon('folder')+'<span>Projects</span></button><button data-action="project-results">Results</button><button data-action="share-project" title="Share project link">Share</button><button class="icon-button" data-action="upload-cloud" title="Upload to cloud" aria-label="Upload to cloud" hidden>'+icon('upload')+'</button>');
 $('#storageWarning').insertAdjacentHTML('beforeend','<button data-action="retry-save">Retry save</button><button data-action="save-copy">Save as new project</button>');
 workspace = new Workspace({
   project:()=>project,
@@ -1196,30 +1196,29 @@ workspace = new Workspace({
     $<HTMLButtonElement>('[data-action="upload-cloud"]').disabled=readOnly||!!workspace?.isUploading;
     $('[data-action="upload-cloud"]').setAttribute('aria-busy',String(!!workspace?.isUploading));
     document.body.dataset.projectReadonly=String(readOnly);
-    const badge=$('#projectMode');badge.hidden=!readOnly;badge.dataset.readonly=String(readOnly);badge.textContent='Viewing';
     $('#storageWarning').hidden=!problem;$('#storageWarning > span').textContent=message;
     $('#inspector').inert=readOnly;$('#sceneAI').inert=readOnly;
     $<HTMLInputElement>('#projectName').disabled=readOnly;
     $<HTMLInputElement>('#sceneName').readOnly=readOnly;
-    if(wasReadOnly&&!readOnly){document.querySelectorAll<HTMLButtonElement>('[data-viewer-disabled]').forEach(node=>{node.disabled=false;delete node.dataset.viewerDisabled;});renderAll();}
-    enforceViewing();
+    if(wasReadOnly&&!readOnly){document.querySelectorAll<HTMLButtonElement>('[data-project-disabled]').forEach(node=>{node.disabled=false;delete node.dataset.projectDisabled;});renderAll();}
+    enforceProjectReady();
   },
 });
-const viewingActions=new Set(['projects','project-results','share-project','save-copy','retry-save','export','export-project','export-scene','export-shot','recover-storage','open','reload','play','rewind','focus','reset-view','top-view','expand-preview','close-preview','shortcuts','close-shortcuts','close-snapshot','refresh-snapshot','download-snapshot','edit-shot','open-scenes','timeline','look-frames']);
+const actionsWithoutProject=new Set(['projects','project-results','share-project','save-copy','retry-save','export','export-project','export-scene','export-shot','recover-storage','open','reload','play','rewind','focus','reset-view','top-view','expand-preview','close-preview','shortcuts','close-shortcuts','close-snapshot','refresh-snapshot','download-snapshot','edit-shot','open-scenes','timeline','look-frames']);
 document.addEventListener('click',event=>{
   if(workspace?.canEdit)return;
   const action=(event.target as HTMLElement).closest<HTMLElement>('[data-action]')?.dataset.action;
-  if((action&&!viewingActions.has(action))||(event.target as HTMLElement).closest('[data-visibility-id],[data-add],[data-color],[data-key-group],[data-key-path]')){event.preventDefault();event.stopImmediatePropagation();status('Viewing only · use Share to start editing');}
+  if((action&&!actionsWithoutProject.has(action))||(event.target as HTMLElement).closest('[data-visibility-id],[data-add],[data-color],[data-key-group],[data-key-path]')){event.preventDefault();event.stopImmediatePropagation();status('Open a project first');}
 },true);
 document.addEventListener('pointerdown',event=>{if(!workspace?.canEdit&&(event.target as HTMLElement).closest('[data-key],[data-clip],[data-shot-clip],.timeline-key')){event.preventDefault();event.stopImmediatePropagation();}},true);
 document.addEventListener('keydown',event=>{if(!workspace?.canEdit&&!(event.target as HTMLElement).closest('input,textarea,[contenteditable=true]')&&['delete','backspace','g','r','s','i','d'].includes(event.key.toLowerCase())){event.preventDefault();event.stopImmediatePropagation();}},true);
-function enforceViewing(){
+function enforceProjectReady(){
   $('#inspector').inert=!workspace?.canEdit||!!editPreview;$('#sceneAI').inert=!workspace?.canEdit||!!performanceSession&&!performanceSession.scriptRevision;
-  document.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLSelectElement>('[data-viewer-disabled]').forEach(node=>{node.disabled=false;delete node.dataset.viewerDisabled;});
+  document.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLSelectElement>('[data-project-disabled]').forEach(node=>{node.disabled=false;delete node.dataset.projectDisabled;});
   if(workspace?.canEdit)return;
-  const nodes=Array.from(document.querySelectorAll<HTMLButtonElement>('[data-action]')).filter(node=>!viewingActions.has(node.dataset.action!));
-  for(const node of [...nodes,...document.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLSelectElement>('[data-visibility-id],[data-add],#autoKey,#animationFps,#duration,.transform-tools button,#placementTools button')])if(!node.disabled){node.disabled=true;node.dataset.viewerDisabled='true';}
+  const nodes=Array.from(document.querySelectorAll<HTMLButtonElement>('[data-action]')).filter(node=>!actionsWithoutProject.has(node.dataset.action!));
+  for(const node of [...nodes,...document.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLSelectElement>('[data-visibility-id],[data-add],#autoKey,#animationFps,#duration,.transform-tools button,#placementTools button')])if(!node.disabled){node.disabled=true;node.dataset.projectDisabled='true';}
 }
-new MutationObserver(enforceViewing).observe(app,{childList:true,subtree:true});
+new MutationObserver(enforceProjectReady).observe(app,{childList:true,subtree:true});
 setTimelineHeight(timelineHeight);setTimelineOpen(timelineHeight>62);renderAll();void assetsPanel?.refresh();
 void workspace.start();

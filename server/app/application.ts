@@ -49,7 +49,7 @@ export async function createApplication(input: Record<string, string | undefined
         if (request.method === 'POST' && pathname.startsWith('/api/') && !['/api/projects', '/api/handoffs', '/api/cloud-projects'].includes(pathname)) {
           const code = request.headers.get('x-littletake-project'), lease = request.headers.get('x-littletake-edit-lease');
           if (!code || !lease || projects.get(code, lease, request.headers.get('x-littletake-edit-page') ?? undefined).editing !== 'you')
-            return Response.json({ error: { code: 'read_only', message: 'Open a project and start editing before changing it or using AI.' } }, { status: 403 });
+            return Response.json({ error: { code: 'read_only', message: 'Open a project before changing it or using AI.' } }, { status: 403 });
         }
         return await handler(request);
       } catch (error) {

@@ -40,7 +40,7 @@ export function createHandoffsHandler(store: ProjectRoomStore) {
       if (request.method !== 'POST') return new Response(null, { status: 405, headers: { Allow: 'POST' } });
       const origin = request.headers.get('origin');
       if (origin && origin !== url.origin) throw new ProjectRoomError('wrong_origin', 'Publish references from LittleTake directly.', 403);
-      if (store.get(code, lease, page).editing !== 'you') throw new ProjectRoomError('read_only', 'Start editing before publishing or withdrawing a reference link.', 403);
+      if (store.get(code, lease, page).editing !== 'you') throw new ProjectRoomError('read_only', 'Open the project before publishing or withdrawing a reference link.', 403);
       const id = z.uuid().parse(url.searchParams.get('id'));
       if (url.searchParams.has('revoke')) { store.revokeHandoff(code, lease, id, page); return Response.json({ withdrawn: true }, { headers }); }
       if (!request.headers.get('content-type')?.startsWith('application/zip')) throw new ProjectRoomError('invalid_content', 'Publish a LittleTake video package.', 415);

@@ -55,7 +55,7 @@ export class Workspace {
   private homeGeneration = 0;
   private workspace: WorkspaceInfo = { mode: 'cloud', cloudAvailable: false };
   private migrationError = '';
-  private readonly pendingOutputs = new Map<string, { room: ProjectRoom; output: ProjectOutput; data: Blob }>();
+  private readonly pendingOutputs = new Map<string, { room: ProjectRoom; output: ProjectOutput; data: Blob; base: number }>();
   private readonly outputWrites = new Map<string, Promise<void>>();
   private browserRecoveryId?: string;
   private autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -88,20 +88,31 @@ export class Workspace {
     window.addEventListener('blur', () => this.heldPointers.clear());
     window.addEventListener('pagehide', () => { this.coverAbort?.abort(); this.options.stop(); channel.close(); clearTimeout(this.autoSaveTimer); if ((!this.autosave || !this.hasUnsaved) && this.room?.editing === 'you') void this.api({ action: 'release' }, this.room.code, true).catch(() => {}); });
   }
-  get canEdit() { return this.room?.editing === 'you' && !this.conflict; }
+  get canEdit() { return this.room !== null; }
   get hasUnsaved() { return Boolean(this.pending || this.failed || this.saving || this.pendingOutputs.size); }
   get hasUnsafeChanges() { return Boolean(this.pending || this.saving || this.pendingOutputs.size || this.creation || this.uploading); }
   private get autosave() { return this.workspace.mode === 'cloud'; }
   private get remoteGallery() { return this.canUpload && this.gallerySource === 'cloud'; }
   get canUpload() { return this.workspace.mode === 'local' && this.workspace.cloudAvailable; }
   get isUploading() { return this.uploading; }
-  private async api(body?: unknown, code?: string, keepalive = false): Promise<ProjectRoom> {
+  private async api(body?: unknown, code?: string, keepalive = false, reconnect = true): Promise<ProjectRoom> {
     const response = await fetch('/api/projects' + (code ? '?code=' + encodeURIComponent(code) : ''), {
       method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', 'x-littletake-edit-lease': this.lease, 'x-littletake-edit-page': this.page }, ...(body ? { body: JSON.stringify(body) } : {}), cache: 'no-store', keepalive,
     });
     const value = await response.json().catch(() => ({}));
+    if (!response.ok && reconnect && code && value.error?.code === 'edit_lease_lost' && ['save', 'heartbeat'].includes((body as { action?: string })?.action ?? '')) {
+      await this.api({ action: 'claim' }, code);
+      return this.api(body, code, keepalive, false);
+    }
     if (!response.ok) throw Object.assign(new Error(value.error?.message ?? 'The project service is unavailable. Keep this page open and retry saving.'), { code: value.error?.code ?? 'unavailable' });
     return value;
+  }
+  async ensureSession(room = this.room) {
+    if (!room) throw new Error('Open a project first.');
+    if (room === this.room && Date.now() - this.lastHeartbeat < EDIT_HEARTBEAT_MS) return;
+    const next = await this.api({ action: 'heartbeat' }, room.code);
+    room.leaseExpiresAt = next.leaseExpiresAt;
+    if (room === this.room) this.lastHeartbeat = Date.now();
   }
   async start() {
     await this.sessionReady;
@@ -125,7 +136,8 @@ export class Workspace {
     this.options.stop(); clearTimeout(this.autoSaveTimer); this.pending = null; this.draftVersion = undefined; this.firstPendingAt = 0; this.room = room; this.lastHeartbeat = Date.now(); this.failed = false; this.conflict = false;
     this.savedText = serializeProject(room.project);
     projectRequestContext({ code: room.code, lease: this.lease, page: this.page }, this);
-    room.project = parseProject(serializeProject(room.project), room.editing === 'you');
+    // Another page may still be running the saved conversation.
+    room.project = parseProject(serializeProject(room.project), false);
     const url = new URL(location.href); url.searchParams.set('project', room.code); history.replaceState(null, '', url);
     this.options.open(room.project);
     const editor = document.getElementById('app'); if (editor) { editor.removeAttribute('data-opening'); editor.inert = false; }
@@ -135,9 +147,8 @@ export class Workspace {
   }
   async join(code: string) {
     if (this.room && !await this.leave()) throw new Error('Finish saving the current project before switching.');
-    const clean = code.replace(/[-\s]/g, '').toUpperCase(); let room: ProjectRoom;
-    try { room = await this.api({ action: 'claim' }, clean); }
-    catch (error) { if ((error as { code?: string }).code !== 'editor_present') throw error; room = await this.api(undefined, clean); }
+    const clean = code.replace(/[-\s]/g, '').toUpperCase();
+    const room = await this.api({ action: 'claim' }, clean);
     await this.activate(room);
   }
   async create(project: ProjectDocument = createProject(null), sourceCode?: string) {
@@ -147,7 +158,7 @@ export class Workspace {
     this.creation ??= { id: newId(), project, ...(sourceCode ? { sourceCode } : {}) };
     this.notify();
     let room = await this.api({ action: 'create', id: this.creation.id, project, ...(sourceCode ? { sourceCode } : {}) });
-    if (room.editing !== 'you') try { room = await this.api({ action: 'claim' }, room.code); } catch (error) { if ((error as { code?: string }).code !== 'editor_present') throw error; }
+    if (room.editing !== 'you') room = await this.api({ action: 'claim' }, room.code);
     this.creation = null; this.listed = null;
     await this.activate(room);
   }
@@ -159,18 +170,19 @@ export class Workspace {
     if (!this.pending) this.draftVersion = this.room.savedVersion;
     this.pending = structuredClone(project);
     this.notify();
-    if (!this.autosave) return;
+    if (!this.autosave || this.conflict) return;
     this.firstPendingAt ||= Date.now(); clearTimeout(this.autoSaveTimer);
     this.autoSaveTimer = setTimeout(() => void this.flush().catch(() => {}), Math.min(650, Math.max(0, 2000 - (Date.now() - this.firstPendingAt))));
   }
   async flush(manual = false): Promise<void> {
     if (!this.autosave && !manual) return;
+    if (this.conflict) throw new Error('A newer version is saved. Download your changes or save a new project.');
     clearTimeout(this.autoSaveTimer); this.firstPendingAt = 0;
     if (this.saving) return this.saving;
     if (!this.pending || !this.room || !this.canEdit) return;
     const room = this.room;
     this.saving = (async () => {
-      while (this.pending && this.room === room && this.canEdit) {
+      while (this.pending && this.room === room && !this.conflict) {
         const project = this.pending;
         try {
           const saved = await this.api({ action: 'save', savedVersion: this.draftVersion ?? room.savedVersion, project }, room.code);
@@ -182,7 +194,7 @@ export class Workspace {
           this.failed = false; this.listed = null;
         } catch (error) {
           this.failed = true;
-          if (['save_conflict', 'edit_lease_lost', 'editor_present'].includes((error as { code?: string }).code ?? '')) { this.conflict = true; this.options.stop(); }
+          if ((error as { code?: string }).code === 'save_conflict') { this.conflict = true; this.options.stop(); }
           throw error;
         }
       }
@@ -193,14 +205,13 @@ export class Workspace {
     if (!this.room) return;
     try {
       if (this.failed || this.conflict) {
-        const room = this.room, next = await this.api(undefined, room.code);
+        const room = this.room, next = await this.api({ action: 'claim' }, room.code);
         if (this.room !== room) return;
         if (this.pending && next.savedVersion !== (this.draftVersion ?? room.savedVersion) && serializeProject(next.project) !== serializeProject(this.pending)) {
           this.conflict = true; this.options.stop(); throw new Error('A newer version is saved. Download your changes or save a new project.');
         }
-        const claimed = await this.api({ action: 'claim' }, room.code);
-        if (!this.pending && claimed.savedVersion !== room.savedVersion) { this.savedText = serializeProject(claimed.project); this.options.open(claimed.project); }
-        Object.assign(room, claimed); this.conflict = false; this.lastHeartbeat = Date.now();
+        // Reconnecting must not replace this page's draft or advance its save baseline.
+        room.leaseExpiresAt = next.leaseExpiresAt; this.conflict = false; this.lastHeartbeat = Date.now();
       }
       await this.flush();
       if (this.autosave) await this.flushOutputs(this.room);
@@ -211,18 +222,10 @@ export class Workspace {
   private async refresh() {
     if (!this.room || this.refreshing || this.home.open) return; this.refreshing = true; const room = this.room;
     try {
-      if (this.canEdit) {
-        if (this.autosave && (this.failed || [...this.pendingOutputs.values()].some(entry => entry.room.id === room.id))) { await this.retry(); return; }
-        if (Date.now() - this.lastHeartbeat >= EDIT_HEARTBEAT_MS) { const next = await this.api({ action: 'heartbeat' }, room.code); room.leaseExpiresAt = next.leaseExpiresAt; this.lastHeartbeat = Date.now(); }
-        if (this.pending && this.failed) await this.flush();
-      } else if (!this.conflict) {
-        const next = await this.api(undefined, room.code);
-        if (this.room !== room) return;
-        if (next.savedVersion !== room.savedVersion) { this.room = next; this.options.open(next.project); }
-        else Object.assign(room, { editing: next.editing, outputs: next.outputs, cover: next.cover });
-      }
-      this.failed = false;
-    } catch (error) { if (this.room === room) { this.failed = true; if ((error as { code?: string }).code === 'edit_lease_lost') { this.conflict = true; this.options.stop(); } } }
+      await this.ensureSession(room);
+      if (this.conflict) return;
+      if (this.autosave && (this.failed || [...this.pendingOutputs.values()].some(entry => entry.room.id === room.id))) { await this.retry(); return; }
+    } catch { if (this.room === room) this.failed = true; }
     finally { this.refreshing = false; this.notify(); }
     void this.updateCover();
   }
@@ -246,6 +249,7 @@ export class Workspace {
         const data = source ? await (await fetch(source)).blob() : new Blob([], { type: 'image/webp' });
         validateCover(new Uint8Array(await data.arrayBuffer()));
         if (controller.signal.aborted || document.hidden || this.room !== room || !this.canEdit) return;
+        await this.ensureSession(room);
         const response = await fetch(`/api/projects?code=${encodeURIComponent(room.code)}&cover=1&version=${version}`, {
           method: 'POST', headers: { 'Content-Type': 'image/webp', 'x-littletake-edit-lease': this.lease, 'x-littletake-edit-page': this.page }, body: data, signal: controller.signal,
         });
@@ -263,7 +267,7 @@ export class Workspace {
     if (!this.options.beforeSwitch()) return false;
     this.options.stop();
     if (!this.autosave && this.hasUnsaved && !await this.confirmLocalLeave()) return false;
-    if (this.autosave && this.conflict && this.pending) { this.options.state('Keep your changes by downloading them or saving a new project before switching.', true, true); return false; }
+    if (this.autosave && this.conflict && this.hasUnsaved) { this.options.state('Keep your changes by downloading them or saving a new project before switching.', false, true); return false; }
     try {
       await this.flush();
       if (this.autosave && this.room) await this.flushOutputs(this.room);
@@ -338,14 +342,9 @@ export class Workspace {
   showShare() {
     if (!this.room) return; const room = this.room;
     if (!this.autosave) { this.transferDialog('Local editing', 'Upload this project to cloud before sharing it. Local edits are not saved automatically.'); return; }
-    this.share.innerHTML = `<header><h2>${this.canEdit ? 'Share your project' : 'Viewing this project'}</h2><button data-close aria-label="Close share">✕</button></header><p>One editor, a shared view of the whole set.</p><small>PROJECT CODE</small><strong>${this.formatCode(room.code)}</strong><label>Project link<input readonly value="${escape(location.href)}"></label><label class="project-identity">Project ID<input readonly value="${room.id}"></label><p data-share-status>${this.canEdit ? 'You are editing. Others join as viewers.' : room.editing === 'available' ? 'The editing seat is available.' : 'Someone else is editing. Your view follows saved changes.'}</p><div><button data-copy>Copy link</button><button class="primary-button" data-seat>${this.canEdit ? 'Release editing' : 'Start editing'}</button></div>`;
-    this.share.querySelector<HTMLButtonElement>('[data-seat]')!.disabled = !this.canEdit && room.editing !== 'available';
+    this.share.innerHTML = `<header><h2>Share your project</h2><button data-close aria-label="Close share">✕</button></header><p>Anyone with this link can open and edit the project.</p><small>PROJECT CODE</small><strong>${this.formatCode(room.code)}</strong><label>Project link<input readonly value="${escape(location.href)}"></label><label class="project-identity">Project ID<input readonly value="${room.id}"></label><p data-share-status></p><div><button class="primary-button" data-copy>Copy link</button></div>`;
     this.share.querySelector('[data-close]')!.addEventListener('click', () => this.share.close());
     this.share.querySelector('[data-copy]')!.addEventListener('click', async () => { try { await copyText(location.href, this.share); this.share.querySelector('[data-share-status]')!.textContent = 'Link copied'; } catch { this.share.querySelector('input')!.select(); } });
-    this.share.querySelector('[data-seat]')!.addEventListener('click', async () => {
-      try { this.options.stop(); await this.flush(); const next = await this.api({ action: this.canEdit ? 'release' : 'claim' }, room.code); this.share.close(); await this.activate(next); }
-      catch (error) { this.share.querySelector('[data-share-status]')!.textContent = (error as Error).message; }
-    });
     this.share.showModal();
   }
   private async cloudRequest(body?: { action: 'open' | 'upload'; id?: string; code?: string; keepLocal?: boolean; overwrite?: boolean }) {
@@ -389,7 +388,7 @@ export class Workspace {
   async saveNow() { if (this.autosave) await this.flush(); else if (this.canUpload) await this.uploadToCloud(); else await this.download(); }
   async uploadToCloud(overwrite = false) {
     if (!this.canUpload || this.uploading) return;
-    if (!this.room || !this.canEdit) throw new Error('Start editing before uploading this project.');
+    if (!this.room || !this.canEdit) throw new Error('Open a project before uploading it.');
     if (!this.options.beforeSwitch()) return;
     this.options.stop();
     this.uploading = true; this.notify();
@@ -397,6 +396,7 @@ export class Workspace {
       await this.flush(true);
       await this.flushOutputs(this.room);
       await this.updateCover(true, true);
+      await this.ensureSession();
       const room = this.room, value = await this.cloudRequest({ action: 'upload', id: room.id, ...(overwrite ? { overwrite: true } : {}) });
       if (this.room === room) room.cloud = value.cloud;
       this.failed = false; this.listed = null;
@@ -412,24 +412,28 @@ export class Workspace {
     } finally { this.uploading = false; this.notify(); }
   }
   async putOutput(output: Omit<ProjectOutput, 'updatedAt'>, data: Blob, target = this.room): Promise<ProjectOutput> {
-    if (!target || (!this.autosave && target !== this.room) || (target === this.room && !this.canEdit)) throw new Error('Start editing before saving a result.');
+    if (!target || (!this.autosave && target !== this.room) || (target === this.room && !this.canEdit)) throw new Error('Open a project before saving a result.');
     const stored = { ...output, updatedAt: Date.now() }, key = `${target.code}:${output.id}`;
-    this.pendingOutputs.set(key, { room: target, output: stored, data });
+    const base = this.pendingOutputs.get(key)?.base ?? target.outputs.find(item => item.id === output.id)?.updatedAt ?? 0;
+    this.pendingOutputs.set(key, { room: target, output: stored, data, base });
     target.outputs = [stored, ...target.outputs.filter(item => item.id !== output.id)]; this.notify();
     if (this.autosave) await this.writeOutput(key); return target.outputs.find(item => item.id === output.id)!;
   }
   private async writeOutput(key: string): Promise<void> {
+    if (this.conflict) throw new Error('A newer version is saved. Download your changes or save a new project.');
     const writing = this.outputWrites.get(key); if (writing) return writing;
     const promise = (async () => {
       let current;
       try {
         while ((current = this.pendingOutputs.get(key))) {
-          const { room, data, output: { updatedAt: _at, ...metadata } } = current;
-          const response = await fetch(`/api/projects?code=${encodeURIComponent(room.code)}&output=1`, { method: 'POST', headers: { 'x-littletake-edit-lease': this.lease, 'x-littletake-edit-page': this.page, 'x-littletake-output': encodeURIComponent(JSON.stringify(metadata)) }, body: data });
-          const value = await response.json(); if (!response.ok) throw new Error(value.error?.message ?? 'The result has not reached the workspace. Keep this page open and retry.');
+          const { room, data, base, output: { updatedAt: _at, ...metadata } } = current;
+          await this.ensureSession(room);
+          const response = await fetch(`/api/projects?code=${encodeURIComponent(room.code)}&output=1`, { method: 'POST', headers: { 'x-littletake-edit-lease': this.lease, 'x-littletake-edit-page': this.page, 'x-littletake-output': encodeURIComponent(JSON.stringify(metadata)), 'x-littletake-output-version': String(base) }, body: data });
+          const value = await response.json(); if (!response.ok) throw Object.assign(new Error(value.error?.message ?? 'The result has not reached the workspace. Keep this page open and retry.'), { code: value.error?.code });
           if (this.pendingOutputs.get(key) === current) { this.pendingOutputs.delete(key); room.outputs = [value, ...room.outputs.filter(item => item.id !== value.id)]; }
+          else { const queued = this.pendingOutputs.get(key); if (queued) queued.base = value.updatedAt; }
         }
-      } catch (error) { this.failed = true; throw error; }
+      } catch (error) { this.failed = true; if ((error as { code?: string }).code === 'output_conflict') { this.conflict = true; this.options.stop(); } throw error; }
     })().finally(() => { this.outputWrites.delete(key); this.notify(); });
     this.outputWrites.set(key, promise); return promise;
   }
@@ -443,14 +447,16 @@ export class Workspace {
     return response.blob();
   }
   async publishHandoff(archive: Blob, id: string, target = this.room): Promise<HandoffReceipt> {
-    if (!target || target !== this.room || !this.canEdit) throw new Error('Open this project and start editing before publishing references.');
+    if (!target || target !== this.room || !this.canEdit) throw new Error('Open this project before publishing references.');
     await this.flush();
+    await this.ensureSession(target);
     const response = await fetch(`/api/handoffs?code=${encodeURIComponent(target.code)}&id=${id}`, { method: 'POST', headers: { 'Content-Type': 'application/zip', 'x-littletake-edit-lease': this.lease, 'x-littletake-edit-page': this.page }, body: archive });
     const value = await response.json(); if (!response.ok) throw new Error(value.error?.message ?? 'References could not be published. Retry to keep the same publication.');
     target.handoffs = [value, ...(target.handoffs ?? []).filter(item => item.id !== value.id)]; return value;
   }
   async withdrawHandoff(id: string) {
-    if (!this.room || !this.canEdit) throw new Error('Start editing before withdrawing a reference link.');
+    if (!this.room || !this.canEdit) throw new Error('Open the project before withdrawing a reference link.');
+    await this.ensureSession();
     const response = await fetch(`/api/handoffs?code=${encodeURIComponent(this.room.code)}&id=${id}&revoke=1`, { method: 'POST', headers: { 'x-littletake-edit-lease': this.lease, 'x-littletake-edit-page': this.page } });
     if (!response.ok) throw new Error((await response.json()).error?.message ?? 'The reference link could not be withdrawn.');
     const receipt = this.room.handoffs?.find(value => value.id === id); if (receipt) receipt.revokedAt = Date.now();

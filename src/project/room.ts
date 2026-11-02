@@ -16,7 +16,7 @@ export interface ProjectRoom {
   contentVersion?: number;
   cloud?: { origin: string; version: number; localVersion: number };
   updatedAt: number;
-  editing: 'available' | 'you' | 'occupied';
+  editing: 'available' | 'you';
   leaseExpiresAt: number | null;
   outputs: ProjectOutput[];
   handoffs?: HandoffReceipt[];

@@ -103,7 +103,7 @@ test('public cloud needs no login; local edits transfer only on upload and proje
   assert.equal(foreignOrigin.status, 403);
 });
 
-test('active editors and output-only cloud revisions block stale uploads; conflict recovery preserves both projects and their media', async t => {
+test('open pages do not block uploads; revision conflicts preserve both projects and their media', async t => {
   const cloud = await startApplication({ port: 0, env: { LITTLETAKE_DATA_DIR: await directory(), LITTLETAKE_MODE: 'cloud', LITTLETAKE_WORKSPACE_PASSWORD: password } });
   const local = await startApplication({ port: 0, env: { LITTLETAKE_DATA_DIR: await directory(), LITTLETAKE_MODE: 'local', LITTLETAKE_CLOUD_URL: cloud.origin, LITTLETAKE_CLOUD_PASSWORD: password } });
   t.after(async () => { await local.close(); await cloud.close(); });
@@ -116,11 +116,17 @@ test('active editors and output-only cloud revisions block stale uploads; confli
   room.project.name = 'Local change';
   await value(await call(local.origin, '/api/projects?code=' + room.code, { action: 'save', savedVersion: room.savedVersion, project: room.project }, localSession));
   await value(await call(cloud.origin, '/api/projects?code=' + remote.code, { action: 'claim' }, cloudSession));
-  await error(await call(local.origin, '/api/cloud-projects', { action: 'upload', id }, localSession), 'editor_present');
+  await value(await call(local.origin, '/api/cloud-projects', { action: 'upload', id }, localSession));
+  assert.equal(cloud.projects.getById(id).project.name, 'Local change', 'another open page is not an upload lock');
+  const uploadedVersion = cloud.projects.getById(id).savedVersion;
+  remote.project.name = 'Stale cloud page';
+  await error(await call(cloud.origin, '/api/projects?code=' + remote.code, { action: 'save', savedVersion: remote.savedVersion, project: remote.project }, cloudSession), 'save_conflict');
+  const localDraft = local.projects.getById(id); localDraft.project.scenes[0].objects[0].transform.position[0] += 1;
+  await value(await call(local.origin, '/api/projects?code=' + room.code, { action: 'save', savedVersion: localDraft.savedVersion, project: localDraft.project }, localSession));
   const output: Omit<ProjectOutput, 'updatedAt'> = { id: randomUUID(), kind: 'look-frame', mime: 'application/json', sceneId: '', shotId: '', name: 'Cloud frame' }, data = new TextEncoder().encode('{"image":"kept"}');
   await value(await fetch(cloud.origin + '/api/projects?code=' + remote.code + '&output=1', { method: 'POST', headers: { Authorization: auth, ...cloudSession, 'x-littletake-output': encodeURIComponent(JSON.stringify(output)) }, body: data }));
   await value(await call(cloud.origin, '/api/projects?code=' + remote.code, { action: 'release' }, cloudSession));
-  assert.equal(cloud.projects.getById(id).savedVersion, remote.savedVersion, 'output-only edits do not change document CAS');
+  assert.equal(cloud.projects.getById(id).savedVersion, uploadedVersion, 'output-only edits do not change document CAS');
   assert.ok(cloud.projects.getById(id).contentVersion! > remote.contentVersion!);
   await error(await call(local.origin, '/api/cloud-projects', { action: 'upload', id }, localSession), 'cloud_conflict');
   assert.equal(local.projects.getById(id).project.name, 'Local change');
@@ -144,12 +150,11 @@ test('active editors and output-only cloud revisions block stale uploads; confli
   opened.project.name = 'Manual replacement';
   opened.project.scenes[0].objects[0].transform.position[0] = 7;
   await value(await call(local.origin, '/api/projects?code=' + opened.code, { action: 'save', savedVersion: opened.savedVersion, project: opened.project }, localSession));
-  await error(await call(local.origin, '/api/cloud-projects', { action: 'upload', id, overwrite: true }, localSession), 'editor_present');
-  assert.equal(cloud.projects.getById(id).project.name, 'Changed by a cloud editor', 'manual replacement still respects an active cloud editor');
-  await value(await call(cloud.origin, '/api/projects?code=' + remote.code, { action: 'release' }, cloudSession));
   await error(await call(local.origin, '/api/cloud-projects', { action: 'upload', id }, localSession), 'cloud_conflict');
   await value(await call(local.origin, '/api/cloud-projects', { action: 'upload', id, overwrite: true }, localSession));
   assert.equal(cloud.projects.getById(id).project.name, 'Manual replacement');
+  cloudEditing.project.name = 'Stale after manual replacement';
+  await error(await call(cloud.origin, '/api/projects?code=' + remote.code, { action: 'save', savedVersion: cloudEditing.savedVersion + 1, project: cloudEditing.project }, cloudSession), 'save_conflict');
   assert.equal(cloud.projects.getById(id).project.scenes[0].objects[0].transform.position[0], 7);
   assert.equal(cloud.projects.list().length, 1, 'explicit replacement keeps the same cloud project ID');
 });

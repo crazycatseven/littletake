@@ -47,7 +47,7 @@ export function createCloudProjectsHandler(store: ProjectRoomStore, env: Record<
         return json(store.openCloud(bundle, origin, lease, page, input.keepLocal));
       }
       const room = store.getById(input.id!, lease, page);
-      if (room.editing !== 'you') throw new ProjectRoomError('read_only', 'Start editing the local project before uploading it.', 403);
+      if (room.editing !== 'you') throw new ProjectRoomError('read_only', 'Open the local project before uploading it.', 403);
       if (room.cloud && room.cloud.origin !== origin) throw new ProjectRoomError('cloud_mismatch', 'This project belongs to a different cloud workspace. Upload a duplicate instead.');
       const bundle = store.bundle(input.id!);
       const latest = input.overwrite ? await (await remote('id=' + input.id)).json() : null;

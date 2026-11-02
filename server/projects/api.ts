@@ -94,7 +94,8 @@ export function createProjectRoomsHandler(store: ProjectRoomStore, workspace: Wo
         const bytes = await readBytes(request, MAX_OUTPUT_BYTES);
         if (metadata.kind === 'final-video' && (metadata.mime === 'video/mp4' ? bytes.toString('ascii', 4, 8) !== 'ftyp' : metadata.mime === 'video/webm' ? !bytes.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3])) : true))
           throw new ProjectRoomError('invalid_video', 'Choose an MP4 or WebM video file.', 400);
-        return json(store.saveOutput(code, lease, metadata, bytes, page));
+        const base = z.coerce.number().int().nonnegative().parse(request.headers.get('x-littletake-output-version') ?? '0');
+        return json(store.saveOutput(code, lease, metadata, bytes, page, base));
       }
       if (!request.headers.get('content-type')?.startsWith('application/json')) throw new ProjectRoomError('invalid_content', 'Send a JSON project request.', 415);
       const input = inputSchema.parse(JSON.parse((await readBytes(request, MAX_PROJECT_SIZE + 1024)).toString('utf8')));

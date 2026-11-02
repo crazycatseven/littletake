@@ -297,17 +297,6 @@
   font-size:12px}
 .project-share-dialog button.primary-button {
   background:var(--selection)}
-.project-mode {
-  font-size:10px;
-  padding:5px 9px;
-  border-radius:5px;
-  background:var(--selection);
-  color:var(--accent)}
-.project-mode[data-readonly=true] {
-  background:var(--surface-raised);
-  color:var(--muted)}
-.project-mode[hidden] {
-  display:none}
 .storage-warning [data-action=retry-save] {
   white-space:nowrap}
 body[data-project-readonly=true] #projectName,body[data-project-readonly=true] #sceneName {

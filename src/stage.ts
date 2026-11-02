@@ -217,7 +217,8 @@ export class Stage {
     this.listen(window, 'wheel', this.onFlyWheel as EventListener, { capture: true, passive: false });
     this.listen(canvas, 'contextmenu', (event) => event.preventDefault());
     this.listen(canvas, 'dblclick', this.onDoubleClick as EventListener);
-    this.listen(canvas, 'keydown', this.onKeyDown as EventListener);
+    // Camera navigation takes priority over editor shortcuts.
+    this.listen(window, 'keydown', this.onKeyDown as EventListener, true);
     this.listen(window, 'keyup', this.onKeyUp as EventListener);
     this.listen(canvas, 'blur', this.onBlur);
     this.listen(window, 'blur', this.onBlur);
@@ -1119,7 +1120,7 @@ export class Stage {
     if (this.presentingXR) return;
     if(this.controlled)return;
     if (document.activeElement !== this.renderer.domElement || this.isTextInput(event.target)) return;
-    const key = event.key.toLowerCase();
+    const key = event.code.startsWith('Key') ? event.code.slice(3).toLowerCase() : event.key.toLowerCase();
     if (this.flyPointer !== null && ['w', 'a', 's', 'd', 'q', 'e', 'shift'].includes(key)) {
       this.keys.add(key);
       if (key === 'shift' && !event.repeat) this.updateFlyStatus();
@@ -1136,7 +1137,7 @@ export class Stage {
   };
 
   private onKeyUp = (event: KeyboardEvent): void => {
-    const key = event.key.toLowerCase();
+    const key = event.code.startsWith('Key') ? event.code.slice(3).toLowerCase() : event.key.toLowerCase();
     if (this.keys.has(key) && this.flyPointer !== null) {
       event.preventDefault();
       event.stopPropagation();
