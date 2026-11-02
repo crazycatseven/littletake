@@ -17,7 +17,7 @@ export function openShotExport(renderer: ShotRenderer, shot: Shot, time: number)
     <label data-video hidden>Frame rate<select aria-label="Export frame rate"><option value="24">24 fps</option><option value="30">30 fps</option></select></label>
     <p class="export-range"></p><p class="export-exclusions">${hidden} hidden object${hidden === 1 ? '' : 's'} excluded<br>Clean camera view · no editor overlays</p></fieldset>
     <div class="export-progress" hidden><progress max="1" value="0"></progress><span role="status"></span></div><p class="export-message" role="status" aria-live="polite"></p>
-    <div class="export-actions"><button data-cancel hidden>Cancel export</button><button data-render class="primary-button">Export PNG</button><a data-download class="primary-button" hidden>Download PNG</a></div></div></div>`;
+    <div class="export-actions"><button data-cancel hidden>Cancel export</button><button data-render class="primary-button">Export PNG</button><a data-download hidden>Download PNG again</a></div></div></div>`;
   const find = <T extends HTMLElement = HTMLElement>(selector: string) => dialog.querySelector<T>(selector)!;
   find('[data-shot]').textContent = shot.name + ' · ' + camera.name;
   const preview = find('.export-preview'), settings = find<HTMLFieldSetElement>('.export-settings');
@@ -66,11 +66,13 @@ export function openShotExport(renderer: ShotRenderer, shot: Shot, time: number)
       controller.signal.throwIfAborted();
       url = URL.createObjectURL(blob);
       const filename = (shot.name.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'shot') + (format === 'image' ? `-${time.toFixed(2)}s.png` : '.webm');
-      const download = find<HTMLAnchorElement>('[data-download]'); download.href = url; download.download = filename; download.hidden = false; download.textContent = format === 'image' ? 'Download PNG' : 'Download video';
+      const download = find<HTMLAnchorElement>('[data-download]'); download.href = url; download.download = filename; download.hidden = false; download.textContent = format === 'image' ? 'Download PNG again' : 'Download video again';
       const result = document.createElement(format === 'image' ? 'img' : 'video'); result.src = url;
       if (result instanceof HTMLVideoElement) { result.controls = true; result.preload = 'metadata'; } else result.alt = 'Exported shot frame';
       preview.replaceChildren(result);
-      find('.export-message').textContent = `${filename} · ${(blob.size / 1024 / 1024).toFixed(2)} MB · ready to download`;
+      // The export button is the download: save the file as soon as it exists, and keep the link for another copy.
+      download.click();
+      find('.export-message').textContent = `${filename} · ${(blob.size / 1024 / 1024).toFixed(2)} MB · downloaded`;
     } catch (error) {
       find('.export-message').textContent = controller.signal.aborted ? 'Export cancelled. No partial file was saved.' : (error as Error).message;
       if (dialog.open) { try { showFrame(); } catch {} }

@@ -22,6 +22,7 @@
 .export-progress progress { width:100%; height:6px; accent-color:var(--accent); display:block; margin-bottom:6px; }
 .export-message { font-size:11px; line-height:1.6; color:var(--accent); overflow-wrap:anywhere; min-height:18px; margin-top:16px; }
 .export-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
-.export-actions a { display:inline-flex; align-items:center; text-decoration:none; font-size:12px; padding:8px 14px; border-radius:var(--radius-control); }
+.export-actions a { display:inline-flex; align-items:center; text-decoration:none; font-size:12px; padding:8px 14px; border-radius:var(--radius-control); color:var(--ink); border:1px solid var(--line); }
+.export-actions a:hover { background:var(--surface-hover); }
 .export-actions [hidden] { display:none; }
 @media(max-width:700px) { .export-layout { grid-template-columns:1fr; gap:12px; } }
