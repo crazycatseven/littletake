@@ -64,6 +64,7 @@ export function budgetProvider(provider: AIProvider, limit = 12): AIProvider {
   };
 }
 
+const MAX_ROUND_CALLS = 8;
 export class AssetTools {
   private searches = new Map<string, Awaited<ReturnType<AssetLibrary['search']>>>();
   private readAssets = new Map<string, AssetDefinition>();
@@ -200,10 +201,9 @@ export class AssetTools {
       catch(error){turn.error={code:error instanceof AIError?error.code:'tool_turn_failed',message:error instanceof Error?error.message:'Tool turn failed.'};throw error;}
       input.push(...response.output);
       if (!response.calls.length) { request.onOutput?.(response.text); try { return JSON.parse(response.text); } catch { throw new AIError('invalid_response', 'Muse returned incomplete JSON after using its tools.'); } }
-      if (response.calls.length > 8) throw new AIError('tool_limit', 'Muse requested too many tools at once.');
       const images: { type: string; image_url: string }[] = [];
       let progressed = false;
-      for (const call of response.calls) {
+      for (const call of response.calls.slice(0, MAX_ROUND_CALLS)) {
         const trace: NonNullable<SceneEditDiagnostic['toolCalls']>[number] = { name: call.name, arguments: call.arguments, startedAt: new Date().toISOString() };
         (this.diagnostic?.toolCalls ?? (this.diagnostic ? this.diagnostic.toolCalls = [] : [])).push(trace);
         let result: unknown;
@@ -224,6 +224,8 @@ export class AssetTools {
         }
         trace.finishedAt = new Date().toISOString(); input.push({ type: 'function_call_output', call_id: call.id, output: JSON.stringify(result) });
       }
+      // At most 8 tools run per round. Extra calls get an answer instead of discarding the whole request.
+      for (const call of response.calls.slice(MAX_ROUND_CALLS)) input.push({ type: 'function_call_output', call_id: call.id, output: JSON.stringify({ ok: false, error: `Not run: at most ${MAX_ROUND_CALLS} tools run per round. Call it again in the next round if it is still needed.` }) });
       if (this.referenceTools?.requestedFrames.length) return { referenceFramesRequired: true };
       this.stalledRounds = progressed ? 0 : this.stalledRounds + 1;
       if (this.stalledRounds >= 2) throw new AIError('tool_loop', 'Muse stopped after two tool rounds that only repeated earlier results or errors. Saved observations and ready assets are retained; no scene changes were applied.');

@@ -162,3 +162,18 @@ test('a round with a new tool error is progress; only repeated results stop the 
   await assert.rejects(proposeSceneEdit(input(), new MetaProvider({ apiKey: 'test', model: 'test' }, looping), undefined, newDiagnostic(), library), /only repeated earlier results or errors/);
   assert.equal(repeats, 3);
 });
+
+test('a round asking for more than 8 tools runs 8 and answers the rest instead of failing', async () => {
+  const library = new AssetLibrary(await mkdtemp(path.join(tmpdir(), 'littletake-assets-'))), diagnostic = newDiagnostic();
+  let directorCalls = 0, skipped: any[] = [];
+  const transport = (async (_url: unknown, init: RequestInit) => {
+    const body = JSON.parse(init.body as string); directorCalls++;
+    if (directorCalls === 1) return Response.json({ status: 'completed', output: Array.from({ length: 9 }, (_, i) => ({ type: 'function_call', call_id: 'call_' + i, name: 'search_assets', arguments: JSON.stringify({ query: 'chair ' + i }), status: 'completed' })) });
+    skipped = body.input.filter((x: any) => x.type === 'function_call_output' && /Not run/.test(x.output));
+    return Response.json(json({ summary: 'Nothing to place.', requestedViews: [], objectCounts: [], operations: [] }));
+  }) as typeof fetch;
+  const response = await proposeSceneEdit(input(), new MetaProvider({ apiKey: 'test', model: 'test' }, transport), undefined, diagnostic, library);
+  assert.equal(response.status, 'ready');
+  assert.equal(diagnostic.toolCalls!.length, 8);
+  assert.deepEqual(skipped.map((x: any) => x.call_id), ['call_8']);
+});
