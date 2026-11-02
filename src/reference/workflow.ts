@@ -3,7 +3,8 @@ import type { SceneDocument } from '../types';
 import { MAX_REFERENCE_REVIEWS, MIN_REFERENCE_SCORE } from './analysis';
 import { requestReferenceDraft } from './client';
 import { measureReferenceFraming } from './framing';
-import { referenceReview,referenceFramingMatches } from './review';
+import { referenceReview,referenceFramingMatches,fitJPEG } from './review';
+import { MAX_REFERENCE_BODY_BYTES } from './types';
 import { collectReferenceDetails,collectReferenceSource, verifyBoundaryFrames,measureReferenceFrameBounds } from './video';
 import type { ReferenceDraft, VideoReferenceInput,ReferenceCapture } from './types';
 import type { AssetDefinition } from '../assets/model';
@@ -48,6 +49,11 @@ export async function reconstructReference(input:VideoReferenceInput,capture:Ref
       if(!attempt.frames?.length||!attempt.video)throw new Error('The saved review lacks its exact frame clock or motion video. Render it again before review.');
       analysis=attempt.analysis??analysis;
       const evidence={scene:attempt.scene,assets:attempt.assets,bindings:attempt.bindings,contactSheet:attempt.contactSheet,layoutSheet:attempt.layoutSheet,video:attempt.video,frames:attempt.frames,measurements:attempt.measurements,continuity:attempt.continuity,sourceRegions:attempt.sourceRegions};
+      // The original clip, render video and paired stills share one request. Shrink the paired stills into the room the rest leaves.
+      const rest=new TextEncoder().encode(JSON.stringify({...input,analysis,review:{...evidence,contactSheet:''}})).length,room=Math.min(1_000_000,MAX_REFERENCE_BODY_BYTES-rest-2_000);
+      const sheet=room>120_000?await fitJPEG(evidence.contactSheet,room):null;
+      if(!sheet)throw new Error('This clip leaves too little room in the request for the visual review. Use a clip under about 1.5 MB.');
+      evidence.contactSheet=sheet;
       const result:ReferenceDraft=await requestReferenceDraft({...input,analysis,review:evidence},signal,run.id);if(!result.analysis)throw new Error('The visual review lost its source observations.');attempt.quality=result.quality;attempt.result=structuredClone(result);if(!result.quality?.approved)run.next=structuredClone(result);run.analysis=result.analysis;run.phase='reviewed';await checkpoint?.(run);
       const withinFrame=referenceFramingMatches(attempt.measurements);
       if(result.quality?.approved&&withinFrame&&Object.values(result.quality.scores).every(v=>v>=MIN_REFERENCE_SCORE)){

@@ -46,3 +46,16 @@ export async function referenceReview(scene: SceneDocument, capture:ReferenceCap
   signal.throwIfAborted();
   return {scene,assets,contactSheet:canvas.toDataURL('image/jpeg',.65),layoutSheet:layout.toDataURL('image/jpeg',.65),video,frames,measurements,continuity:measureCutContinuity(scene,analysis,bindings),bindings,sourceRegions:source.frames.map(frame=>({time:frame.time,detections:frame.detections??[],faceLandmarks:frame.faceLandmarks}))};
 }
+
+/** Re-encode a JPEG data URL until it fits in maxChars: lower quality first, then smaller. Returns null when it cannot fit. */
+export async function fitJPEG(dataUrl: string, maxChars: number): Promise<string | null> {
+  if (dataUrl.length <= maxChars) return dataUrl;
+  const image = new Image(); image.src = dataUrl; await image.decode();
+  const canvas = document.createElement('canvas'), context = canvas.getContext('2d')!;
+  for (const scale of [1, .85, .7, .55]) {
+    canvas.width = Math.round(image.naturalWidth * scale); canvas.height = Math.round(image.naturalHeight * scale);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    for (const quality of [.6, .5, .4, .32]) { const result = canvas.toDataURL('image/jpeg', quality); if (result.length <= maxChars) return result; }
+  }
+  return null;
+}
