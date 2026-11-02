@@ -163,7 +163,10 @@ export class AssetTools {
       default: throw new Error('Unknown asset tool.');
     }
     return response;
-    })();if(name!=='render_scene')this.cache.set(key,task);return task;
+    })();
+    // Reuse in-flight and successful results only; a failed call (for example instantiating before read_asset) must be retryable with the same arguments.
+    if(name!=='render_scene'){this.cache.set(key,task);task.catch(()=>{if(this.cache.get(key)===task)this.cache.delete(key);});}
+    return task;
   }
 
   assertSceneInspected(scene:ProjectContent['scenes'][number],operations:SceneOperation[],applyTime:number){
