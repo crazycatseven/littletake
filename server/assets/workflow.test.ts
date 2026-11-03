@@ -38,9 +38,8 @@ function transportFor(mode: 'generate' | 'reuse', assetId = 'builtin-chair') {
     const call = (name: string, args: unknown) => Response.json({ status: 'completed', output: [{ type: 'function_call', call_id: 'call_' + directorCalls, name, arguments: JSON.stringify(args), status: 'completed' }] });
     if (directorCalls === 1) return call('search_assets', { query: mode === 'generate' ? 'blue test chair special' : 'chair' });
     if (directorCalls === 2) return call('read_asset', { assetId });
-    if(mode==='generate'&&directorCalls===3)return call('generate_asset',{searchId:outputs[0].searchId,baseAssetId:'null',brief:'Blue chair with four legs and a backrest, matching the requested special asset.',reason:'The user explicitly requested a new independent test asset variant.'});
-    if(mode==='generate'&&directorCalls===4){assert.equal(expertCalls,0,'An invalid base reference must not spend expert calls.');assert.match(outputs.at(-1).error,/JSON null/);return call('generate_asset',{searchId:outputs[0].searchId,baseAssetId:assetId,brief:'Blue chair with four legs and a backrest, matching the requested special asset.',reason:'The user explicitly requested a new independent test asset variant.'});}
-    const selected = mode === 'generate' ? outputs.find((item:any)=>item.asset)?.asset.id : assetId,start=mode==='generate'?5:3;
+    if(mode==='generate'&&directorCalls===3)return call('generate_asset',{searchId:outputs[0].searchId,baseAssetId:assetId,brief:'Blue chair with four legs and a backrest, matching the requested special asset.',reason:'The user explicitly requested a new independent test asset variant.'});
+    const selected = mode === 'generate' ? outputs.find((item:any)=>item.asset)?.asset.id : assetId,start=mode==='generate'?4:3;
     if (directorCalls === start) return call('instantiate_asset', { assetId: selected, sceneId: 'scene-1', name: 'Chair A', transform });
     if (directorCalls === start+1) return call('instantiate_asset', { assetId: selected, sceneId: 'scene-1', name: 'Chair B', transform: { ...transform, position: [2, 0, 0] } });
     return Response.json(json({ summary: 'Prepared two instances.', requestedViews: [], objectCounts: [], operations: outputs.filter((item:any)=>item.placementId).map((item:any)=>item.operation) }));
@@ -83,7 +82,7 @@ test('missing asset is delegated, rendered, inspected and persisted; a restarted
   const response = await proposeSceneEdit(source, fake.provider, undefined, diagnostic, library);
   assert.equal(response.status, 'ready'); if (response.status !== 'ready') return;
   assert.equal(fake.counts().expertCalls, 2);
-  assert.match(diagnostic.toolCalls!.find(call=>call.error)!.error!,/JSON null/);
+  assert.ok(!diagnostic.toolCalls!.some(call=>call.error));
   const expertRequests = fake.requests.filter(r => !r.tools);
   assert.match(expertRequests[0].instructions, /dedicated Proxy Asset Modeling Expert/);
   assert.ok(!expertRequests[0].instructions.includes('film-set builder'));
@@ -161,4 +160,61 @@ test('a round with a new tool error is progress; only repeated results stop the 
   const looping = (async () => { repeats++; return Response.json({ status: 'completed', output: [{ type: 'function_call', call_id: 'call_' + repeats, name: 'read_asset', arguments: JSON.stringify({ assetId: 'missing-asset' }), status: 'completed' }] }); }) as typeof fetch;
   await assert.rejects(proposeSceneEdit(input(), new MetaProvider({ apiKey: 'test', model: 'test' }, looping), undefined, newDiagnostic(), library), /only repeated earlier results or errors/);
   assert.equal(repeats, 3);
+});
+
+test('a round asking for more than 8 tools runs 8 and answers the rest instead of failing', async () => {
+  const library = new AssetLibrary(await mkdtemp(path.join(tmpdir(), 'littletake-assets-'))), diagnostic = newDiagnostic();
+  let directorCalls = 0, skipped: any[] = [];
+  const transport = (async (_url: unknown, init: RequestInit) => {
+    const body = JSON.parse(init.body as string); directorCalls++;
+    if (directorCalls === 1) return Response.json({ status: 'completed', output: Array.from({ length: 9 }, (_, i) => ({ type: 'function_call', call_id: 'call_' + i, name: 'search_assets', arguments: JSON.stringify({ query: 'chair ' + i }), status: 'completed' })) });
+    skipped = body.input.filter((x: any) => x.type === 'function_call_output' && /Not run/.test(x.output));
+    return Response.json(json({ summary: 'Nothing to place.', requestedViews: [], objectCounts: [], operations: [] }));
+  }) as typeof fetch;
+  const response = await proposeSceneEdit(input(), new MetaProvider({ apiKey: 'test', model: 'test' }, transport), undefined, diagnostic, library);
+  assert.equal(response.status, 'ready');
+  assert.equal(diagnostic.toolCalls!.length, 8);
+  assert.deepEqual(skipped.map((x: any) => x.call_id), ['call_8']);
+});
+
+test('an empty or "null" baseAssetId starts a new asset instead of failing the call', async () => {
+  for (const base of ['', 'null']) {
+    const library = new AssetLibrary(await mkdtemp(path.join(tmpdir(), 'littletake-assets-'))), diagnostic = newDiagnostic();
+    let directorCalls = 0, expertCalls = 0, expertBase: unknown = 'unset';
+    const transport = (async (_url: unknown, init: RequestInit) => {
+      const body = JSON.parse(init.body as string);
+      if (!body.tools) {
+        expertCalls++;
+        if (expertCalls === 1) expertBase = JSON.parse(body.input[0].content[0].text).baseRecipe ?? null;
+        const recipe = assetRecipeSchema.strip().parse(builtinAssets[0]); recipe.name = 'Lobby desk'; recipe.tags = ['desk', 'lobby'];
+        return Response.json(json(expertCalls === 1 ? recipe : { approved: true, notes: 'All rendered views meet the brief.', revisedRecipe: null }));
+      }
+      directorCalls++;
+      const outputs = body.input.filter((x: any) => x.type === 'function_call_output').map((x: any) => JSON.parse(x.output));
+      const call = (name: string, args: unknown) => Response.json({ status: 'completed', output: [{ type: 'function_call', call_id: 'call_' + directorCalls, name, arguments: JSON.stringify(args), status: 'completed' }] });
+      if (directorCalls === 1) return call('search_assets', { query: 'curved lobby desk' });
+      if (directorCalls === 2) return call('generate_asset', { searchId: outputs[0].searchId, baseAssetId: base, brief: 'Curved wooden lobby desk 2.2m wide and 1m tall.', reason: 'No curved desk in the library.' });
+      return Response.json(json({ summary: 'Prepared a desk.', requestedViews: [], objectCounts: [], operations: [] }));
+    }) as typeof fetch;
+    const response = await proposeSceneEdit(input(), new MetaProvider({ apiKey: 'test', model: 'test' }, transport), undefined, diagnostic, library);
+    assert.equal(response.status, 'ready');
+    assert.ok(!diagnostic.toolCalls!.some(call => call.error), JSON.stringify(base));
+    assert.equal(expertBase, null);
+  }
+});
+
+test("a reference run's approved assets can be placed without reading them again", async () => {
+  const library = new AssetLibrary(await mkdtemp(path.join(tmpdir(), 'littletake-assets-'))), diagnostic = newDiagnostic();
+  const approved = { ...structuredClone(builtinAssets[0]), id: 'asset-approved-desk', name: 'Approved desk' };
+  const source = { ...input(), project: { name: 'Reference', scenes: [createEmptyScene()], assets: [approved] } };
+  let directorCalls = 0;
+  const transport = (async (_url: unknown, init: RequestInit) => {
+    const body = JSON.parse(init.body as string), outputs = body.input.filter((x: any) => x.type === 'function_call_output').map((x: any) => JSON.parse(x.output));
+    directorCalls++;
+    if (directorCalls === 1) return Response.json({ status: 'completed', output: [{ type: 'function_call', call_id: 'call_1', name: 'instantiate_asset', arguments: JSON.stringify({ assetId: approved.id, sceneId: 'scene-1', name: 'Desk', transform }), status: 'completed' }] });
+    return Response.json(json({ summary: 'Placed the desk.', requestedViews: [], objectCounts: [], operations: outputs.filter((item: any) => item.placementId).map((item: any) => item.operation) }));
+  }) as typeof fetch;
+  const response = await proposeSceneEdit(source as any, new MetaProvider({ apiKey: 'test', model: 'test' }, transport), undefined, diagnostic, library);
+  assert.equal(response.status, 'ready');
+  assert.deepEqual(diagnostic.toolCalls!.map(call => [call.name, Boolean(call.error)]), [['instantiate_asset', false]]);
 });

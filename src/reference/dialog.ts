@@ -11,6 +11,9 @@ import { collectReferenceSource, readReferenceVideo } from './video';
 import type { SourceEvidence } from './analysis';
 import type { ReferenceConnection, ReferenceDraft, ReferenceImage, ReferenceVideo, ReferenceInput, ReferenceCapture } from './types';
 
+/** Muse quotes measured times like 1.8761666666666668; show them as 1.88. */
+const readableTimes = (text: string) => text.replace(/\d+\.\d{4,}/g, value => Number(value).toFixed(2));
+
 
 const escapeHTML = (text: string) => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
 
@@ -239,15 +242,30 @@ export class ReferenceDialog {
 
     } catch (error) {
       if (operation !== this.operation) return;
-      this.showError((error as Error).message); this.emptyReport('Analysis stopped', 'Completed steps are retained. Resume when you are ready.');
+      this.showError((error as Error).message);
+      // Every review round was rejected: offer the best-scoring reviewed draft, clearly marked, so it can still be edited by hand.
+      const best = this.bestReviewedDraft();
+      if (best) { this.showDraft(best, false); this.showTracks(best); }
+      else this.emptyReport('Analysis stopped', 'Completed steps are retained. Resume when you are ready.');
     }
     if (operation === this.operation) { this.busy = false; this.updateButtons(); }
   }
-  private showDraft(draft:ReferenceDraft){
+  private bestReviewedDraft():ReferenceDraft|null{
+    const reviewed=(this.run?.attempts??[]).filter(attempt=>attempt.quality&&!attempt.quality.approved);
+    if(this.run?.phase!=='failed'||!reviewed.length)return null;
+    const total=(attempt:typeof reviewed[number])=>Object.values(attempt.quality!.scores??{}).reduce((sum,score)=>sum+Number(score),0);
+    const best=reviewed.reduce((a,b)=>total(b)>total(a)?b:a),round=reviewed.indexOf(best)+1;
+    const scores=Object.entries(best.quality!.scores??{}).map(([name,score])=>`${name} ${score}`).join(', ');
+    return {...best.result,scene:structuredClone(best.scene),assets:structuredClone(best.assets??[]),analysis:best.analysis??best.result?.analysis,bindings:best.bindings??best.result?.bindings,quality:best.quality,
+      summary:`Best of ${reviewed.length} reviewed drafts (round ${round}: ${scores} of 10). It did not pass Muse's visual review, so check framing and blocking before you rely on it.`,
+      assumptions:best.result?.assumptions??[],provider:best.result?.provider??'Meta',model:best.result?.model??''};
+  }
+  private showDraft(draft:ReferenceDraft,approved=true){
       this.draft=draft;const animated=draft.scene.objects.filter(item=>item.track||Object.keys(item.animation?.curves??{}).length).length;
-      this.find('#referenceState').textContent = 'DRAFT READY · VISUAL REVIEW PASSED';
+      this.find('#referenceState').textContent = approved ? 'DRAFT READY · VISUAL REVIEW PASSED' : 'BEST DRAFT · DID NOT PASS VISUAL REVIEW';
+      this.applyButton.textContent = approved ? 'Use scene' : 'Use draft anyway';
       const palette=[...new Set(draft.scene.objects.map(item=>item.color))];
-      this.find('#referenceReport').innerHTML = `<div class="reference-draft-summary"><h3>${escapeHTML(draft.scene.name)}</h3><p>${escapeHTML(draft.summary)}</p><div class="reference-output-tags"><span>${draft.scene.objects.length} objects</span><span>${animated} moving</span><span>${draft.scene.shots.length} shots</span><span>${draft.scene.cameras.filter(camera=>camera.track).length} camera moves</span></div><div class="reference-palette" aria-label="Scene palette">${palette.map(color=>`<span title="${color}" style="display:inline-block;width:22px;height:22px;border-radius:4px;margin:8px 4px 0 0;background:${color}"></span>`).join('')}</div></div><ol class="reference-object-list">${draft.scene.shots.map(shot=>`<li><span class="reference-kind">${shot.start.toFixed(2)}–${(shot.start+shot.duration).toFixed(2)}s</span><span>${escapeHTML(shot.name)}</span></li>`).join('')}</ol><ul class="reference-object-list">${draft.scene.objects.map(item => `<li><span class="reference-kind">${escapeHTML(item.kind)}${item.track?' · motion':''}</span><span>${escapeHTML(item.name)}</span></li>`).join('')}</ul>${draft.assumptions.length ? `<div class="reference-assumptions"><h4>Estimated / simplified</h4><ul>${draft.assumptions.map(item => `<li>${escapeHTML(item)}</li>`).join('')}</ul></div>` : ''}`;
+      this.find('#referenceReport').innerHTML = `<div class="reference-draft-summary"><h3>${escapeHTML(draft.scene.name)}</h3><p>${escapeHTML(readableTimes(draft.summary))}</p><div class="reference-output-tags"><span>${draft.scene.objects.length} objects</span><span>${animated} moving</span><span>${draft.scene.shots.length} shots</span><span>${draft.scene.cameras.filter(camera=>camera.track).length} camera moves</span></div><div class="reference-palette" aria-label="Scene palette">${palette.map(color=>`<span title="${color}" style="display:inline-block;width:22px;height:22px;border-radius:4px;margin:8px 4px 0 0;background:${color}"></span>`).join('')}</div></div><ol class="reference-object-list">${draft.scene.shots.map(shot=>`<li><span class="reference-kind">${shot.start.toFixed(2)}–${(shot.start+shot.duration).toFixed(2)}s</span><span>${escapeHTML(shot.name)}</span></li>`).join('')}</ol><ul class="reference-object-list">${draft.scene.objects.map(item => `<li><span class="reference-kind">${escapeHTML(item.kind)}${item.track?' · motion':''}</span><span>${escapeHTML(item.name)}</span></li>`).join('')}</ul>${draft.assumptions.length ? `<div class="reference-assumptions"><h4>Estimated / simplified</h4><ul>${draft.assumptions.map(item => `<li>${escapeHTML(readableTimes(item))}</li>`).join('')}</ul></div>` : ''}`;
   }
   private cancelAnalysis(){
     const scanning=this.preparingSource;
@@ -267,7 +285,9 @@ export class ReferenceDialog {
     this.find('#referenceFileName').textContent = saved.sourceName;
     this.find('#referenceMetadata').textContent = `${this.video.duration.toFixed(1)}s · ${this.video.width} × ${this.video.height}`;
     if (this.run.result) { const draft = parseReferenceDraft(this.run.result); if (draft.quality?.approved) { this.showDraft(draft); this.showTracks(draft); } else { this.run.phase = 'failed'; delete this.run.result; } }
-    if (!this.draft) { this.run.error ??= 'This analysis was interrupted. Resume explicitly to continue.'; this.emptyReport('Saved analysis restored', 'Completed steps are kept. Resume when you are ready.'); }
+    const best = this.draft ? null : this.bestReviewedDraft();
+    if (best) { this.showError(this.run.error ?? 'The rendered reconstruction did not pass visual review.'); this.showDraft(best, false); this.showTracks(best); }
+    else if (!this.draft) { this.run.error ??= 'This analysis was interrupted. Resume explicitly to continue.'; this.emptyReport('Saved analysis restored', 'Completed steps are kept. Resume when you are ready.'); }
     this.open(); this.updateButtons();
   }
   contextChanged() { this.root.close(); this.cancelOperation(); this.video = null; this.draft = null; this.run = null; this.source=null;this.showSamples();this.showTracks(); this.emptyReport('Choose a reference clip', 'Analysis belongs to the current project.'); this.updateButtons(); }

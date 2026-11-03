@@ -2,6 +2,7 @@ import { newId } from "../id.ts";
 import { projectFetch, projectDiagnosticId } from '../project/client';
 import { validateDocument } from '../model';
 import { MAX_REFERENCE_BODY_BYTES } from './types';
+import { fitJPEG } from './review';
 import type { ReferenceConnection, ReferenceDraft, ReferenceInput, VideoReferenceInput, ImageReferenceInput, ReferenceObservation, ReferencePreparation, ReferenceResult,ReferenceJobSummary,ReferenceJobSubmission } from './types';
 import { analysisSchema, qualitySchema } from './analysis';
 import { detectedRegionSchema } from './analysis';
@@ -28,7 +29,7 @@ export async function requestReferenceDraft(input: ReferenceInput, signal: Abort
   const id=newId(),record:RequestDiagnostic<ReferenceInput>={id,turnId:runId,conversationId:projectDiagnosticId('reference:'+runId),messageId:id,startedAt:new Date().toISOString(),input:structuredClone(input),status:'pending'};
   await saveDiagnostic(record);
   try{
-  const body=JSON.stringify(input);if(new TextEncoder().encode(body).length>MAX_REFERENCE_BODY_BYTES)throw new Error('The clip and review frames exceed the request limit. Use a smaller video.');
+  const body=JSON.stringify('video' in input?await fitReferenceSheets(input):input);if(new TextEncoder().encode(body).length>MAX_REFERENCE_BODY_BYTES)throw new Error('This clip leaves too little room in the request for its review images. Use a clip under about 1.5 MB.');
   const response = await projectFetch('/api/reference', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-littletake-run-id': runId }, body, signal });
   let data;
   try { data = await response.json(); } catch { throw new Error('Analysis did not finish. Please try a shorter clip.'); }
@@ -63,4 +64,31 @@ export async function downloadReferenceJob(id:string):Promise<void>{
   const response=await projectFetch('/api/reference-jobs?id='+encodeURIComponent(id)+'&action=diagnostics');if(!response.ok)throw new Error('The saved analysis could not be downloaded.');
   const url=URL.createObjectURL(await response.blob()),anchor=document.createElement('a');anchor.href=url;anchor.download='LittleTake-reference-analysis.json.gz';anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 
+}
+
+/** Server limits for the rendered and source sheets each request may carry. */
+const SHEET_LIMITS: [part: 'review' | 'repair' | 'source', field: 'contactSheet' | 'layoutSheet', limit: number][] = [
+  ['review', 'contactSheet', 1_000_000], ['repair', 'contactSheet', 1_000_000], ['review', 'layoutSheet', 600_000], ['repair', 'layoutSheet', 600_000], ['source', 'contactSheet', 600_000],
+];
+/**
+ * The original clip, the render video and the sheets share one request body. Re-encode sheets that exceed their own
+ * limit, then shrink the largest sheet until the whole body fits. Measurements, frames and the clip itself are unchanged.
+ */
+async function fitReferenceSheets(input: VideoReferenceInput): Promise<VideoReferenceInput> {
+  const copy = { ...input } as Record<string, unknown> & VideoReferenceInput;
+  const parts = copy as unknown as Record<string, Record<string, unknown> | undefined>;
+  for (const part of ['review', 'repair', 'source'] as const) if (parts[part]) parts[part] = { ...parts[part] };
+  const sheets = SHEET_LIMITS.filter(([part, field]) => typeof parts[part]?.[field] === 'string');
+  const read = ([part, field]: typeof SHEET_LIMITS[number]) => parts[part]![field] as string;
+  const write = ([part, field]: typeof SHEET_LIMITS[number], value: string) => { parts[part]![field] = value; };
+  for (const sheet of sheets) if (read(sheet).length > sheet[2]) write(sheet, await fitJPEG(read(sheet), sheet[2]) ?? read(sheet));
+  for (let round = 0; round < sheets.length * 2; round++) {
+    const excess = new TextEncoder().encode(JSON.stringify(copy)).length - MAX_REFERENCE_BODY_BYTES + 2_000;
+    const largest = [...sheets].sort((a, b) => read(b).length - read(a).length)[0];
+    if (excess <= 0 || !largest || read(largest).length < 150_000) break;
+    const fitted = await fitJPEG(read(largest), Math.max(120_000, read(largest).length - excess));
+    if (!fitted || fitted === read(largest)) break;
+    write(largest, fitted);
+  }
+  return copy;
 }

@@ -91,10 +91,10 @@ export class ConversationSession {
     if (edit.revision !== context.revision) { edit.status = 'stale'; this.clearPreview(); this.emit(); return; }
     try {
       this.options.prepare();
-      this.preview = { messageId: id, base: serializeContent(context.project), project: applyProjectOperations(context.project, edit.operations, edit.time), focus: {
-        sceneId: edit.operations.find(op => op.type === 'add_scene')?.sceneId ?? edit.sceneId,
-        shotId: edit.shotId,
-      } };
+      const project = applyProjectOperations(context.project, edit.operations, edit.time), sceneId = edit.operations.find(op => op.type === 'add_scene')?.sceneId ?? edit.sceneId;
+      // A request sent before any shot existed (e.g. "build a scene") opens on the first shot it created, not on a bare camera preview.
+      const shotId = edit.shotId ?? project.scenes.find(scene => scene.id === sceneId)?.shots[0]?.id ?? null;
+      this.preview = { messageId: id, base: serializeContent(context.project), project, focus: { sceneId, shotId } };
       this.after = after; this.options.preview(after ? this.preview.project : null, this.preview.focus);
     } catch { edit.status = 'stale'; this.clearPreview(); }
     this.emit();

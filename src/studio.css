@@ -134,7 +134,7 @@ kbd { margin-left: auto; color: var(--muted); font-family: inherit; font-size: 1
 .transform-tools button svg { width: 15px; height: 15px; }
 .transform-tools button.active { border-color: var(--focus-ring); background: var(--selection-strong); color: var(--selection-ink); }
 .viewport-caption { position: absolute; right: 20px; bottom: 13px; left: 20px; overflow: hidden; color: var(--text-secondary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
-.shot-panel { position: absolute; z-index: 6; top: 192px; right: 20px; width: clamp(220px, 20vw, 280px); overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--paper); box-shadow: var(--shadow-floating); backdrop-filter: none; }
+.shot-panel { position: absolute; z-index: 6; top: calc(var(--viewport-heading-height, 55px) + 137px); right: 20px; width: clamp(220px, 20vw, 280px); overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--paper); box-shadow: var(--shadow-floating); backdrop-filter: none; }
 .shot-heading { display: flex; align-items: center; justify-content: space-between; gap: 3px; height: 41px; padding: 0 8px; background: var(--surface-raised); }
 .shot-heading h2 { display: inline-flex; flex: 1; min-width: 0; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 12px; font-weight: 500; }
 .shot-heading h2 span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -328,9 +328,9 @@ dialog::backdrop { background: var(--backdrop); backdrop-filter: none; }
   .shot-panel { width: 210px; background: var(--paper); }
   .bottom-panel-toolbar, .timeline-toolbar { gap: 8px; }
 }
-@media (max-height: 720px) { .app-header { flex-basis: 60px; background: var(--shell); } .shot-panel { top: 180px; width: 190px; background: var(--paper); } }
+@media (max-height: 720px) { .app-header { flex-basis: 60px; background: var(--shell); } .shot-panel { top: calc(var(--viewport-heading-height, 55px) + 125px); width: 190px; background: var(--paper); } }
 
-.view-navigation { position: absolute; z-index: 7; top: 58px; right: 20px; width: 112px; display: grid; justify-items: center; user-select: none; }
+.view-navigation { position: absolute; z-index: 7; top: calc(var(--viewport-heading-height, 55px) + 3px); right: 20px; width: 112px; display: grid; justify-items: center; user-select: none; }
 .view-navigation svg { width: 112px; height: 100px; overflow: visible; touch-action: none; cursor: grab; }
 .view-navigation.dragging svg { cursor: grabbing; }
 .view-navigation g { cursor: inherit; outline: none; }
@@ -348,4 +348,11 @@ dialog::backdrop { background: var(--backdrop); backdrop-filter: none; }
   border: 1px solid var(--line);
   border-radius: var(--radius-panel);
   padding: 3px;
+}
+
+/* Laptop widths: icon-only transform tools keep the viewport toolbar on one row, and the shot label gives way to its actions. */
+@media (max-width: 1360px) {
+  .transform-tools button { width: 30px; padding: 6px; }
+  .transform-tools button > span { display: none; }
+  .shot-heading h2 span { display: none; }
 }
