@@ -48,7 +48,7 @@ test('XR take is isolated until apply, preserves out-of-range keys and scale, an
   assert.equal(session.mode, 'armed'); session.begin(1000);
   for (let i = 1; i <= 90; i++) session.sample(pose(1 + i / 90, i / 90 * 45), 1000 + i * 1000 / 90);
   session.stop(); assert.equal(session.mode, 'review'); assert.deepEqual(item, before);
-  assert.equal(session.state().samples, 31); assert.ok(session.state().keys! < 15);
+  assert.equal(session.state().samples, 3); assert.ok(session.state().keys! < 15);
   const next = session.apply(); validateAnimation(next.animation, 4);
   assert.deepEqual(next.animation!.curves['scale.x'], before.animation!.curves['scale.x']);
   assert.deepEqual(next.animation!.curves['position.x']!.filter(key => key.time < 1 || key.time > 2), before.animation!.curves['position.x']!.filter(key => key.time < 1 || key.time > 2));
@@ -142,4 +142,32 @@ test('parented camera recording preserves world motion and camera timeline keys'
   const end = worldTransform(preview, result.id, 1);
   assert.ok(Math.abs(end.position[0] - start.position[0] - 1) < 1e-6);
   assert.ok(q(end).angleTo(q(start)) < 1e-6);
+});
+
+
+test('object and camera takes sample at 2 Hz while live poses follow every update', () => {
+  for (const item of [createObject('cube', 1), createCamera('camera', 'Camera')]) {
+    for (const rate of [60, 90, 120]) {
+      item.transform = pose(0);
+      const session = new XRRecording(item, 0, 4); session.begin(0);
+      for (let i = 1; i <= rate * 2; i++) {
+        const t = i / rate, current = pose(t, Math.sin(t * 6) * 45);
+        session.sample(current, t * 1000);
+        assert.deepEqual(session.pose, current);
+        assert.ok(session.state().samples! <= 1 + Math.floor(t * 2 + 1e-8));
+      }
+      // Release between sampling ticks must replace, not append, a close endpoint.
+      session.sample(pose(2.05, 33), 2050); session.stop();
+      assert.equal(session.state().samples, 5);
+      const keys = session.apply().animation!.curves['position.x']!;
+      assert.equal(keys.at(-1)!.time, 2.05);
+      assert.equal(keys.at(-1)!.value, 2.05);
+      assert.ok(keys.length <= 5);
+      for (let i = 1; i < keys.length; i++) assert.ok(keys[i].time - keys[i - 1].time >= .5 - 1e-8);
+    }
+    const short = new XRRecording(item, 0, 1); short.begin(0);
+    short.sample(pose(.15), 150); short.stop();
+    assert.equal(short.state().samples, 2);
+    assert.equal(short.apply().animation!.takes[0].end, .15);
+  }
 });

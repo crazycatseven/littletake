@@ -5,10 +5,13 @@ import { transformSchema } from '../performance/motion';
 import type { SceneEntity, Transform } from '../types';
 import { eulerDegrees } from '../rotation';
 
+export const XR_RECORDING_HZ = 2;
+
 export type XRRecordAction = 'record' | 'preview' | 'apply' | 'discard';
 export interface XRRecordingState {
   mode: 'idle' | 'armed' | 'recording' | 'review';
   canRecord?: boolean;
+  handheld?: boolean;
   samples?: number;
   keys?: number;
   previewing?: boolean;
@@ -84,33 +87,40 @@ export class XRRecording<T extends SceneEntity = SceneEntity> {
   private raw: PoseSample[] = [];
   private processed: PoseSample[] = [];
   private result?: T;
-  constructor(item: T, time: number, readonly duration: number) {
-    if (time < 0 || duration - time < .1) throw new Error('Move the playhead earlier to record at least 0.1 seconds.');
+  constructor(item: T, time: number, readonly duration: number, readonly end = duration) {
+    if (time < 0 || end > duration || end - time < .1) throw new Error('Move the playhead earlier to record at least 0.1 seconds.');
     this.before = structuredClone(item); this.start = this.time = time;
     this.pose = evaluateTransform(item, time); this.last = { time, transform: structuredClone(this.pose) };
+  }
+  prepare(pose: Transform): void {
+    if (this.mode !== 'armed') return;
+    this.pose = transformSchema.parse(pose);
+    this.last = { time: this.start, transform: structuredClone(this.pose) };
   }
   begin(now: number): void {
     if (this.mode !== 'armed') return;
     this.mode = 'recording'; this.startedAt = now;
     this.raw = [{ time: this.start, transform: structuredClone(this.pose) }];
   }
-  sampleTime(now: number): number { return Math.min(this.duration, this.start + Math.max(0, now - this.startedAt) / 1000); }
+  sampleTime(now: number): number { return Math.min(this.end, this.start + Math.max(0, now - this.startedAt) / 1000); }
   sample(pose: Transform, now: number): void {
     if (this.mode !== 'recording') return;
     const next = { time: this.sampleTime(now), transform: transformSchema.parse(pose) };
     if (next.time < this.last.time) return;
     // Fixed-rate resampling makes filtering independent of headset refresh rate.
-    for (let at = this.start + this.raw.length / 30; at <= next.time + 1e-9; at = this.start + this.raw.length / 30) {
+    for (let at = this.start + this.raw.length / XR_RECORDING_HZ; at <= next.time + 1e-9; at = this.start + this.raw.length / XR_RECORDING_HZ) {
       const alpha = next.time > this.last.time ? Math.min(1, (at - this.last.time) / (next.time - this.last.time)) : 1;
-      this.raw.push({ time: Math.min(at, this.duration), transform: interpolatePose(this.last.transform, next.transform, alpha) });
+      this.raw.push({ time: Math.min(at, this.end), transform: interpolatePose(this.last.transform, next.transform, alpha) });
     }
     this.last = next; this.time = next.time; this.pose = structuredClone(next.transform);
-    if (this.time >= this.duration) this.stop();
+    if (this.time >= this.end) this.stop();
   }
   stop(): void {
     if (this.mode !== 'recording') return;
     if (this.time - this.start < .1 - 1e-9) { this.cancelGrip(); return; }
-    if (this.time - this.raw.at(-1)!.time > 1e-8) this.raw.push(structuredClone(this.last));
+    // Keep the exact release pose without adding a closely spaced extra key.
+    // A short take still needs its initial and final poses to be playable.
+    if (this.raw.length === 1 || this.time - this.raw.at(-1)!.time >= 1 / XR_RECORDING_HZ - 1e-8) this.raw.push(structuredClone(this.last));
     else this.raw[this.raw.length - 1] = structuredClone(this.last);
     this.processed = processRecording(this.raw);
     const current = animationFor(this.before) ?? emptyAnimation();

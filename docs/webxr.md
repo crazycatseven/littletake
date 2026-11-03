@@ -47,7 +47,7 @@ Recording is an opt-in mode; normal grip editing and existing keyboard performan
 
 1. Enter **Timeline**, select an object and scrub to the recording start time (leave at least 0.1 s before the scene ends).
 2. Press **Record** in the strip below the timeline. Hold trigger or grip on the selected object with either hand to start the clock. Near-sphere grabs record movement and rotation; distant ray grabs retain their translation-only behavior.
-3. Release the button used to grab to stop, or recording stops at the scene end. Motion is sampled at 30 Hz, lightly smoothed, then reduced to pose keys using 2 cm position and 3° rotation error limits relative to the smoothed samples. Endpoints are retained. A second reduction pass removes redundant keys while checking timed motion, so straight constant-speed segments can reduce to two endpoints and significant turns or pauses retain the nodes needed to stay within those limits.
+3. Release the button used to grab to stop, or recording stops at the scene end. Object and camera motion is sampled at 2 Hz (one stored pose every 0.5 seconds); live grabbing still updates every headset frame. A release between sampling ticks replaces the last sample to avoid an extra nearby key; very short takes retain their two endpoints. Motion is lightly smoothed, then reduced to pose keys using 2 cm position and 3° rotation error limits relative to the smoothed samples. Endpoints are retained. A second reduction pass removes redundant keys while checking timed motion, so straight constant-speed segments can reduce to two endpoints and significant turns or pauses retain the nodes needed to stay within those limits.
 4. **Preview** plays the processed take; the thumbstick and key markers can also inspect it. The strip shows the sample-to-key reduction. **Apply** writes position and rotation keys into the recorded interval; existing keys outside it and scale channels remain. Left **X** undoes the application as one step.
 5. **Discard** restores the original animation and start time. To retry, discard and press Record again. Leaving VR discards an unapplied take.
 
@@ -63,3 +63,19 @@ Trigger drag-selection shows a translucent range and updates selected markers wh
 Select the Shot to record before entering VR, then enter **Timeline** and select its camera model. Scrub to the desired scene time, press **Record**, and hold Grip or Trigger on the camera to move it. Near-sphere grabs capture both position and rotation; distant grabs only translate. Release to smooth and reduce the take, then **Preview**, **Apply**, or **Discard**, just as for objects.
 
 Camera keys and translucent poses appear on the timeline and support adding, multi-selecting and deleting keys. Apply updates the camera animation; Shots linked to that camera use the same motion. Existing Shot ranges and FOV animation are preserved. Recording uses scene time and stops at the scene end, not the Shot boundary; start and stop within the intended Shot range. X undoes Apply. Headset movement is not recorded automatically. Existing object recording is unchanged.
+
+
+## Handheld camera mode
+
+Choose an existing Shot on desktop, enter VR, then select the **clapperboard / Handheld camera** icon in the expanded menu. The camera appears in front of you with a live 16:9 monitor; Timeline opens automatically. This mode does not create or change the Shot range.
+
+- Hold **Grip** with either hand to frame the camera. Move and rotate the hand; framing stays temporary until Apply. Grip on a panel title still moves that panel.
+- While holding the camera, press **Trigger** to start recording and press it again to stop. Trigger release does not stop. Releasing Grip also stops, and the take automatically ends at the Shot boundary.
+- The monitor shows READY / REC / REVIEW, elapsed time and controls. Rendering is limited to 640?360 at 20 Hz; VR menus and controllers are excluded from the picture.
+- Use **Preview / Apply / Discard** below the timeline. Apply saves the smoothed, reduced camera keys in one undo step, preserving lens animation and keys outside the take. Apply or Discard exits handheld mode; enter again to retry.
+- Before recording, press the clapperboard again to leave without saving. Tracking loss cancels the current take back to Ready. Leaving VR discards an unapplied take.
+
+Normal Timeline object/camera grab recording keeps its existing Trigger / Grip behavior. Handheld mode uses fixed smoothing after capture; the live monitor shows the unsmoothed camera pose. Select the intended Shot before entering VR; in-headset Shot creation and switching are not included.
+
+
+**Dual-Grip priority:** holding both Grips always starts Grab Move, even over an object, camera or panel. An unfinished grab or recording is cancelled first; camera-follow returns to free view. Release one Grip to continue one-hand navigation, then release both before grabbing an object again. Existing horizontal-only rotation and two-hand scaling remain unchanged.

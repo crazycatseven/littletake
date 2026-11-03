@@ -54,7 +54,7 @@ for (const target of ['object', 'camera'] as const) test(`${target}: opt-in XR r
     controllers.forEach((controller)=>controller.dispatchEvent({type:'connected',data:{gripSpace:{}}} as never));
     click(5);click(XR_RECORD);assert.equal(mode(),'armed');
     grips[0].position.set(0,0,-2);controls.update(frame);fire('selectstart');assert.equal(mode(),'recording');
-    fire('squeezestart',1); // A second hand cannot take over the object or start navigation.
+    fire('squeezestart',1); fire('squeezeend',1); // One Grip cannot take over a trigger-owned recording.
     for(let i=1;i<=30;i++){now+=1000/30;grips[0].position.x=i/30;controls.update(frame);}
     fire('selectend');assert.equal(mode(),'review');assert.deepEqual(item,before);assert.equal(ordinary,0);
     grips[0].position.set(0,0,0);controls.update(frame);
@@ -68,6 +68,16 @@ for (const target of ['object', 'camera'] as const) test(`${target}: opt-in XR r
     tracked=true;grips[0].position.set(0,0,0);controls.update(frame);click(XR_RECORD_DISCARD);assert.equal(take,null);
     grips[0].position.copy(object.position);controls.update(frame);fire('squeezestart');controls.update(frame);fire('squeezeend');assert.equal(ordinary,3);
     assert.deepEqual(actions,['record','preview','apply','record','discard']);
+    // Grip on the object, then a second Grip: cancel the edit and navigate instead.
+    const ordinaryBefore=ordinary,rigBefore=controls.rig.position.clone();
+    grips[0].position.copy(object.position);controls.update(frame);fire('squeezestart');
+    fire('squeezestart',1);assert.equal(ordinary,ordinaryBefore+2); // start + cancel, never commit
+    grips[0].position.x+=.3;grips[1].position.x+=.3;controls.updateView(frame);controls.update(frame);
+    assert.notDeepEqual(controls.rig.position,rigBefore);assert.equal(ordinary,ordinaryBefore+2);
+    fire('squeezeend',1);grips[0].position.x+=.2;controls.updateView(frame);controls.update(frame);
+    assert.equal(ordinary,ordinaryBefore+2); // remaining Grip stays navigation-only
+    fire('squeezeend');
+
   }finally{
     controls.dispose();object.geometry.dispose();(object.material as THREE.Material).dispose();
     if(previous)Object.defineProperty(globalThis,'document',previous);else Reflect.deleteProperty(globalThis,'document');

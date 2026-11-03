@@ -1,5 +1,6 @@
+import type { HandheldAction, HandheldState } from './handheld';
 import * as THREE from 'three';
-import { XRMenu, XR_MENU_TOGGLE, XR_MENU_DRAG, XR_TIMELINE_DRAG, XR_ADD_KEY, XR_DELETE_KEY, XR_RECORD, XR_RECORD_PREVIEW, XR_RECORD_APPLY, XR_RECORD_DISCARD } from './menu';
+import { XRMenu, XR_MENU_TOGGLE, XR_MENU_DRAG, XR_TIMELINE_DRAG, XR_ADD_KEY, XR_DELETE_KEY, XR_RECORD, XR_RECORD_PREVIEW, XR_RECORD_APPLY, XR_RECORD_DISCARD, XR_HANDHELD } from './menu';
 import type { XRRecordAction } from './recording';
 import { XRMenuSpace } from './menu-space';
 import { menuButtonBinding } from './buttons';
@@ -30,6 +31,9 @@ export function rotatedGrab(start: Transform, origin: THREE.Vector3, current: TH
 }
 
 interface Options {
+  handheldState?(): HandheldState;
+  handheldAction?(action: HandheldAction): boolean;
+  handheldPose?(pose: Transform): void;
   timelineState?(): XRTimelineState;
   timelineObject?(id: string): THREE.Object3D | undefined;
   seek?(time: number): void;
@@ -76,6 +80,7 @@ export class XRControls {
   private nearTracked = new Map<number, boolean>();
   private raycaster = new THREE.Raycaster();
   private sources = new Map<number, XRInputSource>();
+  private gripPressed = new Set<number>();
   private buttonPressed = new Map<number, boolean[]>();
   private menuPressed = new Map<number, { index: number; pressed: boolean }>();
   private controllers: THREE.Group[] = [];
@@ -93,6 +98,7 @@ export class XRControls {
   private menuNeedsPlacement = true;
   private cleanups: (() => void)[] = [];
   private grab: { index: number; input: 'grip' | 'trigger'; id: string; start: Transform; origin: THREE.Vector3; orientation: THREE.Quaternion; latest: Transform; near: boolean } | null = null;
+  private heldCamera: { index: number; start: Transform; origin: THREE.Vector3; orientation: THREE.Quaternion } | null = null;
   private locomotion: NavigationGrab | null = null;
   private session: XRSession | null = null;
   private reference: XRReferenceSpace | null = null;
@@ -120,14 +126,26 @@ export class XRControls {
       this.pointers.push(new XRPointerFeedback(controller));
       const outline = new XRObjectOutline(); this.hoverOutlines.push(outline); this.feedbackRoot.add(outline.root);
       const connected = (event: { data: XRInputSource }) => { this.sources.set(index, event.data); this.buttonPressed.set(index, [4, 5].map(button => !!event.data.gamepad?.buttons?.[button]?.pressed)); const binding = menuButtonBinding(event.data); if (binding) this.menuPressed.set(index, { index: binding.index, pressed: !!event.data.gamepad?.buttons[binding.index]?.pressed }); this.nearTracked.set(index, true); visual.connect(event.data); };
-      const disconnected = () => { visual.disconnect(); this.pointers[index].root.visible = false; this.hoverOutlines[index].root.visible = false; this.buttonPressed.delete(index); this.nearSelection.clear(index); this.nearTracked.delete(index); if (this.keyDrag?.index === index || this.menuDrag === index || this.grab?.index === index || this.locomotion?.indices.includes(index)) this.finish(true); this.sources.delete(index); this.resetTimelineInput(); };
+      const disconnected = () => { this.gripPressed.delete(index); visual.disconnect(); this.pointers[index].root.visible = false; this.hoverOutlines[index].root.visible = false; this.buttonPressed.delete(index); this.nearSelection.clear(index); this.nearTracked.delete(index); if (this.heldCamera?.index === index || this.keyDrag?.index === index || this.menuDrag === index || this.grab?.index === index || this.locomotion?.indices.includes(index)) this.finish(true); this.sources.delete(index); this.resetTimelineInput(); };
       const select = () => this.select(index);
       const selectRelease = () => {
         if(this.keyDrag?.index===index){this.updateKeyDrag();this.keyDrag=null;this.resetTimelineInput();this.syncTimeline(this.options.timelineState?.()??null);}
         if (this.grab?.index === index && this.grab.input === 'trigger') this.finish(false);
       };
-      const squeeze = () => this.begin(index);
+      const squeeze = () => {
+        this.gripPressed.add(index);
+        const hands=[...this.gripPressed].filter(hand=>this.sources.get(hand)?.gripSpace&&this.controllers[hand].visible&&this.grips[hand].visible&&this.nearTracked.get(hand)!==false);
+        if(hands.length===2&&this.session?.visibilityState==='visible'){
+          // Dual grip owns navigation even when either hand is over an object or panel.
+          // Cancel an unfinished edit/take before changing the user's reference frame.
+          this.finish(true);this.leaveCamera();this.nearSelection.clear();this.resetTimelineInput();
+          this.locomotion=this.navigationGrab(hands);return;
+        }
+        this.begin(index);
+      };
       const release = () => {
+        this.gripPressed.delete(index);
+        if(this.heldCamera?.index===index){this.options.handheldAction?.('stop');this.heldCamera=null;return;}
         if (this.menuDrag === index || this.grab?.index === index && this.grab.input === 'grip') this.finish(false);
         else if (this.locomotion?.indices.includes(index)) {
           const remaining = this.locomotion.indices.filter(hand => hand !== index);
@@ -169,7 +187,7 @@ export class XRControls {
     this.leaveCamera();
     this.session?.removeEventListener('visibilitychange', this.visibility);
     this.reference?.removeEventListener('reset', this.reset); this.reference = null;
-    this.session = null; this.sources.clear(); this.rig.visible = false;
+    this.session = null; this.sources.clear(); this.gripPressed.clear(); this.rig.visible = false;
     this.menuRoot.visible = false;
     this.feedbackRoot.visible = false; this.selectionFeedback.sync([], 1);
     this.pointers.forEach(pointer => pointer.root.visible = false);
@@ -178,8 +196,8 @@ export class XRControls {
     this.nearTracked.clear(); this.nearSelection.clear();
     this.controllerVisuals.forEach(visual => visual.disconnect());
   }
-  private visibility = () => { this.buttonPressed.clear(); this.menuPressed.clear(); this.resetTimelineInput(); if (this.session?.visibilityState !== 'visible') { this.finish(true); this.nearSelection.clear(); } };
-  private reset = () => { this.resetTimelineInput(); this.finish(true); this.leaveCamera(); this.nearSelection.clear(); this.menuNeedsPlacement = true; };
+  private visibility = () => { this.buttonPressed.clear(); this.menuPressed.clear(); this.resetTimelineInput(); if (this.session?.visibilityState !== 'visible') { this.gripPressed.clear(); this.finish(true); this.nearSelection.clear(); } };
+  private reset = () => { this.gripPressed.clear(); this.resetTimelineInput(); this.finish(true); this.leaveCamera(); this.nearSelection.clear(); this.menuNeedsPlacement = true; };
 
   private menuHead(): THREE.Matrix4 {
     this.rig.updateWorldMatrix(true, false);
@@ -316,7 +334,7 @@ export class XRControls {
   }
   private syncMenu(): void {
     const playback = this.options.menuState?.() ?? { playing: false, canUndo: false };
-    this.menu.setState({ ...playback, following: this.following, hasCamera: !!this.options.followCamera?.(), scale: this.following ? 1 : 1 / this.rig.scale.x, timeline: this.timeline, dragging: this.menuDrag !== null && !this.draggingTimeline, timelineDragging: this.menuDrag !== null && this.draggingTimeline });
+    this.menu.setState({ ...playback, handheld:!!this.options.handheldState?.().id, canHandheld:!!this.options.handheldState?.().available, following: this.following, hasCamera: !!this.options.followCamera?.(), scale: this.following ? 1 : 1 / this.rig.scale.x, timeline: this.timeline, dragging: this.menuDrag !== null && !this.draggingTimeline, timelineDragging: this.menuDrag !== null && this.draggingTimeline });
     const idle = !this.keyDrag && !this.grab && !this.locomotion && this.menuDrag === null && this.recordingMode()==='idle';
     this.controllerVisuals.forEach(visual => visual.setState({ playing: playback.playing, canUndo: idle && playback.canUndo, canPlay: idle, canMenu: idle }));
   }
@@ -343,7 +361,7 @@ export class XRControls {
   }
   private updateNear(index: number): NearSelection {
     const source = this.sources.get(index);
-    const enabled = this.session?.visibilityState === 'visible' && !!source?.gripSpace && this.nearTracked.get(index) !== false &&
+    const enabled = !this.options.handheldState?.().id && this.session?.visibilityState === 'visible' && !!source?.gripSpace && this.nearTracked.get(index) !== false &&
       this.controllers[index].visible && this.grips[index].visible && this.options.editable() && (!this.following || this.timeline) &&
       !this.keyDrag && !this.locomotion && this.menuDrag === null && this.recordingMode()!=='review' && (!this.grab || this.grab.index === index);
     let targets = this.options.targets();
@@ -352,6 +370,18 @@ export class XRControls {
     return this.nearSelection.update(index, targets, enabled, this.rig.scale.x, held);
   }
   private select(index: number): void {
+    if(this.heldCamera){
+      if(this.heldCamera.index===index){
+        const mode=this.options.handheldState?.().mode;
+        if(mode==='armed'||mode==='recording'){
+          this.options.handheldAction?.(mode==='armed'?'start':'stop');
+          const actuator=this.sources.get(index)?.gamepad?.hapticActuators?.[0];
+          void actuator?.pulse(.5,60).catch(()=>{});
+          if(this.options.handheldState?.().mode==='review')this.heldCamera=null;
+        }
+      }
+      return;
+    }
     if (this.keyDrag || this.grab || this.locomotion || this.menuDrag !== null) return;
     const near = this.updateNear(index);
     if (near.active) {
@@ -387,6 +417,21 @@ export class XRControls {
       if (action === XR_MENU_TOGGLE) {
         this.toggleMenu();
       }
+      else if (action === XR_HANDHELD) {
+        if(this.options.handheldState?.().id)this.options.handheldAction?.('exit');
+        else {
+          this.leaveCamera();this.setTimeline(true);
+          if(this.options.handheldAction?.('enter')){
+            const id=this.options.handheldState?.().id,pose=id?this.options.pose(id):undefined;
+            if(pose){
+              const head=this.menuHead(),position=new THREE.Vector3(0,-.15,-.55).applyMatrix4(head);
+              const rotation=new THREE.Euler().setFromRotationMatrix(new THREE.Matrix4().extractRotation(head));
+              this.options.handheldPose?.({...pose,position:position.toArray(),rotation:[rotation.x,rotation.y,rotation.z].map(THREE.MathUtils.radToDeg) as Transform['rotation']});
+            }
+          }
+        }
+        this.syncMenu();this.syncTimeline(this.options.timelineState?.()??null);
+      }
       else if (action === 5) this.setTimeline(!this.timeline);
       else if (action === XR_ADD_KEY && this.timeline && this.options.editable()) {
         this.options.addKeyframe?.(); this.resetTimelineInput(); this.syncTimeline(this.options.timelineState!());
@@ -398,10 +443,11 @@ export class XRControls {
       else if (action === 2) void this.session?.end().catch(() => {});
       return;
     }
+    if(this.options.handheldState?.().id)return;
     const id = this.entity(hit); if (id) this.beginObject(index, id, false, 'trigger');
   }
   private begin(index: number): void {
-    if(this.keyDrag)return;
+    if(this.keyDrag||this.heldCamera||this.locomotion)return;
     if (this.grab || this.menuDrag !== null || this.session?.visibilityState !== 'visible' || !this.controllers[index].visible || !this.grips[index].visible || !this.sources.get(index)?.gripSpace) return;
     // Grip edits the real object even when a preview is in front of it. A lone
     // preview still blocks empty-space navigation; only trigger selects a key.
@@ -418,14 +464,17 @@ export class XRControls {
       (timelineDrag ? this.timelineSpace : this.menuSpace).begin(point, grip); this.nearSelection.clear(); this.resetTimelineInput();
       return;
     }
+    const handheld=this.options.handheldState?.();
+    if(handheld?.id){
+      if(handheld.mode!=='armed'||!this.options.editable())return;
+      const start=this.options.pose(handheld.id);if(!start)return;
+      this.heldCamera={index,start,origin:grip,orientation:this.grips[index].getWorldQuaternion(new THREE.Quaternion())};
+      return;
+    }
     if(this.recordingMode()==='review')return;
     if (this.following && !this.timeline) return;
     if (near.active && !near.target) return;
     const hit = near.active ? undefined : this.hit(index, false) ?? this.hit(index);
-    if (this.locomotion) {
-      if (!hit && !this.locomotion.indices.includes(index)) this.locomotion = this.navigationGrab([...this.locomotion.indices, index]);
-      return;
-    }
     // UI and objects own their grip gestures, even when editing is locked.
     if (!hit && !near.target) {
       if(this.recordingMode()!=='idle')return;
@@ -524,6 +573,7 @@ export class XRControls {
 
   update(frame?: XRFrame): void {
     if (!this.session) return;
+    this.updateHeldCamera(frame);
     this.updateKeyDrag(frame);
     this.updateControllerButtons(); this.syncMenu();
     const hovered: number[] = [];
@@ -536,7 +586,7 @@ export class XRControls {
       this.hoverOutlines[index].root.visible = false;
       // Use the same grip-space radius and title target as begin(), even when
       // an object's near sphere would otherwise suppress ray hover feedback.
-      const canInteract = !this.keyDrag && !this.grab && !this.locomotion && this.menuDrag === null;
+      const canInteract = !this.heldCamera && !this.keyDrag && !this.grab && !this.locomotion && this.menuDrag === null;
       if (canInteract && this.session?.visibilityState === 'visible' && this.controllers[index].visible &&
           this.grips[index].visible && this.nearTracked.get(index)) {
         const grip = this.grips[index].getWorldPosition(new THREE.Vector3());
@@ -561,7 +611,7 @@ export class XRControls {
       const keyTime = hit && this.timeline && canInteract ? this.menu.keyframeTime(hit) ?? this.keyframeGhosts.timeAt(hit) : undefined;
       if (keyTime !== undefined) hoveredKey = keyTime;
       if (canInteract && typeof action === 'number' && this.menu.enabled(action)) hovered.push(action);
-      const held = this.keyDrag?.index === index || this.grab?.index === index || this.menuDrag === index || !!this.locomotion?.indices.includes(index);
+      const held = this.heldCamera?.index === index || this.keyDrag?.index === index || this.grab?.index === index || this.menuDrag === index || !!this.locomotion?.indices.includes(index);
       const actionable = canInteract && (keyTime !== undefined || (action !== undefined ? this.menu.enabled(action) : !!hit && this.options.editable() && (!this.following || this.timeline)));
       const color = held ? XR_FEEDBACK.held : actionable ? XR_FEEDBACK.ready : hit ? XR_FEEDBACK.disabled : XR_FEEDBACK.idle;
       this.pointers[index].update(true, hit ? hit.distance / this.rig.scale.x : held ? .3 : 8, !!hit, color, held || actionable);
@@ -588,7 +638,18 @@ export class XRControls {
       if (!grab.near) this.hoverOutlines[grab.index].update(this.options.targets().find(target => target.userData.entityId === grab.id), this.rig.scale.x, XR_FEEDBACK.held);
     }
   }
+  private updateHeldCamera(frame?: XRFrame): void {
+    const held=this.heldCamera;if(!held)return;
+    const state=this.options.handheldState?.(),source=this.sources.get(held.index);
+    if(!state?.id||state.mode==='review'){this.heldCamera=null;return;}
+    if(!this.options.editable()||this.session?.visibilityState!=='visible'||!source?.gripSpace||!this.reference||!frame?.getPose(source.gripSpace,this.reference)){
+      this.options.handheldAction?.('cancel');this.heldCamera=null;return;
+    }
+    const grip=this.grips[held.index];
+    this.options.handheldPose?.(rotatedGrab(held.start,held.origin,grip.getWorldPosition(new THREE.Vector3()),held.orientation,grip.getWorldQuaternion(new THREE.Quaternion())));
+  }
   private finish(cancel: boolean): void {
+    if(this.heldCamera){this.options.handheldAction?.(cancel?'cancel':'stop');this.heldCamera=null;}
     this.keyDrag=null;
     this.menuDrag = null; this.draggingTimeline = false; this.menuSpace.end(); this.timelineSpace.end();
     this.locomotion = null;

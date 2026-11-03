@@ -1,3 +1,4 @@
+import { XRViewfinder } from './xr/handheld';
 import { sceneWorldMatrices, matrixTransform, hierarchyRoots, sceneEntities, effectivelyHidden, descendants } from './placement/hierarchy';
 import * as THREE from 'three';
 import { XRControls } from './xr/controls';
@@ -77,6 +78,8 @@ export class Stage {
   private readonly perspectiveCamera = new THREE.PerspectiveCamera(45, 1, 0.05, 500);
   private readonly orthographicCamera = new THREE.OrthographicCamera(-10, 10, 10, -10, .05, 500);
   private editorCamera: THREE.PerspectiveCamera | THREE.OrthographicCamera = this.perspectiveCamera;
+  private xrViewfinder?: XRViewfinder;
+  private readonly handheldCamera = new THREE.PerspectiveCamera(45,16/9,.05,500);
   private readonly shotCamera = new THREE.PerspectiveCamera(45, 16 / 9, 0.05, 500);
   private readonly renderer: THREE.WebGLRenderer;
   private readonly previewRenderer: THREE.WebGLRenderer;
@@ -263,12 +266,16 @@ export class Stage {
         addKeyframe: this.options.onXRAddKeyframe,
         deleteKeyframe: this.options.onXRDeleteKeyframe,
         recordAction: this.options.onXRRecordAction,
+        handheldState: this.options.xrHandheldState,
+        handheldAction: this.options.onXRHandheldAction,
+        handheldPose: this.options.onXRHandheldPose,
         timelineObject: id => this.rootFor(id),
         seek: time => this.options.onXRSeek?.(time),
         timelineChanged: active => this.options.onXRTimelineChange?.(active),
         menuState: () => this.options.xrMenuState?.() ?? { playing: this.playing, canUndo: false },
       });
       this.scene.add(this.xrControls.rig, this.xrControls.menuRoot, this.xrControls.timelineRoot, this.xrControls.keyframeGhosts.root, this.xrControls.nearSelection.root, this.xrControls.feedbackRoot);
+      if(!this.xrViewfinder){this.xrViewfinder=new XRViewfinder();this.scene.add(this.xrViewfinder.root);}
       await this.renderer.xr.setSession(session);
       this.xrControls.start(session, this.orbit.target);
     } catch (error) {
@@ -288,6 +295,7 @@ export class Stage {
   };
 
   private onXREnd = (): void => {
+    if(this.xrViewfinder)this.xrViewfinder.root.visible=false;
     this.xrControls?.stop(); this.lastFrame = 0;
     for (const view of this.views.values()) setXRObjectCulling(view.root, false);
     this.scene.traverse(node => { if (node !== this.xrControls?.camera && node.layers.isEnabled(3)) { node.layers.disable(3); node.layers.enable(1); } });
@@ -618,6 +626,7 @@ export class Stage {
     this.fixedMaterials.forEach((material) => material.dispose());
     this.sun.shadow.dispose();
     this.scene.clear();
+    this.xrViewfinder?.dispose();
     this.renderer.dispose();
     this.previewRenderer.dispose();
     this.renderer.domElement.remove();
@@ -1287,6 +1296,11 @@ export class Stage {
       this.renderer.xr.updateCamera(this.xrControls.camera);
       this.xrControls.update(frame);
       this.syncSelectionMarker();
+      const handheld=this.options.xrHandheldState?.()??{available:false};
+      const source=this.currentDoc?.cameras.find(camera=>camera.id===handheld.id),root=handheld.id?this.rootFor(handheld.id):undefined;
+      if(source&&root){this.applyPose(this.handheldCamera,this.readPose(root),false);this.handheldCamera.fov=evaluateFov(source,this.currentTime);}
+      this.xrViewfinder?.render(this.renderer,this.scene,this.handheldCamera,handheld,time,this.xrControls.rig.scale.x,
+        [this.xrControls.rig,this.xrControls.menuRoot,this.xrControls.timelineRoot,this.xrControls.keyframeGhosts.root,this.xrControls.nearSelection.root,this.xrControls.feedbackRoot]);
       this.renderer.render(this.scene, this.xrControls.camera);
       return;
     }

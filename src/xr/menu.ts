@@ -4,7 +4,8 @@ import { MenuTexture } from './texture';
 import { keyframeAtTimeline, xrTimelineSvg, type XRTimelineState } from './timeline';
 import type { XRRecordingState } from './recording';
 
-export interface XRMenuState { playing: boolean; canUndo: boolean; following: boolean; hasCamera: boolean; scale: number; timeline?: boolean; dragging?: boolean; timelineDragging?: boolean }
+export const XR_HANDHELD = 14;
+export interface XRMenuState { handheld?: boolean; canHandheld?: boolean; playing: boolean; canUndo: boolean; following: boolean; hasCamera: boolean; scale: number; timeline?: boolean; dragging?: boolean; timelineDragging?: boolean }
 export const XR_MENU_TOGGLE = 4;
 export const XR_MENU_DRAG = 6;
 export const XR_TIMELINE_DRAG = 7;
@@ -13,7 +14,7 @@ export const XR_DELETE_KEY = 9;
 export const XR_RECORD = 10, XR_RECORD_PREVIEW = 11, XR_RECORD_APPLY = 12, XR_RECORD_DISCARD = 13;
 export function xrRecordingSvg(state: XRRecordingState, hovered: ReadonlySet<number> = new Set()): string {
   const review = state.mode === 'review', active = state.mode !== 'idle';
-  const status = state.mode === 'recording' ? 'Recording · Release to smooth and review' : state.mode === 'armed' ? 'Ready · Hold trigger or grip on the selected object or camera' : review ? `Smoothed take · ${state.samples} samples → ${state.keys} pose keys · Apply replaces this time range` : 'Single-hand recording · Select an object or camera, then Record';
+  const status = state.handheld ? state.mode === 'recording' ? 'Handheld camera ? Trigger or release Grip to stop' : state.mode === 'armed' ? 'Hold Grip to frame ? Trigger to start recording' : `Camera take ? ${state.samples} samples ? ${state.keys} pose keys ? Preview, Apply or Discard` : state.mode === 'recording' ? 'Recording · Release to smooth and review' : state.mode === 'armed' ? 'Ready · Hold trigger or grip on the selected object or camera' : review ? `Smoothed take · ${state.samples} samples → ${state.keys} pose keys · Apply replaces this time range` : 'Single-hand recording · Select an object or camera, then Record';
   const labels = [state.mode === 'recording' ? 'Recording' : state.mode === 'armed' ? 'Armed' : 'Record', state.previewing ? 'Pause preview' : 'Preview', 'Apply', 'Discard'];
   const enabled = [!active && state.canRecord, review, review, active && state.mode !== 'recording'];
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="180" viewBox="0 0 1440 180"><rect x="4" y="4" width="1432" height="172" rx="20" fill="#182b26" stroke="${active ? '#ffbd66' : '#587167'}" stroke-width="3"/>
@@ -23,12 +24,12 @@ export function xrRecordingSvg(state: XRRecordingState, hovered: ReadonlySet<num
 
 /** Shared SVG source for browser textures and offline visual verification. */
 export function xrMenuSvg(state: XRMenuState, hovered: ReadonlySet<number> = new Set()): string {
-  const actions = [3, 5, 2];
-  const labels = [state.hasCamera ? state.following ? 'Free view' : 'Follow camera' : 'No camera', state.timeline ? 'Exit timeline' : 'Timeline', 'Exit VR'];
-  const symbols = [state.following ? 'focus' : 'camera', 'timeline', 'exit'] as const;
+  const actions = [3, 5, XR_HANDHELD, 2];
+  const labels = [state.hasCamera ? state.following ? 'Free view' : 'Follow camera' : 'No camera', state.timeline ? 'Exit timeline' : 'Timeline', state.handheld ? 'Leave camera' : 'Handheld camera', 'Exit VR'];
+  const symbols = [state.following ? 'focus' : 'camera', 'timeline', 'film', 'exit'] as const;
   const cells = actions.map((action, i) => {
-    const disabled = action === 3 && !state.hasCamera;
-    const hover = !disabled && hovered.has(action), active = action === 5 && state.timeline || action === 3 && state.following;
+    const disabled = action === 3 && !state.hasCamera || action === XR_HANDHELD && !state.canHandheld && !state.handheld;
+    const hover = !disabled && hovered.has(action), active = action === 5 && state.timeline || action === 3 && state.following || action === XR_HANDHELD && state.handheld;
     const fill = disabled ? '#253432' : hover ? '#c9f86b' : active ? '#35554d' : '#182b26';
     const ink = disabled ? '#789084' : hover ? '#10231e' : action === 2 ? '#efc9b4' : '#f6f3e9';
     const x = 120 + i * 240;
@@ -39,10 +40,10 @@ export function xrMenuSvg(state: XRMenuState, hovered: ReadonlySet<number> = new
   const titleActive = state.dragging || hovered.has(XR_MENU_DRAG);
   const hoveredIndex = actions.findIndex(action => hovered.has(action));
   const hint = state.dragging ? 'Release to place' : titleActive ? 'Hold grip to move' : hoveredIndex >= 0 ? labels[hoveredIndex] : '';
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="320" viewBox="0 0 720 320">
-    <rect x="240" y="10" width="240" height="40" rx="20" fill="${state.dragging ? '#ffbd66' : titleActive ? '#c9f86b' : '#182b26'}" stroke="#587167" stroke-width="2"/>
-    ${icon('grip-horizontal',{x:326,y:14,width:68,height:32,color:titleActive?'#10231e':'#c7d6ce'})}
-    ${cells}${hint ? `<rect x="200" y="268" width="320" height="48" rx="12" fill="#182b26"/><text x="360" y="301" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" fill="#f6f3e9" font-size="28">${hint}</text>` : ''}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="320" viewBox="0 0 960 320">
+    <rect x="360" y="10" width="240" height="40" rx="20" fill="${state.dragging ? '#ffbd66' : titleActive ? '#c9f86b' : '#182b26'}" stroke="#587167" stroke-width="2"/>
+    ${icon('grip-horizontal',{x:446,y:14,width:68,height:32,color:titleActive?'#10231e':'#c7d6ce'})}
+    ${cells}${hint ? `<rect x="320" y="268" width="320" height="48" rx="12" fill="#182b26"/><text x="480" y="301" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" fill="#f6f3e9" font-size="28">${hint}</text>` : ''}</svg>`;
 }
 export function xrMenuHandleSvg(expanded: boolean, hovered = false): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
@@ -60,7 +61,7 @@ export class XRMenu {
   private hovered = new Set<number>();
   private stateKey = '';
   private hoverKey = '';
-  private panelTexture = new MenuTexture(720, 320);
+  private panelTexture = new MenuTexture(960, 320);
   private handleTexture = new MenuTexture(200, 200);
   private timelineTexture = new MenuTexture(1440, 400);
   private recordingTexture = new MenuTexture(1440, 180);
@@ -77,15 +78,15 @@ export class XRMenu {
   private title: THREE.Mesh;
   private buttons: THREE.Mesh[] = [];
   constructor() {
-    this.panel = this.plane(.36, .16, this.panelTexture.texture);
-    this.panel.position.set(.24, 0, 0);
+    this.panel = this.plane(.48, .16, this.panelTexture.texture);
+    this.panel.position.set(.30, 0, 0);
     this.panel.userData.xrAction = -1;
     this.handle = this.plane(.1, .1, this.handleTexture.texture);
     this.handle.position.set(0, 0, 0); this.handle.userData.xrAction = XR_MENU_TOGGLE;
     this.title = this.plane(.12, .02);
-    this.title.position.set(.24, .065, .002);
+    this.title.position.set(.30, .065, .002);
     this.title.userData.xrAction = XR_MENU_DRAG;
-    [3, 5, 2].forEach((action, index) => {
+    [3, 5, XR_HANDHELD, 2].forEach((action, index) => {
       const button = this.plane(.09, .09);
       button.position.set(.12 + index * .12, 0, .001);
       button.userData.xrAction = action; this.buttons.push(button);
@@ -130,6 +131,7 @@ export class XRMenu {
   }
   enabled(action: number): boolean {
     const recording=this.timelineState?.recording,active=!!recording&&recording.mode!=='idle';
+    if(action===XR_HANDHELD)return this.expanded&&(this.state.handheld?recording?.mode==='armed':!active&&!!this.state.canHandheld);
     if(active && [3,5,XR_ADD_KEY,XR_DELETE_KEY].includes(action))return false;
     if(action>=XR_RECORD&&action<=XR_RECORD_DISCARD){
       if(!this.timelineRoot.visible||!recording)return false;

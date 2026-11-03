@@ -250,7 +250,7 @@ test('title grip moves only the menu, preserves its grabbed point and stops on r
       const origin = grips[0].getWorldPosition(new THREE.Vector3());
       const local = controls.menuRoot.worldToLocal(point.clone());
       const position = controls.menuRoot.position.clone(), orientation = controls.menuRoot.quaternion.clone();
-      fire('squeezestart'); fire('squeezestart', 1); // A second hand must not start locomotion.
+      fire('squeezestart'); // Single-hand panel drag; dual grip is tested separately.
       const dragTime = time;
       axes[2] = 1; buttons[4].pressed = true; buttons[5].pressed = true;
       grips[0].position.add(new THREE.Vector3(.2, .15, -.3)); grips[0].rotation.set(.8, .4, .6);
