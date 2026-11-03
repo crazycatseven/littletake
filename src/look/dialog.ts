@@ -11,6 +11,8 @@ import type { Workspace } from '../project/workspace';
 import { copyText } from '../clipboard';
 import { museInstruction, videoPrompt } from './handoff';
 import { MAX_OUTPUT_BYTES } from '../project/room';
+import { loadAppearance } from '../appearance/images';
+import { appearanceFile, appearanceInstructions, type AppearanceImage } from '../appearance/model';
 
 interface Frame { time: number; label: string; previs: string; boxes: Map<string, [number, number, number, number]>; result?: string; savedId?: string; message: string; state: 'waiting' | 'running' | 'done' | 'failed' }
 
@@ -33,9 +35,9 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
     <label>Style reference <span>(optional)</span><input type="file" accept="image/png,image/jpeg,image/webp"></label>
     <label class="look-check"><input type="checkbox" data-anchor checked> Keep the look consistent across frames and shots</label>
     <p class="look-anchor" hidden>Matching the approved look of this scene · <button data-reset>Reset look</button></p>
-    <p class="look-note">Styles the first, middle and last reference only. At most 3 Muse Image calls; storyboards keep the original composition and timing.</p><button data-render>Generate up to 3 styled frames</button></details></fieldset></div>
+    <p class="look-note">Styles the first, middle and last reference only. At most 3 Muse Image calls; storyboards keep the original composition and timing.</p><button data-render>Generate up to 3 styled frames</button></details>
     <section class="look-brief"><div class="look-brief-head"><label for="museVideoPrompt">Prompt for Muse</label><button data-copy>Copy full prompt</button></div><textarea id="museVideoPrompt" data-prompt rows="10" maxlength="12000" placeholder="Generate a prompt from your shot, or write your own here. You can edit every part before copying or exporting."></textarea></section>
-    <p class="look-message" role="status"></p><div class="look-actions"><button data-cancel hidden>Cancel</button><button data-package class="primary-button">Download storyboards & prompt</button><a data-open-muse href="https://muse.ai/" target="_blank" rel="noopener noreferrer">Open Muse ${icon('external')}</a></div><p class="look-upload-help">In Muse, attach the first-frame image and all storyboard pages, then paste the prompt. These are image inputs; render a video separately in the Video tab.</p>
+    </fieldset></div><footer class="look-footer"><p class="look-message" role="status"></p><div class="look-actions"><button data-cancel hidden>Cancel</button><button data-package class="primary-button">Download storyboards & prompt</button><a data-open-muse href="https://muse.ai/" target="_blank" rel="noopener noreferrer">Open Muse ${icon('external')}</a></div><p class="look-upload-help">In Muse, attach the first-frame image, all storyboard pages and the bound appearance images, then paste the prompt. These are image inputs; render a video separately in the Video tab.</p></footer>
     <details class="look-handoffs"><summary>Share a reference link or import the finished video</summary><p>Publish a fixed page with these images and this prompt. Anyone with the link can view it. Send it to Muse manually; generation does not start here.</p><div data-handoffs></div><textarea data-instruction readonly hidden aria-label="Muse instruction"></textarea><div class="look-handoff-actions"><button data-publish>Create reference link</button><button data-instruction-copy hidden>Copy instruction and link</button><button data-import-video>Import finished video</button><input data-video type="file" accept="video/mp4,video/webm" hidden></div></details>`;
   const find = <T extends HTMLElement = HTMLElement>(selector: string) => dialog.querySelector<T>(selector)!;
   find('.look-subtitle').textContent = `${shot.name} · ${camera.name} · ${shot.duration.toFixed(2)}s. Prepare images and an editable prompt for Muse.`;
@@ -45,6 +47,21 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
   let anchor: string | undefined, loading = true, uploading = false;
   let publication: { id: string; archive: Blob } | null = null;
   const room = workspace.room;
+  let appearance: AppearanceImage[] = [], appearanceError = '';
+  find('.look-settings').insertAdjacentHTML('afterbegin', '<section class="look-appearance" hidden><h3>Object appearance</h3><p>Bound to the objects in this shot. Included in the prompt and download.</p><div class="look-appearance-images"></div></section>');
+  const loadReferences = async () => {
+    try {
+      appearance = await loadAppearance(workspace, doc, new Set(frames.flatMap(frame => [...frame.boxes.keys()])), room);
+      appearanceError = '';
+      find('.look-appearance').hidden = !appearance.length;
+      find('.look-appearance-images').replaceChildren(...appearance.map(reference => {
+        const figure = document.createElement('figure'), image = new Image(), caption = document.createElement('figcaption'), link = document.createElement('a');
+        image.src = reference.image; image.alt = reference.bindings.map(binding => binding.objectName).join(', ');
+        caption.textContent = reference.bindings.map(binding => `${binding.objectName} · ${binding.primary ? 'Primary' : 'Detail'}`).join('; ');
+        link.href = reference.image; link.download = appearanceFile(reference); link.title = 'Download appearance reference'; link.append(image); figure.append(link, caption); return figure;
+      }));
+    } catch (error) { appearanceError = (error as Error).message; throw error; }
+  };
   const save = (kind: 'look-frame' | 'video-brief', name: string, value: unknown) => workspace.putOutput({ id: kind === 'video-brief' ? briefId : newId(), kind, sceneId: doc.id, shotId: shot.id, name, mime: 'application/json' }, new Blob([JSON.stringify(value)], { type: 'application/json' }), room);
   const message = (text: string) => { if (!disposed) find('.look-message').textContent = text; };
   const savePrompt = async () => {
@@ -105,18 +122,19 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
     if (disposed) return;
     find<HTMLFieldSetElement>('.look-settings').disabled = busy || uploading || loading;
     find('[data-cancel]').hidden = !busy;
-    const render = find<HTMLButtonElement>('[data-render]'); render.disabled = busy || uploading || loading || !pages.length || !imageAvailable || !workspace.canEdit;
-    find<HTMLButtonElement>('[data-brief]').disabled = busy || uploading || loading || !pages.length || !briefAvailable || !workspace.canEdit;
+    const render = find<HTMLButtonElement>('[data-render]'); render.disabled = busy || uploading || loading || !!appearanceError || !pages.length || !imageAvailable || !workspace.canEdit;
+    find<HTMLButtonElement>('[data-brief]').disabled = busy || uploading || loading || !!appearanceError || !pages.length || !briefAvailable || !workspace.canEdit;
     direction.readOnly = !workspace.canEdit; find<HTMLInputElement>('input[type=file]').disabled = !workspace.canEdit;
     const hasPrompt = !!brief && !!videoPrompt(shot,brief,direction.value).trim();
     prompt.readOnly = busy || uploading || loading || !workspace.canEdit;
     find<HTMLButtonElement>('[data-copy]').disabled = busy || uploading || !hasPrompt;
-    find<HTMLButtonElement>('[data-package]').disabled = busy || uploading || loading || !pages.length || !hasPrompt;
-    find<HTMLButtonElement>('[data-publish]').disabled = busy || uploading || loading || !pages.length || !workspace.canEdit || !hasPrompt;
+    find<HTMLButtonElement>('[data-package]').disabled = busy || uploading || loading || !!appearanceError || !pages.length || !hasPrompt;
+    find<HTMLButtonElement>('[data-publish]').disabled = busy || uploading || loading || !!appearanceError || !pages.length || !workspace.canEdit || !hasPrompt;
     find<HTMLButtonElement>('[data-import-video]').disabled = busy || uploading || !workspace.canEdit;
     find<HTMLButtonElement>('[data-instruction-copy]').disabled = busy;
     find('.look-anchor').hidden = !(anchor && find<HTMLInputElement>('[data-anchor]').checked);
-    find('[data-prepare]').hidden = busy || !!pages.length;
+    find('[data-prepare]').hidden = busy || (!!pages.length && !appearanceError);
+    find('[data-prepare]').textContent = appearanceError ? 'Retry reference images' : 'Prepare storyboards';
     find<HTMLButtonElement>('[data-prepare]').disabled = loading || uploading;
     onBusyChange();
   };
@@ -146,7 +164,7 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
   find('[data-prepare]').onclick = async () => {
     if (busy || loading) return;
     busy = true; controller = new AbortController(); update();
-    try { await capture(controller.signal); drawPages(); draw(); message(`${frames.length} frames · ${pages.length} storyboard pages ready.`); }
+    try { if (!pages.length) { await capture(controller.signal); drawPages(); draw(); } await loadReferences(); message(`${frames.length} frames · ${pages.length} storyboard pages ready.`); }
     catch (error) { message(controller.signal.aborted ? 'Preparation cancelled. Try again when ready.' : (error as Error).message); }
     finally { busy = false; update(); }
   };
@@ -168,14 +186,16 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
         sent.push({ at: Math.max(0, frame.time - shot.start), image: referenceJPEG(image, image.naturalWidth, image.naturalHeight, 1280), kind: frame.result ? 'look' : 'previs' });
       }
       sent.push(...pages.map(page => ({ at: page.frames[0].at, image: page.image, kind: 'storyboard' as const, tiles: page.frames })));
-      const body = JSON.stringify(briefInput(doc, shot, direction.value, sent));
+      const body = JSON.stringify(briefInput(doc, shot, direction.value, sent, appearance));
       if (new Blob([body]).size > BRIEF_LIMITS.maxBodyBytes) throw new Error('These references are too large for prompt generation. You can write the prompt manually and download all images.');
       controller.signal.throwIfAborted();
       const response = await projectFetch('/api/brief', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: controller.signal });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error?.message ?? 'The video brief could not be written.');
       controller.signal.throwIfAborted();
-      brief = data as VideoBrief; showBrief();
+      brief = data as VideoBrief;
+      brief.promptText = [videoPrompt(shot, brief, direction.value), appearanceInstructions(appearance)].filter(Boolean).join('\n\n');
+      showBrief();
       publication = null;
       brief.promptText = videoPrompt(shot,brief,direction.value);
       await savePrompt();
@@ -186,7 +206,7 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
   const makePackage = async () => {
     if (!brief || !videoPrompt(shot,brief,direction.value).trim()) throw new Error('Write or generate a prompt before preparing references.');
     return videoPackage(doc, shot, brief, direction.value, sourceFrames(), pages,
-      [...(style ? [{ image: style, role: 'style' as const, label: 'Style reference' }] : []), ...(anchor ? [{ image: anchor, role: 'scene' as const, label: 'Scene continuity reference' }] : [])]);
+      [...(style ? [{ image: style, role: 'style' as const, label: 'Style reference' }] : []), ...(anchor ? [{ image: anchor, role: 'scene' as const, label: 'Scene continuity reference' }] : [])], appearance);
   };
   find('[data-publish]').onclick = async () => {
     if (busy || !brief || !videoPrompt(shot,brief,direction.value).trim()) return;
@@ -256,9 +276,9 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
         frame.state = 'running'; draw(); message(`Rendering ${frame.label.toLowerCase()} · ${done + 1} of ${selected.length}`);
         // Within one render, each frame follows the previous finished frame, so neighbouring frames change only by the blocking between them.
         const reference = consistent ? previous ?? anchor : undefined;
-        const subjects = framedObjects(doc, shot.cameraId, frame.time).map(({ object, position, depth }) => ({ name: object.name.trim().slice(0, 80), position, depth, ...(frame.boxes.has(object.id) ? { box: frame.boxes.get(object.id) } : {}) }));
+        const subjects = framedObjects(doc, shot.cameraId, frame.time).map(({ object, position, depth }) => ({ id: object.id, name: object.name.trim().slice(0, 80), position, depth, ...(frame.boxes.has(object.id) ? { box: frame.boxes.get(object.id) } : {}) }));
         const original = await loadImage(frame.previs);
-        const body = { frame: referenceJPEG(original, original.naturalWidth, original.naturalHeight, 1280), direction: look, subjects, ...(reference ? { anchor: reference } : {}), ...(style ? { style } : {}) };
+        const body = { frame: referenceJPEG(original, original.naturalWidth, original.naturalHeight, 1280), direction: look, subjects, appearance: appearance.map(image => ({ ...image, bindings: image.bindings.filter(binding => frame.boxes.has(binding.objectId)) })).filter(image => image.bindings.length), ...(reference ? { anchor: reference } : {}), ...(style ? { style } : {}) };
         try {
           const response = await projectFetch('/api/look', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
           const data = await response.json().catch(() => ({}));
@@ -298,7 +318,7 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
       // Cancelling image capture must still leave the creator's saved prompt available.
       const savedBrief = room?.outputs.find(output => output.kind === 'video-brief' && output.sceneId === doc.id && output.shotId === shot.id);
       if (savedBrief) { const value = JSON.parse(await (await workspace.output(savedBrief.id)).text()); brief = value.brief; briefId = savedBrief.id; if (brief) brief.promptText ??= videoPrompt(shot,brief,value.direction ?? direction.value); }
-      await capture(controller!.signal); drawPages(); draw();
+      await capture(controller!.signal); drawPages(); draw(); await loadReferences();
       const settings = workspace.lookSettings(doc.id);
       if (settings.anchorId) anchor = JSON.parse(await (await workspace.output(settings.anchorId)).text()).image;
       if (settings.styleId) style = await new Promise<string>((resolve, reject) => { void workspace.output(settings.styleId!).then(blob => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(blob); }, reject); });

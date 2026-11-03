@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { STORYBOARD_MAX_PAGES, STORYBOARD_PAGE_SIZE } from './storyboard.ts';
+import { appearanceBindingSchema } from '../appearance/model.ts';
 
 const fileName = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,119}$/);
 export const videoManifestSchema = z.strictObject({
@@ -10,7 +11,7 @@ export const videoManifestSchema = z.strictObject({
   frames: z.array(z.strictObject({ file: fileName, at: z.number().min(0).max(60), kind: z.enum(['look', 'previs']) })).min(1).max(240),
   firstFrame: fileName.optional(),
   storyboards: z.array(z.strictObject({ file: fileName, frames: z.array(z.strictObject({ index: z.number().int().min(1).max(121), at: z.number().min(0).max(60) })).min(1).max(STORYBOARD_PAGE_SIZE) })).max(STORYBOARD_MAX_PAGES).optional(),
-  references: z.array(z.strictObject({ file: fileName, role: z.enum(['style', 'character', 'scene']), label: z.string().max(160) })).max(100),
+  references: z.array(z.strictObject({ file: fileName, role: z.enum(['style', 'character', 'scene', 'appearance']), label: z.string().max(160), bindings: z.array(appearanceBindingSchema).min(1).max(100).optional() })).max(100),
   previs: fileName.nullable(),
   models: z.strictObject({ brief: z.string().max(160), look: z.string().max(160).nullable() }),
   usage: z.string().max(2000),
@@ -29,4 +30,4 @@ export function videoPrompt(shot: { duration: number }, brief: VideoManifest['br
 }
 export interface HandoffReceipt { id: string; token: string; sceneId: string; shotId: string; name: string; createdAt: number; revokedAt: number | null }
 export const handoffPath = (token: string) => `/s/${token}/`;
-export const museInstruction = (url: string) => `Open ${url} and read the full prompt. Download and attach the first-frame image and every numbered storyboard page as actual image inputs. Read each storyboard left to right, then top to bottom, in page order; tile labels give seconds from this shot's start. They are successive moments of one continuous video. Preserve composition, action timing, character identity and the requested look; do not render the grid, labels, numbers or a slideshow. Only images are supplied, not an input video. If you cannot open the link or attach all the images, ask me to upload the original images directly.`;
+export const museInstruction = (url: string) => `Open ${url} and read the full prompt. Download and attach the first-frame image, every numbered storyboard page and all object appearance references as actual image inputs. Apply each appearance image only to its named objects; use its primary/detail label and appearance notes. Read each storyboard left to right, then top to bottom, in page order; tile labels give seconds from this shot's start. They are successive moments of one continuous video. Preserve composition, action timing, character identity and the requested look; do not render the grid, labels, numbers or a slideshow. Only images are supplied, not an input video. If you cannot open the link or attach all the images, ask me to upload the original images directly.`;

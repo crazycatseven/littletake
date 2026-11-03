@@ -7,6 +7,7 @@ import { conversationHistory, newConversation, type AssistantMessage, type Conve
 import type { SceneEditInput, SceneEditResponse } from './types.ts';
 import type { ReferenceContext, ReferenceProgress } from '../reference/observations.ts';
 import { performanceSelection, performanceFrames, performanceOperations, type PerformanceTarget } from '../performance/refinement.ts';
+import type { AppearanceImage } from '../appearance/model.ts';
 
 export interface EditorContext { project: ProjectContent; sceneId: string | null; shotId: string | null; revision: number; time: number; selectedId: string | null; selectedIds?: string[] }
 export interface SessionOptions {
@@ -19,6 +20,7 @@ export interface SessionOptions {
   apply(project: ProjectContent, base: string, focus: { sceneId: string | null; shotId: string | null }): boolean;
   changed(): void;
   reference?(threadId: string): Promise<ReferenceContext | undefined>;
+  appearance?(context: EditorContext): Promise<AppearanceImage[]>;
   saveReferenceObservations?(progress: ReferenceProgress): Promise<void>;
   requestReferenceFrames?(threadId: string, sourceId: string, times: number[], signal: AbortSignal): Promise<ReferenceContext>;
   request?(input: SceneEditInput, signal: AbortSignal): Promise<SceneEditResponse>;
@@ -53,7 +55,7 @@ export class ConversationSession {
     this.cancel(); this.clearPreview();
     if (this.options.focus && !this.options.focus({ sceneId: targets[0].sceneId, shotId: targets[0].shotId, selectedId: selectedIds.at(-1)!, selectedIds, time: Math.min(...selected.map(entry => entry.take.start)) })) return;
     this.active.performance = structuredClone(targets);
-    if (!this.active.draft.trim()) this.active.draft = 'Read these selected animations together with their rendered frames. Explain the intention you infer, then refine the movement and framing as a coordinated performance. Preserve deliberate pauses, timing and routes; ask me if the intention is ambiguous.';
+    if (!this.active.draft.trim()) this.active.draft = 'Refine these recordings while preserving their intent, timing and route.';
     this.emit();
   }
   detachPerformance(index?: number) {
@@ -189,6 +191,8 @@ export class ConversationSession {
     try {
       const input: SceneEditInput = { project, sceneId: context.sceneId, shotId: context.shotId, time: context.time, selectedId: context.selectedId, selectedIds, prompt: message.text,
         history: conversationHistory(thread.messages.slice(0, -1)), snapshots: [] };
+      if (this.options.appearance) input.appearance = await this.options.appearance({ ...context, project });
+      if (!current()) return;
       const reference = !performance && this.options.reference ? await this.options.reference(thread.id) : undefined;
       if (!current()) return;
       if (reference) input.reference = reference;

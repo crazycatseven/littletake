@@ -12,6 +12,10 @@ export async function readVideoPackage(blob: Blob) {
   }
   const manifest = videoManifestSchema.parse(JSON.parse(new TextDecoder().decode(files.get('manifest.json'))));
   const expected = new Set(['manifest.json', 'brief.md']);
+  if (manifest.references.some(reference => reference.role === 'appearance')) {
+    if (!files.has('appearance-references.md')) throw new Error('The appearance reference guide is missing.');
+    expected.add('appearance-references.md');
+  }
   const media = [...manifest.frames, ...manifest.references, ...(manifest.storyboards ?? [])];
   for (const item of media) {
     const bytes = files.get(item.file), mime = mediaType(item.file);

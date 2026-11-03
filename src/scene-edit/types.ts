@@ -3,6 +3,7 @@ import type { EditPlan, SceneSnapshot, SceneView } from './operations';
 import type { ConversationHistory } from './conversations';
 import type { ReferenceContext, ReferenceProgress } from '../reference/observations';
 import type { PerformanceRequest, PerformanceCandidate } from '../performance/refinement';
+import type { AppearanceImage } from '../appearance/model';
 
 export interface SceneEditInput {
   project: ProjectContent; sceneId: string | null; shotId: string | null; prompt: string; selectedId: string | null; time: number;
@@ -11,6 +12,7 @@ export interface SceneEditInput {
   history?: ConversationHistory;
   reference?: ReferenceContext;
   performance?: PerformanceRequest;
+  appearance?: AppearanceImage[];
 }
 export type SceneEditResponse = (
   | { status: 'needs_reference_frames'; requestedTimes: number[]; summary: string; provider: string; model: string }

@@ -50,7 +50,7 @@ export function saveObjectAsset(object:SceneObject,assets:AssetDefinition[],id:s
   const transform=structuredClone(object.transform),track=structuredClone(object.track),animation=object.animation?structuredClone(object.animation):undefined;
   if(track)for(const pose of trackPoses(track))pose.position=pose.position.map((v,i)=>v-transform.position[i]) as Vec3;
   if(animation)for(const [index,axis] of (['x','y','z'] as const).entries())for(const key of animation.curves[`position.${axis}`]??[])key.value-=transform.position[index];
-  transform.position=[0,0,0];asset.template={transform,components:structuredClone(object.components??[]).filter(c=>c.type!=='script').map(c=>c.type==='followPath'?{...c,pathId:''}:c),track,...(animation?{animation}: {}),...(object.jointAngles?{jointAngles:structuredClone(object.jointAngles)}:{})};return validateAsset(asset);
+  transform.position=[0,0,0];asset.template={transform,components:structuredClone(object.components??[]).filter(c=>c.type!=='script'&&c.type!=='appearanceReference').map(c=>c.type==='followPath'?{...c,pathId:''}:c),track,...(animation?{animation}: {}),...(object.jointAngles?{jointAngles:structuredClone(object.jointAngles)}:{})};return validateAsset(asset);
 }
 
 /** Detach only this object from its previous prefab; other instances keep their original reference. */

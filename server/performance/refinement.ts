@@ -33,6 +33,7 @@ ${candidate ? `VISUAL REVIEW PHASE. Before and after images have identical times
   const content: AIContent[] = [{ type: 'text', text: JSON.stringify({ request: input.prompt, original: context(input.project),
     ...(candidate && proposed ? { candidate, proposed: context(proposed) } : {}) }) }];
   for (const snapshot of input.snapshots) content.push({ type: 'text', text: JSON.stringify({ variant: snapshot.variant, time: snapshot.time, view: snapshot.view, shotId: snapshot.shotId, bounds: snapshot.bounds }) }, { type: 'image', dataUrl: snapshot.dataUrl });
+  content.push(...appearanceContent(input.appearance));
   const request = { instructions, content, history: input.history ?? [], schema: z.toJSONSchema(candidate ? reviewSchema : proposalSchema), schemaName: candidate ? 'performance_visual_review' : 'performance_intent', format: 'json_object' as const, reasoningEffort: 'high' as const };
   const evidence: SceneEditDiagnostic['attempts'][number] = { request: structuredClone(request) };
   if (diagnostic) { diagnostic.input ??= structuredClone(input); diagnostic.provider = provider.name; diagnostic.model = provider.model; diagnostic.attempts.push(evidence); }
@@ -50,7 +51,8 @@ ${candidate ? `VISUAL REVIEW PHASE. Before and after images have identical times
         : ready(`${review.summary}\n${review.issues.join('\n')}\n\nThe original recording is unchanged. No candidate was applied.`);
     }
     const proposal = proposalSchema.parse(value);
-    if (proposal.observations.some(item => !selected.some(({ take }) => item.time >= take.start && item.time <= take.end))) throw new Error('An observation refers to a time outside this recording.');
+    // Match the rendered-frame tolerance: decimal model output can round a recorded endpoint.
+    if (proposal.observations.some(item => !selected.some(({ take }) => item.time >= take.start - 1e-6 && item.time <= take.end + 1e-6))) throw new Error('An observation refers to a time outside this recording.');
     const summary = [proposal.intent, ...proposal.observations.map(item => `${item.time.toFixed(2)}s — ${item.observation}`), proposal.summary, proposal.question].filter(Boolean).join('\n');
     if (proposal.question || !proposal.refinements) return ready(summary);
     const nextCandidate = { summary, refinements: proposal.refinements };
@@ -63,3 +65,4 @@ ${candidate ? `VISUAL REVIEW PHASE. Before and after images have identical times
     throw new AIError('invalid_performance', 'Muse could not validate this recording refinement. The original recording is unchanged.');
   }
 }
+import { appearanceContent } from '../../src/appearance/model.ts';

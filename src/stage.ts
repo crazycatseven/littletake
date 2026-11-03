@@ -477,6 +477,7 @@ export class Stage {
         this.perspectiveCamera.fov=view.fov;this.orthographicCamera.zoom=view.zoom;this.editorCamera.updateProjectionMatrix();this.orbit.update();this.editorView=null;
       }
       this.pilotCameraId=id;
+      if(!id)this.options.onStatus(NAV_HINT);
     }
     if(review&&!this.pilotReview)this.clearNavigation();
     this.pilotReview=review;this.orbit.enabled=!id&&!this.controlled&&!this.dragging;
@@ -1000,7 +1001,7 @@ export class Stage {
     event.preventDefault(); this.dropSelection();
   };
 
-  private pick(event: PointerEvent): string | null {
+  pick(event: Pick<PointerEvent, 'clientX' | 'clientY'>): string | null {
     const bounds = this.renderer.domElement.getBoundingClientRect();
     this.pointer.set(((event.clientX - bounds.left) / bounds.width) * 2 - 1, -((event.clientY - bounds.top) / bounds.height) * 2 + 1);
     this.scene.updateMatrixWorld(true);

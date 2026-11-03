@@ -26,7 +26,7 @@ export interface ProjectRoom {
 export interface WorkspaceInfo { mode: 'local' | 'cloud'; cloudAvailable: boolean }
 
 export const projectOutputSchema = z.strictObject({
-  id: z.uuid(), kind: z.enum(['shot-render', 'look-frame', 'video-brief', 'reference-analysis', 'style-reference', 'reference-media', 'final-video', 'diagnostic', 'asset-draft']),
+  id: z.uuid(), kind: z.enum(['shot-render', 'look-frame', 'video-brief', 'reference-analysis', 'style-reference', 'appearance-reference', 'reference-media', 'final-video', 'diagnostic', 'asset-draft']),
   sceneId: z.string().max(120), shotId: z.string().max(120), name: z.string().min(1).max(160),
   mime: z.enum(['application/json', 'image/png', 'image/jpeg', 'image/webp', 'video/mp4', 'video/webm']), updatedAt: z.number().int().nonnegative(),
 });

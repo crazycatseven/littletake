@@ -21,6 +21,8 @@ import { SCENE_OBJECT_DRAG } from './assets/folders';
 import { bindHierarchyAssets, type HierarchyAssetSource } from './assets/hierarchy';
 import { evaluateAsset, type AssetDefinition } from './assets/model';
 import { bindComponents, componentInspector } from './components/inspector';
+import { bindAppearanceInspector, bindAppearanceDrop, type AppearanceEditor } from './appearance/inspector';
+import { loadAppearance } from './appearance/images';
 import { inputController } from './components/model';
 import { applyTransformModifiers } from './components/transform';
 import { PerformanceSession, type RecordingClock } from './performance/session';
@@ -358,6 +360,12 @@ function persist() {
 }
 function persistLive(){liveSaveTimer??=setTimeout(()=>{liveSaveTimer=undefined;workspace?.save(project);},100);}
 function changed(message?: string) { project.revision++;sceneEditor?.sceneChanged(); if(liveFieldEdit){pendingFieldDoc=structuredClone(projectContent(project));clearTimeout(fieldCommitTimer);fieldCommitTimer=setTimeout(flushFieldEdit,450);}else{flushFieldEdit();history.commit(projectContent(project));} renderAll(); persist(); if(message)status(message); }
+function appearanceEditor(sceneId: string, id: string): AppearanceEditor {
+  const room = workspace!.room;
+  return { workspace: workspace!, sceneId, item: () => project.scenes.find(scene => scene.id === sceneId)?.objects.find(object => object.id === id),
+    enabled: () => !!workspace?.canEdit && workspace.room === room && doc.id === sceneId && !storageError && !editPreview && !performanceSession && !playing && !assetEditor,
+    changed, status };
+}
 function pause() { const wasPlaying=playing; playing=false; renderTransport(); if(wasPlaying){renderInspector();syncStage();} }
 function select(id: string | null) { selectIds(id ? [id] : [], 'replace'); }
 function selectIds(ids: string[], mode: SelectionMode, range = false) {
@@ -664,6 +672,7 @@ function renderInspector(force=false) {
     $('#inspector').querySelector('.transform-key-actions')?.insertAdjacentHTML('afterend','<p class="property-note">Follow Path controls world position'+(follow.facing?' and facing':'')+'. Disable it to edit the base pose.</p>');
   }
   if('kind' in item){$('#inspector').insertAdjacentHTML('beforeend','<button class="asset-save-button" data-action="save-asset">Create Independent Prefab…</button>');bindComponents($('#inspector'),item,()=>{(document.activeElement as HTMLElement)?.blur();if(item.animation&&!item.components?.some(component=>component.type==='pivot'))for(const path of propertyPaths('pivot'))delete item.animation.curves[path];if(item.animation&&!item.components?.some(c=>c.type==='followPath'))delete item.animation.curves['followPath.progress'];changed('Component settings saved');},()=>performanceSession?exitPerformance():void beginPerformance(),true,project.scripts??[]);}
+  if ('kind' in item && workspace) bindAppearanceInspector($('#inspector'), appearanceEditor(inspectedDoc.id, item.id));
   if('asset' in item&&item.asset)$('#entityName').insertAdjacentHTML('afterend',`<button class="asset-instance-edit" data-action="edit-asset">${icon('key')} Edit Prefab</button>`);
   if(performanceSession){const button=$('#inspector').querySelector<HTMLElement>('[data-component-action]');if(button&&performanceSession.mode!=='control')button.textContent=performanceSession.mode==='record'?'Recording…':'Review Recording';}
   if(performanceSession)$('#inspector').querySelectorAll<HTMLInputElement|HTMLButtonElement>('.entity-name,[data-action],[data-color],#objectColor').forEach(node=>node.disabled=true);
@@ -989,8 +998,14 @@ try {
   placementPanel=new PlacementPanel($('#placementTools'),settings=>stage.setPrecision(settings),(axis,edge)=>stage.alignSelection(axis,edge));
   // The viewport toolbar wraps on narrow screens; keep the view gizmo and shot preview below it.
   {const heading=$('.viewport-heading');new ResizeObserver(()=>heading.parentElement!.style.setProperty('--viewport-heading-height',heading.offsetHeight+'px')).observe(heading);}
-  assetsPanel=new AssetPanel($('#assetPanel'),stage,insertAsset,()=>!!workspace?.canEdit&&!storageError&&!editPreview&&!performanceSession&&!assetEditor,asset=>openAssetEditor(asset),synchronizeAssets,(source,folder)=>void createObjectPrefab(source,folder),{list:()=>project.scenes,active:()=>project.activeSceneId,open:id=>{switchScene(id);setSidePanel('inspector');},create:addScene,remove:requestDeleteScene});assetsPanel.update(project.assets);
+  assetsPanel=new AssetPanel($('#assetPanel'),stage,insertAsset,()=>!!workspace?.canEdit&&!storageError&&!editPreview&&!performanceSession&&!assetEditor,asset=>openAssetEditor(asset),synchronizeAssets,(source,folder)=>void createObjectPrefab(source,folder),{list:()=>project.scenes,active:()=>project.activeSceneId,open:id=>{switchScene(id);setSidePanel('inspector');},create:addScene,remove:requestDeleteScene},()=>workspace);assetsPanel.update(project.assets);
   bindHierarchyAssets($('#outliner'),hierarchyAssetSource,source=>void createObjectPrefab(source,assetsPanel?.currentFolder??''),()=>{assetsPanel?.showFolder(assetsPanel.currentFolder);setBottomPanelTab('assets');});
+  bindAppearanceDrop($('#viewport'), (clientX, clientY) => {
+    const id = stage.pick({ clientX, clientY });
+    if (!workspace || !doc.objects.some(object => object.id === id)) return null;
+    const options = appearanceEditor(doc.id, id!);
+    return { ...options, changed: message => { select(id); setSidePanel('inspector'); changed(message); } };
+  }, status);
   bindParentingTree($('#outliner'),{
     enabled:()=>!!workspace?.canEdit&&!editPreview&&!performanceSession&&!storageError&&!playing,
     selected:()=>selection.ids,
@@ -1002,6 +1017,7 @@ try {
 } catch(error) { $('#viewport').innerHTML=`<div class="webgl-error"><h2>This stage needs WebGL.</h2><p>Enable hardware acceleration in your browser, then reload.</p><small>${esc(error instanceof Error?error.message:'Renderer could not start.')}</small></div>`; }
 
 sceneEditor=new SceneEditPanel({
+  appearance: async context => { const scene = context.project.scenes.find(scene => scene.id === context.sceneId); return workspace && scene ? loadAppearance(workspace, scene) : []; },
   root:$('#sceneAI'), book:project.conversations, context:()=>({project:projectContent(project),sceneId:project.activeSceneId,shotId:project.activeShotId,revision:project.revision,time,selectedId:selection.active,selectedIds:[...selection.ids]}), prepare:()=>{pause();flushFieldEdit();},
   play:()=>togglePlay(),changed:()=>persist(),clearSelection:()=>select(null),removeSelection:id=>selectIds(selection.ids.filter(selected=>selected!==id),'replace'),
   focus:context=>{if(performanceSession){if(context.sceneId===doc.id&&context.selectedId===performanceSession.before.id)return true;status('Stop Control before switching scene context.');return false;}const scene=project.scenes.find(scene=>scene.id===context.sceneId);if((context.sceneId!==null&&!scene)||(context.shotId!==null&&!scene?.shots.some(shot=>shot.id===context.shotId))){status('The original scene or shot no longer exists. Choose a context and send a new message.');return false;}pause();flushFieldEdit();project.activeSceneId=context.sceneId;project.activeShotId=context.shotId;selection.set(context.selectedIds??(context.selectedId?[context.selectedId]:[]));syncDocument();time=clamp(context.time??0,0,doc.duration);renderAll();return true;},
@@ -1376,6 +1392,7 @@ workspace = new Workspace({
     $<HTMLInputElement>('#projectName').disabled=readOnly;
     $<HTMLInputElement>('#sceneName').readOnly=readOnly;
     if(wasReadOnly&&!readOnly){document.querySelectorAll<HTMLButtonElement>('[data-project-disabled]').forEach(node=>{node.disabled=false;delete node.dataset.projectDisabled;});renderAll();}
+    assetsPanel?.update(project.assets);
     enforceProjectReady();
   },
 });

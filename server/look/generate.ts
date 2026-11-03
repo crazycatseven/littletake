@@ -1,14 +1,16 @@
 import { z } from 'zod';
 import { AIError } from '../ai/provider.ts';
+import { appearanceImagesSchema } from '../../src/appearance/model.ts';
 
 /** Look frames: Muse Image turns a clean previs frame into a finished film still with the composition locked. */
-export const LOOK_LIMITS = { maxImageBytes: 1_400_000, maxBodyBytes: 4_000_000, maxDirection: 600, maxSubjects: 40 } as const;
+export const LOOK_LIMITS = { maxImageBytes: 1_400_000, maxBodyBytes: 18_000_000, maxDirection: 600, maxSubjects: 40 } as const;
 export const LOOK_SIZE = '1600x900';
 
 const IMAGE_URL = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/;
 const dataURL = z.string().max(Math.ceil(LOOK_LIMITS.maxImageBytes * 4 / 3) + 40).regex(IMAGE_URL);
 const fraction = z.number().min(0).max(1);
 const subject = z.strictObject({
+  id: z.string().min(1).max(64).optional(),
   name: z.string().trim().min(1).max(80), position: z.enum(['left', 'center', 'right']), depth: z.enum(['foreground', 'midground', 'background']),
   box: z.tuple([fraction, fraction, fraction, fraction]).refine(([left, top, right, bottom]) => right > left && bottom > top).optional(),
 });
@@ -18,6 +20,7 @@ const inputSchema = z.strictObject({
   subjects: z.array(subject).max(LOOK_LIMITS.maxSubjects),
   anchor: dataURL.optional(),
   style: dataURL.optional(),
+  appearance: appearanceImagesSchema.optional(),
 });
 export type LookSubject = z.infer<typeof subject>;
 export type LookInput = z.infer<typeof inputSchema>;
@@ -45,6 +48,7 @@ export function lookPrompt(input: LookInput): string {
     layout ? `Exact layout, as fractions of the frame measured from the top-left corner. Each subject must fill its box at the same size; do not enlarge, shrink or recentre anyone: ${layout}.` : '',
     anchor ? `${anchor} is an approved still from the same film at a different moment, usually the previous moment of this shot. Match only how things look in it: the people's identity and wardrobe, materials, set dressing, lighting and color grade. Never copy its framing or where and how large anyone is in it; positions, sizes and framing come only from @Image1.` : '',
     style ? `Use ${style} only as a reference for visual style and palette, never for composition or content.` : '',
+    ...(input.appearance ?? []).map(reference => `@Image${next++} is an object appearance reference for ${reference.bindings.map(binding => `${binding.objectName} (${binding.primary ? 'primary identity' : 'additional details'})${binding.description ? ': ' + binding.description : ''}`).join('; ')}. Apply it only to these named proxies. Identity, clothing and material come from these references; their pose, size and location come from @Image1. Ignore the reference background.`),
     `Look and mood: ${input.direction}`,
     'No text, captions, watermarks, interface elements or split panels. One 16:9 frame.',
   ].filter(Boolean).join('\n');
@@ -64,7 +68,7 @@ function sniff(bytes: Buffer): string | null {
 }
 
 export async function generateLookFrame(input: LookInput, config: { apiKey: string; model: string }, transport: typeof fetch = fetch, signal?: AbortSignal): Promise<LookResult> {
-  const prompt = lookPrompt(input), images = [input.frame, input.anchor, input.style].filter((url): url is string => Boolean(url));
+  const prompt = lookPrompt(input), images = [input.frame, input.anchor, input.style, ...(input.appearance ?? []).map(reference => reference.image)].filter((url): url is string => Boolean(url));
   // Muse Image mirrors the OpenAI Images API (multipart edits). Several references are sent as repeated `image`
   // fields; live testing rejected `image[]`, so that spelling is only a one-time fallback after a 400.
   const send = (field: string) => {

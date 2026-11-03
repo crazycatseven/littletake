@@ -3,6 +3,7 @@ import { componentAddReason, componentsSchema, componentScripts, movement, pivot
 import type { SceneObject } from '../types';
 import './inspector.css';
 import { scriptParameters, type ScriptDefinition } from '../scripts/model';
+import { appearanceReference } from '../appearance/model';
 
 type ComponentOwner = Pick<SceneObject, 'kind' | 'components'>;
 const esc=(s:string)=>s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
@@ -12,7 +13,7 @@ function componentPicker(components: ObjectComponent[], locked: boolean, scripts
     <div class="component-picker" data-component-picker popover="auto" role="dialog" aria-label="Add Component">
       <header><strong>Add Component</strong><button data-component-picker-close aria-label="Close component picker">${icon('close')}</button></header>
       <input type="search" data-component-search aria-label="Search components" placeholder="Search components…" autocomplete="off"/>
-      <div class="component-options">${Object.entries(componentScripts).filter(([,script]) => script.addable !== false).map(([type, script]) => { const reason = componentAddReason(components, type as ObjectComponent['type']); return `<button class="component-option" data-component-add="${type}" ${reason || locked ? 'disabled' : ''}><span><strong>${script.title}</strong>${reason === 'Added' ? '<small class="component-added">Added</small>' : ''}</span><small>${reason && reason !== 'Added' ? reason : script.description}</small></button>`; }).join('')}</div>
+      <div class="component-options">${Object.entries(componentScripts).filter(([type,script]) => script.addable !== false && (!preview || type !== 'appearanceReference')).map(([type, script]) => { const reason = componentAddReason(components, type as ObjectComponent['type']); return `<button class="component-option" data-component-add="${type}" ${reason || locked ? 'disabled' : ''}><span><strong>${script.title}</strong>${reason === 'Added' ? '<small class="component-added">Added</small>' : ''}</span><small>${reason && reason !== 'Added' ? reason : script.description}</small></button>`; }).join('')}</div>
       ${preview?'':`<div class="component-options">${scripts.map(script=>{const reason=componentAddReason(components,'script');return `<button class="component-option" data-script-attach="${esc(script.id)}" ${locked||reason?'disabled':''}><span><strong>${esc(script.name)}</strong></span><small>${reason||'Project script · revision '+script.revision}</small></button>`;}).join('')}<button class="component-option" data-script-manage ${locked?'disabled':''}><strong>Project Scripts…</strong><small>Create or edit a reusable controller</small></button></div>`}
       <p class="component-empty" hidden>No components found.</p>
     </div>`;
@@ -22,6 +23,7 @@ export function componentInspector(item: ComponentOwner, locked: boolean, contro
   const components = item.components ?? [], disabled = locked ? 'disabled' : '';
   const follows=components.some(c=>c.type==='followPath'&&c.enabled&&c.pathId);
   const cards = components.map(component => {
+    if (component.type === 'appearanceReference') return `<details class="control-component" data-component-card="appearanceReference" open><summary>${icon('chevron-right', {class:'ui-icon component-chevron'})}<input type="checkbox" aria-label="Enable Appearance Reference" data-component-enabled ${component.enabled ? 'checked' : ''} ${disabled}/><span>Appearance Reference</span><button data-component-remove aria-label="Remove Appearance Reference" ${disabled}>${icon('close')}</button></summary><div class="component-fields" data-appearance-fields></div></details>`;
     if(component.type==='script'){
       const script=scripts.find(s=>s.id===component.scriptId),fieldsDisabled=locked&&!controlling?'disabled':'',structureDisabled=locked?'disabled':'';
       const fields=script?.fields.map(field=>{
@@ -54,7 +56,7 @@ export function bindComponents(root: HTMLElement, item: ComponentOwner, change: 
   bindComponentPicker(root, type => {
     const components = item.components ?? [];
     if (componentAddReason(components, type)) return;
-    update(type === 'pivot' ? [pivotOffset(), ...components] : [...components, type==='followPath'?followPath():movement(item.kind === 'human' ? 'walk' : 'free')]);
+    update(type === 'pivot' ? [pivotOffset(), ...components] : [...components, type==='appearanceReference'?appearanceReference():type==='followPath'?followPath():movement(item.kind === 'human' ? 'walk' : 'free')]);
   });
   for (const component of item.components ?? []) {
     const card = root.querySelector<HTMLElement>(`[data-component-card="${component.type}"]`)!;

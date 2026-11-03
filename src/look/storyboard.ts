@@ -3,7 +3,7 @@ import type { Shot } from '../types.ts';
 export const STORYBOARD_INTERVAL = .5;
 export const STORYBOARD_PAGE_SIZE = 9;
 export const STORYBOARD_MAX_PAGES = 14; // A 60-second shot has at most 121 half-second samples, including its last frame.
-export const BRIEF_LIMITS = { maxImageBytes: 900_000, maxImages: STORYBOARD_MAX_PAGES + 3, maxBodyBytes: 22_000_000 } as const;
+export const BRIEF_LIMITS = { maxImageBytes: 900_000, maxImages: STORYBOARD_MAX_PAGES + 3, maxBodyBytes: 35_000_000 } as const;
 export interface StoryboardFrame { at: number; previs: string; look?: string }
 export interface StoryboardPage { image: string; frames: { index: number; at: number }[] }
 
@@ -22,7 +22,7 @@ const escape = (value: string) => value.replace(/[&<>"']/g, char => ({ '&': '&am
 export function storyboardSVG(shot: Pick<Shot, 'name' | 'duration'>, frames: StoryboardFrame[], page: number): string {
   const start = page * STORYBOARD_PAGE_SIZE, tiles = frames.slice(start, start + STORYBOARD_PAGE_SIZE);
   if (!tiles.length) throw new Error('This storyboard page has no frames.');
-  const width = 1984, height = 1276;
+  const width = 1984, height = 52 + Math.ceil(tiles.length / 3) * 408;
   return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
     <rect width="100%" height="100%" fill="#161719"/>
     <g font-family="Arial, sans-serif" fill="#eee9d7">

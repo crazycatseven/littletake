@@ -16,6 +16,7 @@ import { ReferenceTools } from './reference/sam/tools.ts';
 import { checkProjectScript } from '../src/scripts/check.ts';
 import { performanceRequestSchema, performanceSelection, performanceFrames } from '../src/performance/refinement.ts';
 import { proposePerformance } from './performance/refinement.ts';
+import { appearanceImagesSchema, appearanceBindings, appearanceContent } from '../src/appearance/model.ts';
 
 const inputSchema = z.strictObject({
   project: z.unknown(), sceneId: z.string().max(64).nullable(), shotId: z.string().max(64).nullable(), prompt: z.string().trim().min(1).max(2000), selectedId: z.string().max(64).nullable(), time: z.number().min(0).max(60),
@@ -23,6 +24,7 @@ const inputSchema = z.strictObject({
   selectedIds: z.array(z.string().min(1).max(64)).optional(),
   reference: referenceContextSchema.optional(),
   performance: performanceRequestSchema.optional(),
+  appearance: appearanceImagesSchema.optional(),
   snapshots: z.array(z.strictObject({ view: viewSchema, time: z.number(), width: z.number().int().min(1).max(1024), height: z.number().int().min(1).max(1024),
     shotId: z.string().min(1).max(64).nullable().optional(), variant: z.enum(['before', 'after']).optional(), dataUrl: z.string().max(1_600_100), bounds: z.strictObject({ minX: z.number(), maxX: z.number(), minZ: z.number(), maxZ: z.number() }).nullable() })).max(50),
 });
@@ -47,6 +49,11 @@ export function parseSceneEditInput(value: unknown): SceneEditInput {
   try {
     const input = inputSchema.parse(value), project = validateProjectContent(input.project), scene = project.scenes.find(item => item.id === input.sceneId);
     if (input.sceneId !== null && !scene) throw new Error();
+    const bound = scene ? appearanceBindings(scene) : [];
+    for (const reference of input.appearance ?? []) {
+      const expected = bound.find(image => image.id === reference.id);
+      if (!expected || JSON.stringify(expected.bindings) !== JSON.stringify(reference.bindings)) throw new Error();
+    }
     if (input.time > (scene?.duration ?? 0) || (input.selectedId !== null && (!scene || !sceneEntity(scene, input.selectedId)))) throw new Error();
     const selectedIds = input.selectedIds ?? (input.selectedId ? [input.selectedId] : []);
     if (new Set(selectedIds).size !== selectedIds.length || (selectedIds.at(-1) ?? null) !== input.selectedId || selectedIds.some(id => !scene || !sceneEntity(scene, id))) throw new Error();
@@ -89,7 +96,7 @@ Optional visual tools: requestedViews=['top_down'] renders the active scene layo
 export async function proposeSceneEdit(input: SceneEditInput, provider: AIProvider, signal?: AbortSignal, diagnostic?: SceneEditDiagnostic, library?: AssetLibrary,references = new ReferenceTools(input.reference),reference?:{content:AIContent[];instructions:string;frameBounds?:ImageBounds;validateProject?:(content:ProjectContent)=>void},onAsset?:(asset:AssetDefinition)=>void): Promise<SceneEditResponse> {
   if (input.performance) return proposePerformance(input, provider, signal, diagnostic);
   provider = budgetProvider(provider);
-  const assets = library && provider.generateToolTurn ? new AssetTools(library, input.project, provider, diagnostic,onAsset,reference?.frameBounds,references) : null;
+  const assets = library && provider.generateToolTurn ? new AssetTools(library, input.project, provider, diagnostic,onAsset,reference?.frameBounds,references,input.appearance) : null;
   if (diagnostic && references.available) diagnostic.referenceCalls = references.evidence;
   const referenceResult = () => references.available ? { reference: references.progress()! } : {};
   if (diagnostic) { diagnostic.input ??= structuredClone(input); diagnostic.provider = provider.name; diagnostic.model = provider.model; }
@@ -102,6 +109,7 @@ export async function proposeSceneEdit(input: SceneEditInput, provider: AIProvid
     content.push({ type: 'image', dataUrl: snapshot.dataUrl });
   }
   content.push(...references.content());
+  content.push(...appearanceContent(input.appearance));
   content.push(...(reference?.content??[]));
   // A turn gets either one view follow-up or one validation correction, never both.
   const limit = input.snapshots.length ? 1 : 2;

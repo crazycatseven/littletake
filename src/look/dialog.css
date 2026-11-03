@@ -13,7 +13,7 @@
 .look-card figcaption a { color:var(--accent); }
 .look-settings { margin:0; padding:0; border:0; min-width:0; }
 .look-sampling,.look-upload-help,.look-source-frames > p { color:var(--muted); font-size:11px; line-height:1.6; }
-.look-storyboards { display:grid; gap:16px; max-height:540px; overflow:auto; padding-right:5px; }
+.look-storyboards { display:grid; gap:16px; max-height:min(540px,48dvh); overflow:auto; padding-right:5px; }
 .look-storyboard { margin:0; min-width:0; }
 .look-storyboard img { display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:var(--radius-control); }
 .look-storyboard figcaption { display:flex; justify-content:space-between; gap:8px; padding:8px 0; color:var(--muted); font-size:11px; }
@@ -33,6 +33,9 @@
 .look-message { font-size:11px; line-height:1.6; color:var(--accent); min-height:18px; margin-top:16px; }
 .look-actions { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
 .look-actions [hidden] { display:none; }
+.look-footer { position:sticky; bottom:0; z-index:1; padding:8px 0; background:var(--paper); border-top:1px solid var(--line); margin-top:18px; }
+.look-footer .look-message { margin-top:0; }
+.look-footer .look-upload-help { margin-bottom:0; }
 
 .look-brief { margin-top:18px; padding:14px 16px; border:1px solid var(--line); border-radius:var(--radius-panel); background:var(--surface-raised); font-size:12px; line-height:1.6; }
 .look-brief[hidden] { display:none; }
@@ -59,3 +62,4 @@
 .look-styling > p { font-size:11px; color:var(--muted); }
 .look-handoffs summary { margin-bottom:10px; }
 @media(max-width:520px) { .look-frames { grid-template-columns:1fr; } .look-card { max-width:360px; } }
+.look-appearance{margin-bottom:18px}.look-appearance p{font-size:var(--font-small);color:var(--muted)}.look-appearance-images{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.look-appearance-images figure{margin:0;min-width:0}.look-appearance-images img{width:100%;height:100px;object-fit:contain;background:var(--field);border:1px solid var(--line);border-radius:var(--radius-control)}.look-appearance-images figcaption{font-size:var(--font-small);color:var(--text-secondary);margin-top:5px;overflow-wrap:anywhere}

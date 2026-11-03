@@ -145,6 +145,31 @@ test('failed visual review or provider error leaves the original intact and cann
   }
 });
 
+test('rounded recorded endpoints survive proposal, visual review, apply and reopen without accepting observations outside the take', async () => {
+  const { project, target, item, scene } = fixture(true), end = 2.9696999999998375;
+  item.animation = keepRecordedTake(emptyAnimation(), target.takeId, Array.from({ length: 91 }, (_, i) => ({
+    time: i / 90 * end, transform: { ...item.transform, position: [i / 30, i % 2 ? .02 : 0, 1] as Vec3 },
+  })), scene.duration, { recordScale: false });
+  const input = inputFor(project, target), original = serializeContent(project);
+  const rounded = { ...proposal, observations: [{ time: 2.9697, observation: 'The subject remains visible at the end.' }], refinements: [{ targetIndex: 0, refinement: { smoothness: .4, anchors: [] } }] };
+  const { ai, calls } = provider([rounded, approved, { ...rounded, observations: [{ time: 2.98, observation: 'Outside the recording.' }] }]);
+  const response = await proposeSceneEdit(parseSceneEditInput(input), ai);
+  assert.equal(response.status, 'needs_motion_review');
+  if (response.status !== 'needs_motion_review') return;
+  const reviewed = await proposeSceneEdit(parseSceneEditInput({ ...input, performance: { targets: [target], candidate: response.candidate },
+    snapshots: [...input.snapshots, ...input.snapshots.map(frame => ({ ...frame, variant: 'after' }))],
+  }), ai);
+  assert.equal(reviewed.status, 'ready');
+  if (reviewed.status !== 'ready') return;
+  const next = applyProjectOperations(project, reviewed.plan.operations, 0), camera = next.scenes[0].cameras[0];
+  assert.notEqual(serializeContent(next), original);
+  for (const time of [0, end, scene.duration]) assert.deepEqual(evaluateTransform(camera, time), evaluateTransform(item, time));
+  assert.deepEqual(projectContent(parseProject(serializeProject(createProject(next.scenes[0])))).scenes, next.scenes);
+  await assert.rejects(proposeSceneEdit(parseSceneEditInput(input), ai), /could not validate/);
+  assert.equal(calls.length, 3, 'a rounded timestamp never causes an extra model retry');
+  assert.equal(serializeContent(project), original);
+});
+
 test('cancellation, concurrent edits and stale apply cannot overwrite a peer or cross takes', async () => {
   const h = sessionHarness([proposal, approved]); h.session.attachPerformance([h.target]);
   const pending = h.session.send(); h.session.cancel(); await pending;
