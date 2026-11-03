@@ -1,19 +1,31 @@
+import { sceneWorldMatrices, matrixTransform, hierarchyRoots, sceneEntities, effectivelyHidden, descendants } from './placement/hierarchy';
 import * as THREE from 'three';
 import { XRControls } from './xr/controls';
 import { setXRObjectCulling } from './xr/culling';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { evaluateComponents, evaluateFov, evaluateTransform } from './model';
+import { evaluateComponents, evaluateFov, evaluateJointAngles } from './model';
 import { activePivot, fromPivotPose, toPivotPose } from './components/transform';
-import { createAssetGroup, disposeAssetGroup, type AssetDefinition } from './assets/model';
-import { renderSceneSnapshot } from './scene-snapshot';
+import { assetGroupBounds, createAssetGroup, disposeAssetGroup, poseAssetJoints, type AssetDefinition } from './assets/model';
+import { DEFAULT_SCENE_LOOK } from './scene-edit/look';
+import { createObjectGroup, primitiveGeometry } from './spatial/geometry';
+import { renderSceneSnapshot,renderCameraFrame } from './scene-snapshot';
+
 import { configureHandles } from './placement/gizmo';
 import { ViewNavigation } from './placement/navigation';
 import type { AlignmentEdge, PrecisionSettings } from './placement/panel';
 import { ShotRenderer } from './shot-export/renderer';
 import type { PoseUpdate } from './placement/transforms';
 import type { SceneSnapshot, SceneView } from './scene-edit/operations';
-import type { Axis, PrimitiveKind, SceneDocument, SceneObject, StageOptions, ToolMode, Transform } from './types';
+import type { Axis, PrimitiveKind, SceneDocument, SceneObject, StageOptions, ToolMode, Transform, ImageBounds, Vec3 } from './types';
+import { SKETCH_STEP } from './spatial/sketch';
+import { PathEditor } from './motion-paths/editor';
+import type { MotionPath } from './motion-paths/model';
+import type { ProjectCoverFrame } from './project/room';
+import { COVER_WIDTH, COVER_HEIGHT } from './project/cover';
+import { eulerDegrees } from './rotation.ts';
+
+const STROKE_LIMIT = 4096;
 
 interface EntityView {
   root: THREE.Group;
@@ -23,6 +35,8 @@ interface EntityView {
   accent: THREE.MeshStandardMaterial;
   color: string;
   assetKey?: string;
+  assetPose?: string;
+  assetRoot?: THREE.Group;
   disposeAsset?: () => void;
 }
 interface PointerStart {
@@ -42,6 +56,7 @@ const NAV_HINT = 'Drag empty space to orbit · Shift drag to box select · Ctrl 
 
 /** Two persistent views of one scene: an editor with tools, and a clean shot camera. */
 export class Stage {
+  private pathEditor!: PathEditor;
   private precision: PrecisionSettings = { space: 'world', snap: false, move: .25, rotate: 15 };
   private currentAssets: AssetDefinition[] = [];
   private assetKeys = new WeakMap<AssetDefinition, string>();
@@ -51,11 +66,14 @@ export class Stage {
     if (!key) { key = JSON.stringify(asset); this.assetKeys.set(asset, key); }
     return key;
   }
-  private controlled: { id: string; pose: Transform } | null = null;
+  private controlled: { id: string; pose: Transform; joints?:Record<string,number> } | null = null;
   private ghost: THREE.Group | null = null;
   private readonly forwardArrow = new THREE.ArrowHelper(new THREE.Vector3(0,0,1),new THREE.Vector3(),1.2,0x669bb1,.22,.13);
   private readonly options: StageOptions;
   private readonly scene = new THREE.Scene();
+  private readonly editorBackground = new THREE.Color();
+  private readonly editorGround = new THREE.Color();
+  private readonly editorFog: THREE.Fog;
   private readonly perspectiveCamera = new THREE.PerspectiveCamera(45, 1, 0.05, 500);
   private readonly orthographicCamera = new THREE.OrthographicCamera(-10, 10, 10, -10, .05, 500);
   private editorCamera: THREE.PerspectiveCamera | THREE.OrthographicCamera = this.perspectiveCamera;
@@ -86,7 +104,13 @@ export class Stage {
   private readonly fixedMaterials: THREE.Material[] = [];
   private readonly removeListeners: Array<() => void> = [];
   private readonly resizeObserver: ResizeObserver;
+  private resizePending = true;
+  private previewVisible = false;
+  private viewportResize: { width: number; height: number; renderHeight: number } | null = null;
   private readonly sun: THREE.DirectionalLight;
+  private readonly ambient = new THREE.HemisphereLight('#f6f5ee', '#c6c2b9', 2.1);
+  private readonly groundMaterial = new THREE.MeshStandardMaterial({ color: '#eceae4', roughness: .98, metalness: 0 });
+  private lookKey = '';
   private readonly keys = new Set<string>();
   private readonly direction = new THREE.Vector3();
   private readonly right = new THREE.Vector3();
@@ -106,6 +130,11 @@ export class Stage {
   private axis: Axis | null = null;
   private pointerStart: PointerStart | null = null;
   private flyPointer: number | null = null;
+  private flySpeed = 3.5;
+  private pilotCameraId: string | null = null;
+  private pilotReview = false;
+  private editorView: { orthographic: boolean; position: THREE.Vector3; rotation: THREE.Quaternion; target: THREE.Vector3; fov: number; zoom: number } | null = null;
+  private sketch: { pointerId: number | null; points: THREE.Vector3[]; line: THREE.Line; done: (points: Vec3[]) => void; cancel: () => void; keydown: (event: KeyboardEvent) => void } | null = null;
   private lastPointer = new THREE.Vector2();
   private xrControls?: XRControls;
   private xrPending = false;
@@ -116,13 +145,17 @@ export class Stage {
 
   constructor(options: StageOptions) {
     this.options = options;
+    const theme = getComputedStyle(options.viewport);
+    this.editorBackground.set(theme.getPropertyValue('--viewport-background').trim());
+    this.editorGround.set(theme.getPropertyValue('--viewport-ground').trim());
+    this.editorFog = new THREE.Fog(this.editorBackground, 45, 150);
     this.scene.background = new THREE.Color('#e9e7e2');
     this.scene.fog = new THREE.Fog('#e9e7e2', 45, 150);
     this.renderer = this.createRenderer();
     this.previewRenderer = this.createRenderer();
     const canvas = this.renderer.domElement;
     canvas.tabIndex = 0;
-    canvas.setAttribute('aria-label', '3D scene editor. Drag empty space to orbit. Hold right mouse and use WASD to fly.');
+    canvas.setAttribute('aria-label', '3D scene editor. Drag empty space to orbit. Hold right mouse and use WASD to fly, scroll to adjust speed.');
     canvas.style.cssText = 'display:block;width:100%;height:100%;outline:none;touch-action:none;';
     options.viewport.appendChild(canvas);
     const previewCanvas = this.previewRenderer.domElement;
@@ -165,6 +198,7 @@ export class Stage {
     this.gizmo.addEventListener('objectChange', this.onGizmoChange);
     this.gizmo.addEventListener('mouseUp', this.onGizmoEnd);
     this.gizmo.addEventListener('dragging-changed', this.onDraggingChanged);
+    this.pathEditor=new PathEditor(this.scene,this.renderer.domElement,this.gizmo,this.orbit,()=>this.editorCamera,(index,part)=>this.options.onPathSelect?.(index,part),(id,index,phase)=>this.options.onPathChange?.(id,index,phase));
 
     this.forwardArrow.traverse(node => node.layers.set(1)); this.forwardArrow.visible=false; this.scene.add(this.forwardArrow);
     this.sun = this.createEnvironment();
@@ -184,9 +218,11 @@ export class Stage {
     this.listen(canvas, 'pointermove', this.onPointerMove as EventListener, true);
     this.listen(window, 'pointerup', this.onPointerUp as EventListener);
     this.listen(window, 'pointercancel', this.onPointerCancel as EventListener);
+    this.listen(window, 'wheel', this.onFlyWheel as EventListener, { capture: true, passive: false });
     this.listen(canvas, 'contextmenu', (event) => event.preventDefault());
     this.listen(canvas, 'dblclick', this.onDoubleClick as EventListener);
-    this.listen(canvas, 'keydown', this.onKeyDown as EventListener);
+    // Camera navigation takes priority over editor shortcuts.
+    this.listen(window, 'keydown', this.onKeyDown as EventListener, true);
     this.listen(window, 'keyup', this.onKeyUp as EventListener);
     this.listen(canvas, 'blur', this.onBlur);
     this.listen(window, 'blur', this.onBlur);
@@ -261,9 +297,21 @@ export class Stage {
 
   update(doc: SceneDocument, time: number, selectedIds: string[], playing: boolean, shotId: string | null = doc.shots[0]?.id ?? null, assets: AssetDefinition[] = []): void {
     if (this.disposed) return;
-    selectedIds = selectedIds.filter(id => !doc.objects.find(item => item.id === id)?.hidden);
+    selectedIds = hierarchyRoots(sceneEntities(doc),selectedIds).filter(id => !effectivelyHidden(doc,id));
+    const world=sceneWorldMatrices(doc,time,this.controlled ? {id:this.controlled.id,pose:this.controlled.pose}:undefined);
     const selectedId = selectedIds.at(-1) ?? null;
     this.currentDoc = doc; this.currentTime = time; this.currentShotId = shotId;
+    this.pathEditor.setPaths(doc.paths??[]);
+    const look = doc.look ?? DEFAULT_SCENE_LOOK, lookKey = JSON.stringify(look);
+    if (lookKey !== this.lookKey) {
+      this.lookKey = lookKey;
+      (this.scene.background as THREE.Color).set(look.background);
+      this.scene.fog!.color.set(look.background);
+      this.groundMaterial.color.set(look.ground);
+      this.ambient.color.set(look.ambientColor); this.ambient.intensity = look.ambientIntensity;
+      this.sun.color.set(look.keyColor); this.sun.intensity = look.keyIntensity; this.sun.position.fromArray(look.keyPosition);
+      this.renderer.toneMappingExposure = this.previewRenderer.toneMappingExposure = look.exposure;
+    }
     this.currentAssets = assets;
     const liveIds = new Set(doc.objects.map((object) => object.id));
     for (const [id, view] of this.views) {
@@ -297,21 +345,33 @@ export class Stage {
         if(object.asset)view.root.traverse(node=>{if(node instanceof THREE.Mesh && node.userData.baseColor)(node.material as THREE.MeshStandardMaterial).color.set(node.userData.baseColor).multiply(new THREE.Color(object.color));});
       }
       view.root.name = object.name;
-      view.root.visible = !object.hidden;
-      if (!this.dragPoses.has(object.id)) this.applyPose(view.root, this.controlled?.id===object.id?this.controlled.pose:evaluateTransform(object, time));
+      view.root.visible = !effectivelyHidden(doc,object.id);
+      if (view.assetRoot) {
+        const angles = this.controlled?.id===object.id&&this.controlled.joints?this.controlled.joints:evaluateJointAngles(object, time), key = JSON.stringify(angles);
+        if (key !== view.assetPose) {
+          poseAssetJoints(view.assetRoot, this.currentAssets.find(asset => asset.id === object.asset!.id)!, angles);
+          view.assetPose = key; view.bounds.copy(assetGroupBounds(view.assetRoot));
+        }
+      }
+      if (!this.dragPoses.has(object.id)) this.applyWorldMatrix(view.root, world.get(object.id)!);
     }
     const shot = doc.shots.find(item => item.id === shotId);
     const selectedCamera = doc.cameras.find(item => item.id === selectedId);
-    const preview = doc.cameras.find(item => item.id === shot?.cameraId) ?? selectedCamera ?? doc.cameras[0];
+    const preview = doc.cameras.find(item => item.id === this.pilotCameraId) ?? doc.cameras.find(item => item.id === shot?.cameraId) ?? selectedCamera ?? doc.cameras[0];
     const camera = selectedCamera ?? preview;
     this.iconCameraId = camera?.id ?? null; this.previewCameraId = preview?.id ?? null;
     this.cameraIcon.visible = !!camera; this.cameraIcon.userData.entityId = camera?.id ?? '';
-    if (camera && this.dragEntityId !== camera.id) this.applyPose(this.cameraIcon, evaluateTransform(camera, time));
+    if (camera && this.dragEntityId !== camera.id) this.applyWorldMatrix(this.cameraIcon, world.get(camera.id)!);
     if (preview) {
       if (this.dragEntityId === preview.id) this.copyIconToShot();
-      else this.applyPose(this.shotCamera, evaluateTransform(preview, time), false);
+      else this.applyWorldMatrix(this.shotCamera, world.get(preview.id)!, false);
       const fov = evaluateFov(preview, time);
       if (this.shotCamera.fov !== fov) { this.shotCamera.fov = fov; this.shotCamera.updateProjectionMatrix(); }
+      if(this.pilotCameraId){
+        this.applyWorldMatrix(this.editorCamera,world.get(preview.id)!,false);
+        this.editorCamera.matrixAutoUpdate=true;
+        this.perspectiveCamera.fov=fov;this.perspectiveCamera.updateProjectionMatrix();this.keepFlyTarget();
+      }
     }
     this.previewRenderer.domElement.hidden = !preview;
     const validSelectedId = selectedId && (selectedId === this.iconCameraId || this.views.has(selectedId)) ? selectedId : null;
@@ -320,6 +380,70 @@ export class Stage {
     this.selectedId = validSelectedId;
     this.selectedIds = selectedIds.filter(id => this.views.has(id) || id === this.iconCameraId);
     this.syncSelection();
+  }
+
+  setMotionPath(path: MotionPath|null, index=-1, editable=true, part:import('./motion-paths/model').PathPart='point'): void { this.pathEditor.show(path,index,editable,part); }
+  pathView(view:'top'|'side'|'perspective'):void { if(view==='perspective'){this.resetView();return;}this.snapView(view==='top'?new THREE.Vector3(0,1,0):new THREE.Vector3(-1,0,0)); }
+
+  /** Floor stroke mode: one drag on the ground plane returns its points; Escape cancels. */
+  drawPath(done: (points: Vec3[]) => void, cancel: () => void): void {
+    this.cancelPath();
+    this.gizmo.detach();
+    // Preallocated: BufferGeometry.setFromPoints cannot grow an existing attribute.
+    const geometry = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(3 * STROKE_LIMIT), 3)); geometry.setDrawRange(0, 0);
+    const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: '#e0703a', depthTest: false }));
+    line.renderOrder = 20; line.frustumCulled = false; this.scene.add(line);
+    const keydown = (event: KeyboardEvent): void => { if (event.key !== 'Escape') return; event.preventDefault(); event.stopImmediatePropagation(); const active = this.sketch; this.endPath(); active?.cancel(); };
+    window.addEventListener('keydown', keydown, true);
+    this.sketch = { pointerId: null, points: [], line, done, cancel, keydown };
+    this.orbit.enabled = false; this.gizmo.enabled = false; this.renderer.domElement.style.cursor = 'crosshair';
+    this.options.onStatus('Draw path · Drag across the floor · Esc cancels');
+  }
+
+  /** Leaves stroke mode without returning points. */
+  cancelPath(): void { this.pathEditor?.finish(true);const active = this.sketch; if (!active) return; this.endPath(); active.cancel(); }
+
+  get drawingPath(): boolean { return this.sketch !== null; }
+
+  private endPath(): void {
+    const active = this.sketch; if (!active) return;
+    this.sketch = null; window.removeEventListener('keydown', active.keydown, true);
+    if (active.pointerId !== null && this.renderer.domElement.hasPointerCapture(active.pointerId)) this.renderer.domElement.releasePointerCapture(active.pointerId);
+    this.scene.remove(active.line); active.line.geometry.dispose(); (active.line.material as THREE.Material).dispose();
+    this.renderer.domElement.style.cursor = ''; this.orbit.enabled = !this.dragging; this.gizmo.enabled = !!this.selectedId && !this.playing;
+    this.syncSelection();
+    this.options.onStatus(NAV_HINT);
+  }
+
+  private floorPoint(event: PointerEvent): THREE.Vector3 | null {
+    const bounds = this.renderer.domElement.getBoundingClientRect();
+    this.pointer.set(((event.clientX - bounds.left) / bounds.width) * 2 - 1, -((event.clientY - bounds.top) / bounds.height) * 2 + 1);
+    this.editorCamera.updateMatrixWorld(true); this.raycaster.setFromCamera(this.pointer, this.editorCamera);
+    const point = this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
+    return point && point.toArray().every(value => Math.abs(value) < 990) ? point : null;
+  }
+
+  private sketchPointer(event: PointerEvent, phase: 'down' | 'move' | 'up'): boolean {
+    const active = this.sketch;
+    if (!active || (phase !== 'down' && active.pointerId !== event.pointerId)) return false;
+    event.preventDefault(); event.stopImmediatePropagation();
+    if (phase === 'down') {
+      if (event.button !== 0) return true;
+      const point = this.floorPoint(event); if (!point) { this.options.onStatus('Start the path on the floor'); return true; }
+      active.pointerId = event.pointerId; active.points = [point]; this.renderer.domElement.setPointerCapture(event.pointerId);
+    } else if (phase === 'move') {
+      const point = this.floorPoint(event);
+      if (point && point.distanceTo(active.points.at(-1)!) >= SKETCH_STEP && active.points.length < STROKE_LIMIT) active.points.push(point);
+    } else {
+      const point = this.floorPoint(event); if (point && point.distanceTo(active.points.at(-1)!) > 1e-3) active.points.push(point);
+      const points = active.points.map(p => p.toArray() as Vec3);
+      this.endPath(); active.done(points); return true;
+    }
+    // Drawn just above the floor so it stays visible over the grid.
+    const position = active.line.geometry.getAttribute('position') as THREE.BufferAttribute;
+    active.points.forEach((p, index) => position.setXYZ(index, p.x, .02, p.z));
+    position.needsUpdate = true; active.line.geometry.setDrawRange(0, active.points.length);
+    return true;
   }
 
   setTool(mode: ToolMode): void {
@@ -336,10 +460,26 @@ export class Stage {
     this.syncSelection();
   }
 
-  setControlled(value: {id:string;pose:Transform;world?:boolean}|null): void {
+  setControlled(value: {id:string;pose:Transform;world?:boolean;joints?:Record<string,number>}|null): void {
     if(!!value!==!!this.controlled)this.clearNavigation();
-    this.controlled=value;this.orbit.enabled=!value&&!this.presentingXR;this.forwardArrow.visible=!!value;
-    if(value){this.forwardArrow.position.fromArray(value.pose.position).add(new THREE.Vector3(0,.07,0));const direction=new THREE.Vector3(0,0,1);if(!value.world)direction.applyEuler(new THREE.Euler(...value.pose.rotation.map(THREE.MathUtils.degToRad) as [number,number,number],'XYZ'));direction.y=0;this.forwardArrow.setDirection(direction.normalize());}
+    this.controlled=value;this.orbit.enabled=!value&&!this.pilotCameraId&&!this.presentingXR;this.forwardArrow.visible=!!value&&!this.pilotCameraId;
+    if(value&&!this.pilotCameraId){this.forwardArrow.position.fromArray(value.pose.position).add(new THREE.Vector3(0,.07,0));const direction=new THREE.Vector3(0,0,1);if(!value.world)direction.applyEuler(new THREE.Euler(...value.pose.rotation.map(THREE.MathUtils.degToRad) as [number,number,number],'XYZ'));direction.y=0;this.forwardArrow.setDirection(direction.normalize());}
+  }
+  setCameraPilot(id:string|null,review=false):void {
+    if(id!==this.pilotCameraId){
+      this.clearNavigation();this.viewTween=null;
+      if(id){
+        this.editorView={orthographic:this.editorCamera===this.orthographicCamera,position:this.editorCamera.position.clone(),rotation:this.editorCamera.quaternion.clone(),target:this.orbit.target.clone(),fov:this.perspectiveCamera.fov,zoom:this.orthographicCamera.zoom};
+        this.setProjection(false);
+      }else if(this.editorView){
+        const view=this.editorView;this.setProjection(view.orthographic);
+        this.editorCamera.position.copy(view.position);this.editorCamera.quaternion.copy(view.rotation);this.orbit.target.copy(view.target);
+        this.perspectiveCamera.fov=view.fov;this.orthographicCamera.zoom=view.zoom;this.editorCamera.updateProjectionMatrix();this.orbit.update();this.editorView=null;
+      }
+      this.pilotCameraId=id;
+    }
+    if(review&&!this.pilotReview)this.clearNavigation();
+    this.pilotReview=review;this.orbit.enabled=!id&&!this.controlled&&!this.dragging;
   }
   focusCanvas():void {this.renderer.domElement.focus({preventScroll:true});}
   placement(asset:AssetDefinition,clientX?:number,clientY?:number): Transform|null {
@@ -368,11 +508,11 @@ export class Stage {
   }
 
   focusSelection(): void {
-    if (!this.selectedIds.length) {
+    if (!this.selectedIds.length&&!this.pathEditor.active) {
       this.resetView();
       return;
     }
-    const box = this.selectedBounds();
+    const box = this.pathEditor.active?this.pathEditor.bounds!:this.selectedBounds();
     if (box.isEmpty()) return;
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
@@ -404,25 +544,50 @@ export class Stage {
     return { transform: this.readPose(this.editorCamera), fov: this.perspectiveCamera.fov };
   }
 
-  captureSnapshot(doc: SceneDocument, time: number, view: SceneView, shotId: string | null = doc.shots[0]?.id ?? null, assets:AssetDefinition[] = this.currentAssets): SceneSnapshot {
+  captureSnapshot(doc: SceneDocument, time: number, view: SceneView, shotId: string | null = doc.shots[0]?.id ?? null, assets:AssetDefinition[] = this.currentAssets, measureVisible=false,frameBounds?:ImageBounds): SceneSnapshot {
     if (view === 'shot' && !doc.shots.some(shot => shot.id === shotId)) throw new Error('Choose a shot before capturing its view.');
     if (this.disposed || !this.currentDoc) throw new Error('The stage is not ready to capture an image.');
     if (this.dragging || this.flyPointer !== null) throw new Error('Finish moving the object or camera before capturing a view.');
     const previous = { doc: this.currentDoc, time: this.currentTime, selected: [...this.selectedIds], playing: this.playing, shotId: this.currentShotId, assets:this.currentAssets };
     try {
       this.update(doc, time, [], true, shotId, assets);
-      return renderSceneSnapshot(this.previewRenderer, this.scene, this.shotCamera, doc.objects.filter(item=>!item.hidden).map(item => ({ id: item.id, name: item.name, root: this.views.get(item.id)!.root })), view, time, this.previewCameraId);
+      return renderSceneSnapshot(this.previewRenderer, this.scene, this.shotCamera, doc.objects.filter(item=>!effectivelyHidden(doc,item.id)).map(item => ({ id: item.id, name: item.name, root: this.views.get(item.id)!.root })), view, time, this.previewCameraId,measureVisible,frameBounds??doc.cameras.find(camera=>camera.id===this.previewCameraId)?.frameBounds);
     } finally { this.update(previous.doc, previous.time, previous.selected, previous.playing, previous.shotId,previous.assets); }
+  }
+
+  get canCaptureProjectCover(): boolean { return !this.disposed && !!this.currentDoc && !this.playing && !this.dragging && !this.viewportResize && !this.controlled && !this.sketch && !this.presentingXR && this.flyPointer === null; }
+
+  captureProjectPreview({ scene: doc, shotId, assets }: ProjectCoverFrame): string | null {
+    if (!doc || !doc.objects.some(item => !effectivelyHidden(doc, item.id))) return null;
+    if (!this.canCaptureProjectCover || !this.currentDoc) throw new Error('The stage is not ready for a project preview.');
+    const previous = { doc: this.currentDoc, time: this.currentTime, selected: [...this.selectedIds], playing: this.playing, shotId: this.currentShotId, assets: this.currentAssets };
+    const time = doc.shots.find(shot => shot.id === shotId)?.start ?? 0;
+    try {
+      this.update(doc, time, [], true, shotId, assets);
+      const objects = doc.objects.filter(item => !effectivelyHidden(doc, item.id)).map(item => ({ id: item.id, name: item.name, root: this.views.get(item.id)!.root }));
+      const camera = this.shotCamera.clone(); camera.aspect = 16 / 9;
+      if (!this.previewCameraId) {
+        const bounds = new THREE.Box3(); objects.forEach(item => bounds.expandByObject(item.root));
+        const center = bounds.getCenter(new THREE.Vector3()), radius = Math.max(.5, bounds.getBoundingSphere(new THREE.Sphere()).radius);
+        camera.fov = 40; const distance = radius * 1.15 / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2));
+        camera.position.copy(center).addScaledVector(new THREE.Vector3(1, .65, 1.25).normalize(), distance);
+        camera.lookAt(center); camera.far = Math.max(500, distance + radius * 2);
+      }
+      camera.updateProjectionMatrix();
+      return renderSceneSnapshot(this.previewRenderer, this.scene, camera, objects, 'shot', time, this.previewCameraId, false, doc.cameras.find(item => item.id === this.previewCameraId)?.frameBounds, { width: COVER_WIDTH, height: COVER_HEIGHT, type: 'image/webp', quality: .82 }).dataUrl;
+    } finally { this.update(previous.doc, previous.time, previous.selected, previous.playing, previous.shotId, previous.assets); }
   }
 
   createShotRenderer(cameraId: string): ShotRenderer {
     if (!this.currentDoc || this.disposed || this.dragging) throw new Error('Finish editing before exporting a shot.');
     const roots = [...this.views.values()].map(view => view.root);
     const environment = this.scene.children.filter(node => node instanceof THREE.Light || (node instanceof THREE.Mesh && node.layers.isEnabled(0)));
-    return new ShotRenderer(this.currentDoc, cameraId, [...environment, ...roots], this.scene.background, this.scene.fog);
+    return new ShotRenderer(this.currentDoc, cameraId, [...environment, ...roots], this.scene.background, this.scene.fog, this.currentAssets);
   }
 
   dispose(): void {
+    this.pathEditor.dispose();
+    this.cancelPath();
     if (this.disposed) return;
     this.disposed = true;
     this.renderer.setAnimationLoop(null);
@@ -472,7 +637,7 @@ export class Stage {
 
   private createEnvironment(): THREE.DirectionalLight {
     const floorGeometry = new THREE.PlaneGeometry(200, 200);
-    const floorMaterial = new THREE.MeshStandardMaterial({ color: '#eceae4', roughness: 0.98, metalness: 0 });
+    const floorMaterial = this.groundMaterial;
     const floor = new THREE.Mesh(floorGeometry, floorMaterial);
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.012;
@@ -480,7 +645,8 @@ export class Stage {
     this.scene.add(floor);
     this.fixedGeometries.push(floorGeometry);
     this.fixedMaterials.push(floorMaterial);
-    const grid = new THREE.GridHelper(100, 100, '#aaa79e', '#b9b6ad');
+    const theme = getComputedStyle(this.options.viewport);
+    const grid = new THREE.GridHelper(100, 100, theme.getPropertyValue('--viewport-grid-major').trim(), theme.getPropertyValue('--viewport-grid-minor').trim());
     grid.position.y = -0.008;
     grid.layers.set(1);
     for (const material of Array.isArray(grid.material) ? grid.material : [grid.material]) {
@@ -491,7 +657,7 @@ export class Stage {
     }
     this.fixedGeometries.push(grid.geometry);
     this.scene.add(grid);
-    this.scene.add(new THREE.HemisphereLight('#f6f5ee', '#c6c2b9', 2.1));
+    this.scene.add(this.ambient);
     const sun = new THREE.DirectionalLight('#fff4dc', 3.4);
     sun.position.set(-4, 9, 6);
     sun.castShadow = true;
@@ -513,65 +679,25 @@ export class Stage {
   }
 
   private geometry(kind: string): THREE.BufferGeometry {
-    const existing = this.geometries.get(kind);
-    if (existing) return existing;
-    let geometry: THREE.BufferGeometry;
-    switch (kind) {
-      case 'sphere': geometry = new THREE.SphereGeometry(0.5, 24, 16); break;
-      case 'cylinder': geometry = new THREE.CylinderGeometry(0.5, 0.5, 1, 32); break;
-      case 'cone': geometry = new THREE.ConeGeometry(0.5, 1, 32); break;
-      case 'capsule': geometry = new THREE.CapsuleGeometry(0.5, 1, 6, 12); break;
-      case 'plane': geometry = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2); break;
-      default: geometry = new THREE.BoxGeometry(1, 1, 1);
-    }
-    this.geometries.set(kind, geometry);
+    let geometry = this.geometries.get(kind);
+    if (!geometry) { geometry = primitiveGeometry(kind); this.geometries.set(kind, geometry); }
     return geometry;
   }
 
   private createEntity(object: SceneObject): EntityView {
-    const root = new THREE.Group();
-    root.userData.entityId = object.id;
-    const material = new THREE.MeshStandardMaterial({ color: object.color, roughness: 0.79, metalness: 0.01 });
-    const accent = material.clone();
-    accent.color.multiplyScalar(0.72);
-    if(object.kind==='asset'){
-      const asset=this.currentAssets.find(a=>a.id===object.asset?.id);
-      if(!asset)throw new Error('Missing asset: '+object.name);
-      const group=createAssetGroup(asset);root.add(group);group.traverse(node=>{if(node instanceof THREE.Mesh)(node.material as THREE.MeshStandardMaterial).color.multiply(new THREE.Color(object.color));});
-      return {root,bounds:new THREE.Box3().setFromObject(root),kind:object.kind,material,accent,color:object.color,assetKey:this.assetKey(asset),disposeAsset:()=>disposeAssetGroup(group)};
-    }
-    if (object.kind === 'plane') material.side = THREE.DoubleSide;
-    const add = (kind: string, x: number, y: number, z: number, sx: number, sy: number, sz: number, dark = false): THREE.Mesh => {
-      const mesh = new THREE.Mesh(this.geometry(kind), dark ? accent : material);
-      mesh.position.set(x, y, z);
-      mesh.scale.set(sx, sy, sz);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      root.add(mesh);
-      return mesh;
-    };
-    if (object.kind === 'human') {
-      add('capsule', 0, 1.12, 0, 0.41, 0.29, 0.27);
-      add('sphere', 0, 0.82, 0, 0.39, 0.28, 0.29, true);
-      add('cylinder', 0, 1.45, 0, 0.11, 0.12, 0.11);
-      add('sphere', 0, 1.63, 0, 0.32, 0.37, 0.32);
-      for (const side of [-1, 1]) {
-        add('capsule', side * 0.12, 0.43, 0, 0.14, 0.34, 0.15, true);
-        add('cube', side * 0.12, 0.055, -0.045, 0.155, 0.11, 0.28, true);
-        const arm = add('capsule', side * 0.315, 1.09, 0, 0.12, 0.28, 0.12);
-        arm.rotation.z = side * 0.1;
-        add('sphere', side * 0.344, 0.79, 0, 0.13, 0.15, 0.13);
-      }
-    } else {
-      add(object.kind, 0, 0, 0, 1, 1, 1);
-    }
-    return { root, bounds: new THREE.Box3().setFromObject(root), kind: object.kind, material, accent, color: object.color };
+    const material = new THREE.MeshStandardMaterial({ color: object.color, roughness: .79, metalness: .01 });
+    const accent = material.clone(); accent.color.multiplyScalar(.72);
+    const root = createObjectGroup(object, this.currentAssets, material, accent, kind => this.geometry(kind));
+    const asset = object.kind === 'asset' ? this.currentAssets.find(asset => asset.id === object.asset?.id) : undefined;
+    return { root, bounds: new THREE.Box3().setFromObject(root), kind: object.kind, material, accent, color: object.color,
+      ...(asset ? { assetKey: this.assetKey(asset), assetRoot: root.children[0] as THREE.Group, disposeAsset: () => disposeAssetGroup(root.children[0] as THREE.Group) } : {disposeAsset:()=>root.userData.ownedMaterials?.forEach((material:THREE.Material)=>material.dispose())}) };
   }
 
   private createSelectionMarker(): void {
     const fillGeometry = new THREE.CircleGeometry(1, 96).rotateX(-Math.PI / 2);
     const ringGeometry = new THREE.RingGeometry(0.985, 1, 96).rotateX(-Math.PI / 2);
-    const fillMaterial = new THREE.MeshBasicMaterial({ color: '#bd804b', transparent: true, opacity: 0.05, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+    const color = getComputedStyle(this.options.viewport).getPropertyValue('--accent').trim();
+    const fillMaterial = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.05, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
     const ringMaterial = fillMaterial.clone(); ringMaterial.opacity = 0.85;
     const fill = new THREE.Mesh(fillGeometry, fillMaterial), ring = new THREE.Mesh(ringGeometry, ringMaterial);
     fill.renderOrder = 1; ring.renderOrder = 2;
@@ -672,7 +798,13 @@ export class Stage {
     this.scene.add(this.cameraIcon);
   }
 
+  private applyWorldMatrix(object: THREE.Object3D, matrix: THREE.Matrix4, withScale = true): void {
+    if(!withScale){this.applyPose(object,matrixTransform(matrix),false);return;}
+    matrix.decompose(object.position,object.quaternion,object.scale); object.matrix.copy(matrix); object.matrixAutoUpdate=false; object.updateMatrixWorld(true);
+  }
+
   private applyPose(object: THREE.Object3D, pose: Transform, withScale = true): void {
+    object.matrixAutoUpdate=true;
     object.position.fromArray(pose.position);
     object.rotation.set(pose.rotation[0] * DEG, pose.rotation[1] * DEG, pose.rotation[2] * DEG, 'XYZ');
     if (withScale) object.scale.fromArray(pose.scale);
@@ -680,16 +812,17 @@ export class Stage {
 
   private readPose(object: THREE.Object3D): Transform {
     // Persist the same Euler convention used by the scene model, in degrees.
-    const rotation = new THREE.Euler().setFromQuaternion(object.quaternion, 'XYZ');
+    const rotation = eulerDegrees(object.quaternion);
     const clean = (value: number): number => Math.abs(value) < 0.000001 ? 0 : value;
     return {
       position: [object.position.x, object.position.y, object.position.z].map(clean) as [number, number, number],
-      rotation: [rotation.x / DEG, rotation.y / DEG, rotation.z / DEG].map(clean) as [number, number, number],
+      rotation: rotation.map(clean) as [number, number, number],
       scale: [object.scale.x, object.scale.y, object.scale.z].map(clean) as [number, number, number],
     };
   }
 
   private getSelectedObject(): THREE.Object3D | null {
+    if(this.selectedIds.some(id=>this.currentDoc?.objects.find(o=>o.id===id)?.components?.some(c=>c.type==='followPath'&&c.enabled&&c.pathId)))return null;
     if (this.selectedIds.length > 1) return this.groupPivot;
     if (this.selectedId !== null && this.selectedId === this.iconCameraId) return this.cameraIcon;
     if (activePivot(this.currentDoc?.objects.find(item => item.id === this.selectedId)?.components)) return this.objectPivot;
@@ -698,6 +831,9 @@ export class Stage {
 
   private syncSelection(): void {
     if (this.presentingXR) { this.gizmo.detach(); this.gizmo.enabled = false; return; }
+    if(this.sketch){this.gizmo.detach();this.gizmo.enabled=false;return;}
+    if(this.pathEditor.active&&!this.playing){this.uniformHandles(false);this.gizmo.setMode(this.pathEditor.editing?'translate':this.tool);this.gizmo.setSpace(this.pathEditor.editing?'world':this.tool==='scale'?'local':this.precision.space);this.syncAxis();if(this.gizmo.object!==this.pathEditor.point)this.gizmo.attach(this.pathEditor.point);this.gizmo.enabled=true;return;}
+    this.gizmo.setMode(this.tool);
     if (this.selectedIds.length > 1 && !this.dragging) {
       this.groupPivot.position.fromArray(this.selectionCenter());
       this.groupPivot.quaternion.copy(this.precision.space === 'local' ? this.rootFor(this.selectedId!)!.quaternion : new THREE.Quaternion());
@@ -715,7 +851,7 @@ export class Stage {
     } else if (this.gizmo.object !== selected) {
       this.gizmo.attach(selected);
     }
-    this.gizmo.enabled = !!selected && !this.playing && this.flyPointer === null && !this.pointerStart?.orbit && !this.pointerStart?.box;
+    this.gizmo.enabled = !!selected && !this.controlled && !this.pilotCameraId && !this.playing && this.flyPointer === null && !this.pointerStart?.orbit && !this.pointerStart?.box;
   }
 
   private syncAxis(): void {
@@ -730,6 +866,7 @@ export class Stage {
   }
 
   private onGizmoStart = (): void => {
+    if(this.pathEditor.active){this.pathEditor.begin();return;}
     if (this.playing || !this.selectedId || !this.gizmo.object) return;
     this.clearNavigation();
     this.dragging = true;
@@ -740,7 +877,9 @@ export class Stage {
     this.lastAxisPress = { axis: this.gizmo.axis, x: this.pointerStart?.x ?? 0, y: this.pointerStart?.y ?? 0, at: performance.now() };
     this.orbit.enabled = false;
     if (this.pointerStart) this.pointerStart.gizmo = true;
-    if (!this.options.onTransform(this.currentUpdates(), 'start', this.selectedIds.length > 1)) this.finishGizmo(true);
+    if (!this.options.onTransform(this.currentUpdates(), 'start', this.selectedIds.length > 1)) { this.finishGizmo(true); return; }
+    // Hierarchy poses render from exact matrices; handles edit TRS during a gesture.
+    for (const id of this.dragPoses.keys()) this.rootFor(id)!.matrixAutoUpdate=true;
   };
 
   private currentUpdates(): PoseUpdate[] {
@@ -748,6 +887,7 @@ export class Stage {
   }
 
   private onGizmoChange = (): void => {
+    if(this.pathEditor.active){this.pathEditor.queue();return;}
     if (!this.dragEntityId || !this.gizmo.object || this.playing) return;
     const object = this.gizmo.object;
     object.scale.clampScalar(0.01, 100);
@@ -767,7 +907,7 @@ export class Stage {
     if (!this.options.onTransform(this.currentUpdates(), 'change', this.dragPoses.size > 1)) this.finishGizmo(true);
   };
 
-  private onGizmoEnd = (): void => this.finishGizmo();
+  private onGizmoEnd = (): void => {if(this.pathEditor.gesturing)this.pathEditor.finish();else this.finishGizmo();};
 
   private onDraggingChanged = (event: { value?: unknown }): void => {
     this.dragging = event.value === true;
@@ -830,6 +970,7 @@ export class Stage {
   dropSelection(): void {
     if (this.controlled || this.dragging) return;
     const ids = this.selectedIds.filter(id => this.views.has(id)), pending = new Set(ids);
+    const subtree=new Set(ids.flatMap(id=>this.currentDoc?[...descendants(sceneEntities(this.currentDoc),id)]:[id]));
     const originals = new Map(ids.map(id => [id, this.readPose(this.views.get(id)!.root)]));
     const boxFor = (id: string) => { const view = this.views.get(id)!; view.root.updateWorldMatrix(true, true); return view.bounds.clone().applyMatrix4(view.root.matrixWorld); };
     const ordered = ids.sort((a, b) => boxFor(a).min.y - boxFor(b).min.y), updates: PoseUpdate[] = [];
@@ -837,7 +978,7 @@ export class Stage {
     try {
       for (const id of ordered) {
         const view = this.views.get(id)!, box = boxFor(id);
-        const supports = [...this.views].filter(([other, value]) => !pending.has(other) && value.root.visible).map(([, value]) => value.root);
+        const supports = [...this.views].filter(([other, value]) => !subtree.has(other) && !pending.has(other) && value.root.visible).map(([, value]) => value.root);
         supports.forEach(root => root.updateWorldMatrix(true, true));
         let height = 0;
         // Sample inside the actual rotated footprint rather than the corners of its world AABB.
@@ -880,7 +1021,9 @@ export class Stage {
 
   private onPointerDown = (event: PointerEvent): void => {
     if (this.presentingXR) return;
-    if(this.controlled){event.preventDefault();event.stopImmediatePropagation();this.focusCanvas();return;}
+    if (this.sketchPointer(event, 'down')) return;
+    if(!this.pilotCameraId&&this.pathEditor.down(event))return;
+    if(this.controlled&&(!this.pilotCameraId||this.pilotReview||event.button!==2)){event.preventDefault();event.stopImmediatePropagation();this.focusCanvas();return;}
     if (event.pointerType === 'touch' && !event.isPrimary) return;
     this.renderer.domElement.focus({ preventScroll: true });
     this.viewTween = null;
@@ -896,7 +1039,7 @@ export class Stage {
       this.orbit.enabled = false;
       this.gizmo.enabled = false;
       this.renderer.domElement.setPointerCapture(event.pointerId);
-      this.options.onStatus('Fly camera · WASD to move · Q / E down / up · Shift for speed · Release right mouse to finish');
+      this.updateFlyStatus();
       return;
     }
     if (event.button !== 0 || this.flyPointer !== null) return;
@@ -911,6 +1054,8 @@ export class Stage {
   };
 
   private onPointerMove = (event: PointerEvent): void => {
+    if(this.pathEditor.move(event))return;
+    if (this.sketchPointer(event, 'move')) return;
     const start = this.pointerStart;
     if (start?.box && start.id === event.pointerId) {
       event.preventDefault(); event.stopImmediatePropagation();
@@ -934,6 +1079,8 @@ export class Stage {
   };
 
   private onPointerUp = (event: PointerEvent): void => {
+    if(this.pathEditor.up(event))return;
+    if (this.sketchPointer(event, 'up')) return;
     if (this.flyPointer === event.pointerId) {
       this.clearNavigation();
       return;
@@ -951,6 +1098,7 @@ export class Stage {
       this.options.onSelect(this.boxSelection(start.x, start.y, event.clientX, event.clientY), start.additive ? 'append' : 'replace'); return;
     }
     if (moved <= 5 && !start.gizmo && !event.altKey && (!start.orbit || start.selected === null)) {
+      const pathId=this.pathEditor.pick(event);if(pathId){this.options.onPathOpen?.(pathId);return;}
       this.options.onSelect(start.selected ? [start.selected] : [], start.toggle ? 'toggle' : 'replace');
     }
   };
@@ -970,6 +1118,8 @@ export class Stage {
   }
 
   private onPointerCancel = (): void => {
+    this.pathEditor.finish(true);
+    if (this.sketch) { this.cancelPath(); return; }
     this.pointerStart = null;
     this.selectionBox.hidden = true;
     this.clearNavigation();
@@ -978,6 +1128,7 @@ export class Stage {
   };
 
   private onBlur = (): void => {
+    this.pathEditor.finish(true);
     if (this.pointerStart?.box && this.renderer.domElement.hasPointerCapture(this.pointerStart.id)) this.renderer.domElement.releasePointerCapture(this.pointerStart.id);
     this.pointerStart = null;
     this.selectionBox.hidden = true;
@@ -990,15 +1141,17 @@ export class Stage {
   }
 
   private onKeyDown = (event: KeyboardEvent): void => {
+    if(event.key==='Escape'&&this.pathEditor.gesturing){event.preventDefault();event.stopImmediatePropagation();this.pathEditor.finish(true);return;}
     if (this.presentingXR) return;
-    if(this.controlled)return;
+    if(this.controlled&&(!this.pilotCameraId||this.pilotReview))return;
     if (document.activeElement !== this.renderer.domElement || this.isTextInput(event.target)) return;
-    const key = event.key.toLowerCase();
+    const key = event.code.startsWith('Key') ? event.code.slice(3).toLowerCase() : event.key.toLowerCase();
     if (this.flyPointer !== null && ['w', 'a', 's', 'd', 'q', 'e', 'shift'].includes(key)) {
       this.keys.add(key);
+      if (key === 'shift' && !event.repeat) this.updateFlyStatus();
       event.preventDefault();
       event.stopPropagation();
-    } else if (key === 'f' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    } else if (key === 'f' && !this.pilotCameraId && !event.ctrlKey && !event.metaKey && !event.altKey) {
       event.preventDefault();
       event.stopPropagation();
       this.focusSelection();
@@ -1009,13 +1162,28 @@ export class Stage {
   };
 
   private onKeyUp = (event: KeyboardEvent): void => {
-    const key = event.key.toLowerCase();
+    const key = event.code.startsWith('Key') ? event.code.slice(3).toLowerCase() : event.key.toLowerCase();
     if (this.keys.has(key) && this.flyPointer !== null) {
       event.preventDefault();
       event.stopPropagation();
     }
     this.keys.delete(key);
+    if (key === 'shift' && this.flyPointer !== null) this.updateFlyStatus();
   };
+
+  private onFlyWheel = (event: WheelEvent): void => {
+    if (this.flyPointer === null || event.ctrlKey || event.metaKey) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const pixels = event.deltaY * (event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? this.options.viewport.clientHeight : 1);
+    this.flySpeed = THREE.MathUtils.clamp(this.flySpeed * Math.pow(1.25, -pixels / 100), .1, 200);
+    this.updateFlyStatus();
+  };
+
+  private updateFlyStatus(): void {
+    const speed = this.flySpeed * (this.keys.has('shift') ? 12 / 3.5 : 1);
+    this.options.onStatus(`${this.pilotCameraId?'Pilot camera':'Fly'} · ${speed.toFixed(1)} m/s · WASD move · Q / E down / up · Scroll speed · Shift boost${this.pilotCameraId?' · R record / stop':' · Release right mouse to finish'}`);
+  }
 
   private clearNavigation(): void {
     const pointer = this.flyPointer;
@@ -1024,12 +1192,12 @@ export class Stage {
     if (pointer !== null && this.renderer.domElement.hasPointerCapture(pointer)) {
       this.renderer.domElement.releasePointerCapture(pointer);
     }
-    this.orbit.enabled = !this.dragging;
-    this.gizmo.enabled = !!this.selectedId && !this.playing && !this.pointerStart?.orbit;
+    this.orbit.enabled = !this.dragging && !this.controlled && !this.pilotCameraId;
+    this.gizmo.enabled = !!this.selectedId && !this.controlled && !this.pilotCameraId && !this.playing && !this.pointerStart?.orbit;
     if (pointer !== null) {
       this.gizmo.axis = null;
       this.orbit.update();
-      this.options.onStatus(NAV_HINT);
+      this.options.onStatus(this.pilotCameraId?'Pilot camera · Hold right mouse + WASD · R record / stop · Esc to finish':NAV_HINT);
     }
   }
 
@@ -1051,38 +1219,69 @@ export class Stage {
     if (this.keys.has('e')) this.velocity.y += 1;
     if (this.keys.has('q')) this.velocity.y -= 1;
     if (this.velocity.lengthSq() > 0) {
-      this.velocity.normalize().multiplyScalar(delta * (this.keys.has('shift') ? 12 : 3.5));
+      this.velocity.normalize().multiplyScalar(delta * this.flySpeed * (this.keys.has('shift') ? 12 / 3.5 : 1));
       this.editorCamera.position.add(this.velocity);
       this.orbit.target.add(this.velocity);
     }
   }
 
-  private resize = (): void => {
-    if (this.disposed || this.presentingXR) return;
+  beginViewportResize(maxHeight: number): void {
+    const { viewport } = this.options;
+    this.viewportResize = { width: Math.max(1, viewport.clientWidth), height: Math.max(1, viewport.clientHeight), renderHeight: Math.max(viewport.clientHeight, Math.ceil(maxHeight)) };
+    this.resize();
+  }
+
+  endViewportResize(): void {
+    if (!this.viewportResize) return;
+    this.viewportResize = null;
+    this.resize();
+  }
+
+  // ResizeObserver runs after animation callbacks. Only resize immediately before drawing,
+  // so a cleared WebGL buffer can never be presented between two animation frames.
+  private resize = (): void => { this.resizePending = true; };
+
+  private applyResize(): void {
+    this.resizePending = false;
     const { viewport, preview } = this.options;
-    const width = Math.max(1, viewport.clientWidth);
-    const height = Math.max(1, viewport.clientHeight);
+    const locked = this.viewportResize;
+    const width = locked?.width ?? Math.max(1, viewport.clientWidth);
+    const height = locked?.renderHeight ?? Math.max(1, viewport.clientHeight);
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    this.renderer.setPixelRatio(dpr);
-    this.renderer.setSize(width, height, false);
-    this.perspectiveCamera.aspect = width / height;
-    this.perspectiveCamera.updateProjectionMatrix();
-    this.orthographicCamera.left = -10 * width / height; this.orthographicCamera.right = 10 * width / height;
-    this.orthographicCamera.updateProjectionMatrix();
-    const hostWidth = Math.max(1, preview.clientWidth);
-    const hostHeight = preview.clientHeight || hostWidth * 9 / 16;
+    const size = this.renderer.getSize(new THREE.Vector2());
+    if (this.renderer.getPixelRatio() !== dpr) this.renderer.setPixelRatio(dpr);
+    if (size.x !== width || size.y !== height) this.renderer.setSize(width, height, false);
+    this.renderer.domElement.style.width = locked ? `${width}px` : '100%';
+    this.renderer.domElement.style.height = locked ? `${height}px` : '100%';
+    const aspect = width / (locked?.height ?? height);
+    this.perspectiveCamera.aspect = aspect;
+    this.orthographicCamera.left = -10 * aspect; this.orthographicCamera.right = 10 * aspect;
+    if (locked) {
+      // Extend the drawing below the visible viewport without moving its existing pixels.
+      // Both upward and downward drags then reveal/crop this same full-height canvas.
+      this.perspectiveCamera.setViewOffset(locked.width, locked.height, 0, 0, width, height);
+      this.orthographicCamera.setViewOffset(locked.width, locked.height, 0, 0, width, height);
+    } else {
+      this.perspectiveCamera.clearViewOffset();
+      this.orthographicCamera.clearViewOffset();
+    }
+    const hostWidth = preview.clientWidth, hostHeight = preview.clientHeight;
+    this.previewVisible = hostWidth > 0 && hostHeight > 0;
+    if (!this.previewVisible) return;
     const previewWidth = Math.max(1, Math.min(hostWidth, hostHeight * 16 / 9));
     const previewHeight = previewWidth * 9 / 16;
-    this.previewRenderer.setPixelRatio(dpr);
-    this.previewRenderer.setSize(Math.round(previewWidth), Math.round(previewHeight), false);
+    this.previewRenderer.getSize(size);
+    if (this.previewRenderer.getPixelRatio() !== dpr) this.previewRenderer.setPixelRatio(dpr);
+    if (size.x !== Math.round(previewWidth) || size.y !== Math.round(previewHeight)) this.previewRenderer.setSize(Math.round(previewWidth), Math.round(previewHeight), false);
     this.previewRenderer.domElement.style.width = `${previewWidth}px`;
     this.previewRenderer.domElement.style.height = `${previewHeight}px`;
-  };
+  }
 
   private render = (time: number, frame?: XRFrame): void => {
     if (this.disposed) return;
-    this.options.onFrame?.(time);
+    this.pathEditor.flush();
     if (this.presentingXR && this.xrControls) {
+      this.options.onFrame?.(time);
       this.xrControls.updateView(frame, time);
       this.xrControls.rig.updateMatrixWorld(true);
       this.renderer.xr.updateCamera(this.xrControls.camera);
@@ -1091,6 +1290,7 @@ export class Stage {
       this.renderer.render(this.scene, this.xrControls.camera);
       return;
     }
+    if (this.resizePending && !this.presentingXR) this.applyResize();
     const delta = Math.min(this.lastFrame ? (time - this.lastFrame) / 1000 : 0, 0.05);
     this.lastFrame = time;
     this.updateFly(delta);
@@ -1099,12 +1299,42 @@ export class Stage {
       this.editorCamera.position.lerpVectors(this.viewTween.from, this.viewTween.to, eased); this.orbit.update();
       if (t >= 1) this.viewTween = null;
     } else if (this.flyPointer === null && this.orbit.enabled) this.orbit.update();
+    // Sample a piloted camera after navigation, then update the scene at that same time.
+    this.options.onFrame?.(time);
     if (this.dragEntityId !== null && this.dragEntityId === this.iconCameraId) this.copyIconToShot();
     this.syncSelectionMarker();
+    this.pathEditor.render();
     this.navigation.update(this.editorCamera, this.editorCamera === this.orthographicCamera, !this.controlled && !this.dragging);
-    this.renderer.render(this.scene, this.editorCamera);
-    this.previewRenderer.render(this.scene, this.shotCamera);
+    if(this.pilotCameraId)this.renderPilotView();
+    else if (this.presentingXR) this.renderer.render(this.scene, this.editorCamera);
+    else {
+      // Editor chrome has its own ground/background. Restore the scene's
+      // environment before preview, snapshots and exports can use it.
+      const { background, fog } = this.scene, ground = this.groundMaterial.color;
+      try {
+        this.scene.background = this.editorBackground;
+        this.scene.fog = this.editorFog;
+        this.groundMaterial.color = this.editorGround;
+        this.renderer.render(this.scene, this.editorCamera);
+      } finally {
+        this.scene.background = background;
+        this.scene.fog = fog;
+        this.groundMaterial.color = ground;
+      }
+    }
+    if (this.previewVisible) renderCameraFrame(this.previewRenderer,this.scene,this.shotCamera,this.currentDoc?.cameras.find(camera=>camera.id===this.previewCameraId)?.frameBounds);
   };
+
+  private renderPilotView():void {
+    const size=this.renderer.getSize(new THREE.Vector2()),visibleHeight=this.viewportResize?.height??size.y,width=Math.min(size.x,visibleHeight*16/9),height=width*9/16,x=(size.x-width)/2,top=(visibleHeight-height)/2,y=size.y-top-height;
+    const viewport=this.renderer.getViewport(new THREE.Vector4()),scissor=this.renderer.getScissor(new THREE.Vector4()),test=this.renderer.getScissorTest(),color=this.renderer.getClearColor(new THREE.Color()),alpha=this.renderer.getClearAlpha();
+    const bounds=this.currentDoc?.cameras.find(camera=>camera.id===this.pilotCameraId)?.frameBounds??[0,0,1,1];
+    try{
+      this.renderer.setScissorTest(false);this.renderer.setClearColor(0,1);this.renderer.clear();
+      this.renderer.setViewport(x,y,width,height);this.renderer.setScissor(x,y,width,height);this.renderer.setScissorTest(true);
+      renderCameraFrame(this.renderer,this.scene,this.shotCamera,[(x+bounds[0]*width)/size.x,(top+bounds[1]*height)/size.y,(x+bounds[2]*width)/size.x,(top+bounds[3]*height)/size.y]);
+    }finally{this.renderer.setViewport(viewport);this.renderer.setScissor(scissor);this.renderer.setScissorTest(test);this.renderer.setClearColor(color,alpha);}
+  }
 
   private listen(target: EventTarget, type: string, listener: EventListener, options?: boolean | AddEventListenerOptions): void {
     target.addEventListener(type, listener, options);

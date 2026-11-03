@@ -5,10 +5,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { MetaProvider } from '../ai/meta.ts';
 import { AssetLibrary } from './library.ts';
-import { generateAsset } from './expert.ts';
+import { generateAsset,type AssetJob } from './expert.ts';
 import { budgetProvider } from './tools.ts';
 import { builtinAssets } from '../../src/assets/builtin.ts';
-import { builtinAssets as catalogAssets } from '../../src/assets/library.ts';
+import { builtinAssets as catalogAssets,instantiateAsset } from '../../src/assets/library.ts';
 import { assetRecipeSchema } from '../../src/assets/model.ts';
 import { createEmptyScene, History } from '../../src/model.ts';
 import { createProject, parseProject, serializeProject } from '../../src/project/storage.ts';
@@ -27,19 +27,22 @@ function transportFor(mode: 'generate' | 'reuse', assetId = 'builtin-chair') {
     const body = JSON.parse(init.body as string); requests.push(body);
     if (!body.tools) {
       expertCalls++;
+      if(expertCalls===1){const context=JSON.parse(body.input[0].content[0].text);assert.deepEqual(context.baseRecipe.parts,builtinAssets[0].parts,'The specialist receives the inspected base geometry, not only a short description.');}
       const recipe = assetRecipeSchema.strip().parse(builtinAssets[0]); recipe.name = 'Blue test chair'; recipe.tags = ['blue', 'test chair']; recipe.parts.forEach(p => p.color = '#4466aa');
+      recipe.parts.push({...structuredClone(recipe.parts[0]),id:'side_handle',name:'Side handle',position:[.6,.6,0],size:[.12,.12,.12]});
       return Response.json(json(expertCalls === 1 ? recipe : { approved: true, notes: 'All rendered views meet the brief.', revisedRecipe: null }));
     }
     directorCalls++;
-    assert.equal(body.parallel_tool_calls, false); assert.equal(body.store, false);
+    assert.equal(body.parallel_tool_calls, true); assert.equal(body.store, false);
     const outputs = body.input.filter((x: any) => x.type === 'function_call_output').map((x: any) => JSON.parse(x.output));
     const call = (name: string, args: unknown) => Response.json({ status: 'completed', output: [{ type: 'function_call', call_id: 'call_' + directorCalls, name, arguments: JSON.stringify(args), status: 'completed' }] });
     if (directorCalls === 1) return call('search_assets', { query: mode === 'generate' ? 'blue test chair special' : 'chair' });
-    if (directorCalls === 2) return mode === 'generate' ? call('generate_asset', { searchId: outputs[0].searchId, brief: 'Blue chair with four legs and a backrest, matching the requested special asset.', reason: 'The user explicitly requested a new test asset variant.' }) : call('read_asset', { assetId });
-    const selected = mode === 'generate' ? outputs[1].asset.id : assetId;
-    if (directorCalls === 3) return call('instantiate_asset', { assetId: selected, sceneId: 'scene-1', name: 'Chair A', transform });
-    if (directorCalls === 4) return call('instantiate_asset', { assetId: selected, sceneId: 'scene-1', name: 'Chair B', transform: { ...transform, position: [2, 0, 0] } });
-    return Response.json(json({ summary: 'Prepared two instances.', requestedViews: [], objectCounts: [], operations: [outputs[2].operation, outputs[3].operation] }));
+    if (directorCalls === 2) return call('read_asset', { assetId });
+    if(mode==='generate'&&directorCalls===3)return call('generate_asset',{searchId:outputs[0].searchId,baseAssetId:assetId,brief:'Blue chair with four legs and a backrest, matching the requested special asset.',reason:'The user explicitly requested a new independent test asset variant.'});
+    const selected = mode === 'generate' ? outputs.find((item:any)=>item.asset)?.asset.id : assetId,start=mode==='generate'?4:3;
+    if (directorCalls === start) return call('instantiate_asset', { assetId: selected, sceneId: 'scene-1', name: 'Chair A', transform });
+    if (directorCalls === start+1) return call('instantiate_asset', { assetId: selected, sceneId: 'scene-1', name: 'Chair B', transform: { ...transform, position: [2, 0, 0] } });
+    return Response.json(json({ summary: 'Prepared two instances.', requestedViews: [], objectCounts: [], operations: outputs.filter((item:any)=>item.placementId).map((item:any)=>item.operation) }));
   }) as typeof fetch;
   return { provider: new MetaProvider({ apiKey: 'do-not-log-this-test-secret', model: 'test' }, transport), requests, counts: () => ({ directorCalls, expertCalls }) };
 }
@@ -63,6 +66,15 @@ test('library-first native tools reuse assets, preserve instance independence, e
   assert.throws(() => validateProjectContent({ ...result, assets: [] }), /Missing asset/);
   const bad = structuredClone(response.plan.operations); bad[1] = { type: 'remove_object', sceneId: 'missing', id: 'missing' };
   assert.throws(() => applyProjectOperations(source.project, bad, 0)); assert.equal(JSON.stringify(source), frozen);
+  const target=moved.scenes[0].objects[0];let swapCalls=0;
+  let reuseTurns=0;const directDiagnostic=newDiagnostic(),direct=await proposeSceneEdit({...source,project:moved,prompt:'Inspect the current chair, then add one more instance.'},{name:'test',model:'test',async generateObject(){throw new Error('Use native tools.');},async generateToolTurn(request){reuseTurns++;const prepared=request.input.filter((item:any)=>item.type==='function_call_output').map((item:any)=>JSON.parse(item.output));if(reuseTurns<=2)return {output:[],calls:[{id:'inspect-'+reuseTurns,name:'render_asset',arguments:JSON.stringify({assetId:target.asset!.id,jointAngles:reuseTurns===1?{'missing-pose-part':30}:{}})}],text:''};return reuseTurns===3?{output:[],calls:[{id:'reuse-current',name:'instantiate_asset',arguments:JSON.stringify({assetId:target.asset!.id,sceneId:'scene-1',name:'Chair C',transform:{...transform,position:[4,0,0]}})}],text:''}:{output:[],calls:[],text:JSON.stringify({summary:'Reuse current chair',requestedViews:[],objectCounts:[],operations:prepared.filter(item=>item.placementId).map(item=>item.operation)})};}},undefined,directDiagnostic,library);
+  assert.equal(direct.status,'ready');assert.equal(reuseTurns,4);assert.match(directDiagnostic.toolCalls![0].error!,/Invalid joint/);const measured=directDiagnostic.toolCalls![1].result as any;assert.ok(measured.measurements.parts.every((part:any)=>part.positionInAssetSpace.length===3));assert.deepEqual(directDiagnostic.toolCalls!.map(call=>call.name),['render_asset','render_asset','instantiate_asset']);if(direct.status==='ready'){const extended=applyProjectOperations(moved,direct.plan.operations,0);assert.equal(extended.scenes[0].objects.length,3);assert.deepEqual(extended.scenes[0].objects.slice(0,2),moved.scenes[0].objects);}
+  const swap=await proposeSceneEdit({...source,project:moved,prompt:'Use the existing table prefab for this object, preserving its state.'},{name:'test',model:'test',async generateObject(){throw new Error('Use native tools.');},async generateToolTurn(){swapCalls++;return swapCalls===1?{output:[],calls:[],text:JSON.stringify({summary:'Change tint without inspection',requestedViews:[],objectCounts:[],operations:[{type:'set_color',sceneId:'scene-1',id:target.id,color:'#ffffff'}]})}:swapCalls===2?{output:[],calls:['builtin-table'].map(assetId=>({id:assetId,name:'read_asset',arguments:JSON.stringify({assetId})})),text:''}:{output:[],calls:[],text:JSON.stringify({summary:'Swap prefab',requestedViews:[],objectCounts:[],operations:[{type:'set_asset',sceneId:'scene-1',id:target.id,assetId:'builtin-table'},{type:'set_color',sceneId:'scene-1',id:target.id,color:'#ffffff'}]})};}},undefined,newDiagnostic(),library);
+  assert.equal(swap.status,'ready');assert.equal(swapCalls,3);if(swap.status==='ready'){const changed=applyProjectOperations(moved,swap.plan.operations,0);assert.deepEqual(changed.scenes[0].objects[0],{...target,asset:{id:'builtin-table'}});assert.deepEqual(changed.scenes[0].objects[1],moved.scenes[0].objects[1]);}
+  const human=catalogAssets.find(asset=>asset.id==='builtin-porter')!,actor=instantiateAsset(human,'performer',[2,0,3],6);actor.jointAngles={'body_yaw':55,'left-shoulder_side':22};
+  const posed=applyProjectOperations({name:'Pose inspection',scenes:[{...createEmptyScene(),duration:6,objects:[actor]}],assets:[human]},[{type:'set_property_keys',sceneId:'scene-1',id:actor.id,path:'jointAngles.right-forearm',keys:[{time:0,value:0,interpolation:'linear'},{time:4,value:-60,interpolation:'linear'}]}],0),poseFrozen=JSON.stringify(posed),poseDiagnostic=newDiagnostic();let poseTurns=0;
+  await proposeSceneEdit({...source,project:posed,prompt:'Inspect the existing writing pose at two seconds without changing it.'},{name:'test',model:'test',async generateObject(){throw new Error('Use native tools.');},async generateToolTurn(request){poseTurns++;if(poseTurns===1)return {output:[],calls:[{id:'actual-pose',name:'render_asset',arguments:JSON.stringify({assetId:human.id,instance:{sceneId:'scene-1',id:actor.id,time:2},jointAngles:{'left-upperarm':-30}})}],text:''};return {output:[],calls:[],text:JSON.stringify({summary:'Inspected the evaluated pose.',requestedViews:[],objectCounts:[],operations:[]})};}},undefined,poseDiagnostic,library);
+  const inspected=poseDiagnostic.toolCalls![0].result as any;assert.equal(inspected.jointAngles.body_yaw,55);assert.equal(inspected.jointAngles['left-shoulder_side'],22);assert.equal(inspected.jointAngles['right-forearm'],-30);assert.equal(inspected.jointAngles['left-upperarm'],-30);assert.deepEqual(inspected.instance.transform.position,[2,0,3]);assert.equal(JSON.stringify(posed),poseFrozen,'Pose inspection cannot alter the prefab or its keyed instance.');
 });
 
 test('missing asset is delegated, rendered, inspected and persisted; a restarted library reuses it without expert calls', async () => {
@@ -70,12 +82,14 @@ test('missing asset is delegated, rendered, inspected and persisted; a restarted
   const response = await proposeSceneEdit(source, fake.provider, undefined, diagnostic, library);
   assert.equal(response.status, 'ready'); if (response.status !== 'ready') return;
   assert.equal(fake.counts().expertCalls, 2);
+  assert.ok(!diagnostic.toolCalls!.some(call=>call.error));
   const expertRequests = fake.requests.filter(r => !r.tools);
   assert.match(expertRequests[0].instructions, /dedicated Proxy Asset Modeling Expert/);
   assert.ok(!expertRequests[0].instructions.includes('film-set builder'));
   assert.ok(expertRequests[1].input[0].content.some((p: any) => p.type === 'input_image' && p.image_url.startsWith('data:image/png;base64,')));
   const result = applyProjectOperations(source.project, response.plan.operations, 0), asset = result.assets![0];
-  const jobs = await readdir(path.join(directory, 'jobs')); const job = await library.readJob(jobs[0].replace('.json', ''));
+  assert.deepEqual(asset.parts.find(part=>part.id==='seat')!.position,builtinAssets[0].parts.find(part=>part.id==='seat')!.position,'An asymmetric variant retains its base origin instead of shifting its skeleton and old placements.');
+  const jobs = await readdir(path.join(directory, 'jobs')); const job = await library.readJob(jobs[0].replace('.json', '')) as AssetJob;
   assert.equal(job.status, 'ready'); assert.equal((job.attempts as unknown[]).length, 2); assert.ok(!JSON.stringify(job).includes('do-not-log-this-test-secret'));
   const fresh = new AssetLibrary(directory); assert.deepEqual(await fresh.read(asset.id), asset);
   assert.ok((await fresh.preview(asset)).length > 1000);
@@ -89,15 +103,118 @@ test('missing asset is delegated, rendered, inspected and persisted; a restarted
   assert.deepEqual(await fresh.read(variant.id), concurrent.find(r => r.status === 'fulfilled')!.value);
 });
 
-test('rejected visual reviews and interrupted jobs retain raw evidence, spend a bounded number of calls and never register a ready asset', async () => {
+test('rejected and interrupted jobs retain evidence and budgets; a later explicit correction review can publish without regeneration', async () => {
   const library = new AssetLibrary(await mkdtemp(path.join(tmpdir(), 'littletake-assets-'))), recipe = assetRecipeSchema.strip().parse(builtinAssets[0]);
   let calls = 0;
   const provider = { name: 'test', model: 'test', async generateObject(request: any) { calls++; const value = calls === 1 ? recipe : { approved: false, notes: 'The requested feature is missing.', revisedRecipe: recipe }; request.onOutput?.(JSON.stringify(value)); return value; } };
   await assert.rejects(generateAsset('Test a chair which must not pass inspection.', provider, library), /review did not pass/);
-  assert.equal(calls, 3); assert.equal((await library.list()).length, catalogAssets.length);
+  assert.equal(calls, 4); assert.equal((await library.list()).length, catalogAssets.length);
   const jobs = await readdir(path.join(library.directory, 'jobs')), job = await library.readJob(jobs[0].replace('.json', ''));
-  assert.equal(job.status, 'failed'); assert.equal((job.attempts as any[]).filter(a => a.rawOutput).length, 3);
-  const controller = new AbortController(); controller.abort(); await assert.rejects(generateAsset('A cancelled chair', provider, library, controller.signal)); assert.equal(calls, 3);
+  assert.equal(job.status, 'failed'); assert.equal((job.attempts as any[]).filter(a => a.rawOutput).length, 4);
+  const referenceImage='data:image/png;base64,'+Buffer.from(await library.preview(builtinAssets[0])).toString('base64');let resumedCalls=0;
+  const revision=structuredClone(recipe);revision.parts[0].color='#224466';
+  const resumed=await generateAsset('Continue the saved revised chair.',{name:'test',model:'test',async generateObject(request:any){resumedCalls++;assert.equal(request.schemaName,'proxy_asset_review');assert.ok(request.content.some((part:any)=>part.dataUrl===referenceImage));return {approved:true,notes:'The saved correction passes the rendered review.',revisedRecipe:resumedCalls===1?revision:null};}},library,undefined,{referenceImage,resumeJobId:String(job.id)});
+  assert.equal(resumedCalls,2);assert.equal(resumed.asset.parts[0].color,'#224466');assert.equal(resumed.job.resumedFrom,job.id);assert.deepEqual(await library.read(resumed.asset.id),resumed.asset);assert.equal((await library.readJob(String(job.id))).status,'failed');
+  const controller = new AbortController(); controller.abort(); await assert.rejects(generateAsset('A cancelled chair', provider, library, controller.signal)); assert.equal(calls, 4);
   const limited = budgetProvider(provider, 1), request = { instructions: '', content: [], schema: {}, schemaName: 'test' };
-  await limited.generateObject(request); await assert.rejects(limited.generateObject(request), /call limit/); assert.equal(calls, 4);
+  await limited.generateObject(request); await assert.rejects(limited.generateObject(request), /call limit/); assert.equal(calls, 5);
+});
+
+test('an instance that failed before read_asset succeeds when retried with the same arguments', async () => {
+  const library = new AssetLibrary(await mkdtemp(path.join(tmpdir(), 'littletake-assets-'))), diagnostic = newDiagnostic();
+  const place = { assetId: 'builtin-chair', sceneId: 'scene-1', name: 'Chair A', transform };
+  let directorCalls = 0;
+  const transport = (async (_url: unknown, init: RequestInit) => {
+    const body = JSON.parse(init.body as string), outputs = body.input.filter((x: any) => x.type === 'function_call_output').map((x: any) => JSON.parse(x.output));
+    directorCalls++;
+    const call = (name: string, args: unknown) => Response.json({ status: 'completed', output: [{ type: 'function_call', call_id: 'call_' + directorCalls, name, arguments: JSON.stringify(args), status: 'completed' }] });
+    if (directorCalls === 1) return call('instantiate_asset', place);
+    if (directorCalls === 2) { assert.match(outputs.at(-1).error, /Read the asset/); return call('read_asset', { assetId: 'builtin-chair' }); }
+    if (directorCalls === 3) return call('instantiate_asset', place);
+    return Response.json(json({ summary: 'Placed one chair.', requestedViews: [], objectCounts: [], operations: outputs.filter((item: any) => item.placementId).map((item: any) => item.operation) }));
+  }) as typeof fetch;
+  const response = await proposeSceneEdit(input(), new MetaProvider({ apiKey: 'test', model: 'test' }, transport), undefined, diagnostic, library);
+  assert.equal(response.status, 'ready');
+  assert.deepEqual(diagnostic.toolCalls!.map(c => [c.name, Boolean(c.error)]), [['instantiate_asset', true], ['read_asset', false], ['instantiate_asset', false]]);
+});
+
+test('a round with a new tool error is progress; only repeated results stop the loop', async () => {
+  const library = new AssetLibrary(await mkdtemp(path.join(tmpdir(), 'littletake-assets-'))), diagnostic = newDiagnostic();
+  const place = { assetId: 'builtin-chair', sceneId: 'scene-1', name: 'Chair A', transform };
+  let directorCalls = 0;
+  const transport = (async (_url: unknown, init: RequestInit) => {
+    const body = JSON.parse(init.body as string), outputs = body.input.filter((x: any) => x.type === 'function_call_output').map((x: any) => JSON.parse(x.output));
+    directorCalls++;
+    const call = (name: string, args: unknown) => Response.json({ status: 'completed', output: [{ type: 'function_call', call_id: 'call_' + directorCalls, name, arguments: JSON.stringify(args), status: 'completed' }] });
+    if (directorCalls === 1) return call('instantiate_asset', place);
+    if (directorCalls === 2) return call('read_asset', { assetId: 'missing-asset' });
+    if (directorCalls === 3) return call('read_asset', { assetId: 'builtin-chair' });
+    if (directorCalls === 4) return call('instantiate_asset', { ...place, name: 'Chair B' });
+    return Response.json(json({ summary: 'Placed one chair.', requestedViews: [], objectCounts: [], operations: outputs.filter((item: any) => item.placementId).map((item: any) => item.operation) }));
+  }) as typeof fetch;
+  const response = await proposeSceneEdit(input(), new MetaProvider({ apiKey: 'test', model: 'test' }, transport), undefined, diagnostic, library);
+  assert.equal(response.status, 'ready');
+  assert.deepEqual(diagnostic.toolCalls!.map(c => Boolean(c.error)), [true, true, false, false]);
+
+  let repeats = 0;
+  const looping = (async () => { repeats++; return Response.json({ status: 'completed', output: [{ type: 'function_call', call_id: 'call_' + repeats, name: 'read_asset', arguments: JSON.stringify({ assetId: 'missing-asset' }), status: 'completed' }] }); }) as typeof fetch;
+  await assert.rejects(proposeSceneEdit(input(), new MetaProvider({ apiKey: 'test', model: 'test' }, looping), undefined, newDiagnostic(), library), /only repeated earlier results or errors/);
+  assert.equal(repeats, 3);
+});
+
+test('a round asking for more than 8 tools runs 8 and answers the rest instead of failing', async () => {
+  const library = new AssetLibrary(await mkdtemp(path.join(tmpdir(), 'littletake-assets-'))), diagnostic = newDiagnostic();
+  let directorCalls = 0, skipped: any[] = [];
+  const transport = (async (_url: unknown, init: RequestInit) => {
+    const body = JSON.parse(init.body as string); directorCalls++;
+    if (directorCalls === 1) return Response.json({ status: 'completed', output: Array.from({ length: 9 }, (_, i) => ({ type: 'function_call', call_id: 'call_' + i, name: 'search_assets', arguments: JSON.stringify({ query: 'chair ' + i }), status: 'completed' })) });
+    skipped = body.input.filter((x: any) => x.type === 'function_call_output' && /Not run/.test(x.output));
+    return Response.json(json({ summary: 'Nothing to place.', requestedViews: [], objectCounts: [], operations: [] }));
+  }) as typeof fetch;
+  const response = await proposeSceneEdit(input(), new MetaProvider({ apiKey: 'test', model: 'test' }, transport), undefined, diagnostic, library);
+  assert.equal(response.status, 'ready');
+  assert.equal(diagnostic.toolCalls!.length, 8);
+  assert.deepEqual(skipped.map((x: any) => x.call_id), ['call_8']);
+});
+
+test('an empty or "null" baseAssetId starts a new asset instead of failing the call', async () => {
+  for (const base of ['', 'null']) {
+    const library = new AssetLibrary(await mkdtemp(path.join(tmpdir(), 'littletake-assets-'))), diagnostic = newDiagnostic();
+    let directorCalls = 0, expertCalls = 0, expertBase: unknown = 'unset';
+    const transport = (async (_url: unknown, init: RequestInit) => {
+      const body = JSON.parse(init.body as string);
+      if (!body.tools) {
+        expertCalls++;
+        if (expertCalls === 1) expertBase = JSON.parse(body.input[0].content[0].text).baseRecipe ?? null;
+        const recipe = assetRecipeSchema.strip().parse(builtinAssets[0]); recipe.name = 'Lobby desk'; recipe.tags = ['desk', 'lobby'];
+        return Response.json(json(expertCalls === 1 ? recipe : { approved: true, notes: 'All rendered views meet the brief.', revisedRecipe: null }));
+      }
+      directorCalls++;
+      const outputs = body.input.filter((x: any) => x.type === 'function_call_output').map((x: any) => JSON.parse(x.output));
+      const call = (name: string, args: unknown) => Response.json({ status: 'completed', output: [{ type: 'function_call', call_id: 'call_' + directorCalls, name, arguments: JSON.stringify(args), status: 'completed' }] });
+      if (directorCalls === 1) return call('search_assets', { query: 'curved lobby desk' });
+      if (directorCalls === 2) return call('generate_asset', { searchId: outputs[0].searchId, baseAssetId: base, brief: 'Curved wooden lobby desk 2.2m wide and 1m tall.', reason: 'No curved desk in the library.' });
+      return Response.json(json({ summary: 'Prepared a desk.', requestedViews: [], objectCounts: [], operations: [] }));
+    }) as typeof fetch;
+    const response = await proposeSceneEdit(input(), new MetaProvider({ apiKey: 'test', model: 'test' }, transport), undefined, diagnostic, library);
+    assert.equal(response.status, 'ready');
+    assert.ok(!diagnostic.toolCalls!.some(call => call.error), JSON.stringify(base));
+    assert.equal(expertBase, null);
+  }
+});
+
+test("a reference run's approved assets can be placed without reading them again", async () => {
+  const library = new AssetLibrary(await mkdtemp(path.join(tmpdir(), 'littletake-assets-'))), diagnostic = newDiagnostic();
+  const approved = { ...structuredClone(builtinAssets[0]), id: 'asset-approved-desk', name: 'Approved desk' };
+  const source = { ...input(), project: { name: 'Reference', scenes: [createEmptyScene()], assets: [approved] } };
+  let directorCalls = 0;
+  const transport = (async (_url: unknown, init: RequestInit) => {
+    const body = JSON.parse(init.body as string), outputs = body.input.filter((x: any) => x.type === 'function_call_output').map((x: any) => JSON.parse(x.output));
+    directorCalls++;
+    if (directorCalls === 1) return Response.json({ status: 'completed', output: [{ type: 'function_call', call_id: 'call_1', name: 'instantiate_asset', arguments: JSON.stringify({ assetId: approved.id, sceneId: 'scene-1', name: 'Desk', transform }), status: 'completed' }] });
+    return Response.json(json({ summary: 'Placed the desk.', requestedViews: [], objectCounts: [], operations: outputs.filter((item: any) => item.placementId).map((item: any) => item.operation) }));
+  }) as typeof fetch;
+  const response = await proposeSceneEdit(source as any, new MetaProvider({ apiKey: 'test', model: 'test' }, transport), undefined, diagnostic, library);
+  assert.equal(response.status, 'ready');
+  assert.deepEqual(diagnostic.toolCalls!.map(call => [call.name, Boolean(call.error)]), [['instantiate_asset', false]]);
 });

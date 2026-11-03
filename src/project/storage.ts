@@ -10,19 +10,22 @@ const LEGACY_SCENE_KEY = 'littletake.scene.v1';
 export const MAX_PROJECT_SIZE = 20_000_000;
 export interface ProjectDocument extends ProjectContent {
   format: 'LittleTake.project'; version: 3; activeSceneId: string | null; activeShotId: string | null; revision: number; conversations: ConversationBook;
+  lookSettings?: Record<string, { direction: string; anchorId: string | null; styleId: string | null }>;
 }
 const projectSchema = z.strictObject({
   format: z.literal('LittleTake.project'), version: z.literal(3), name: z.string(), scenes: z.array(z.unknown()),
   activeSceneId: z.string().nullable(), activeShotId: z.string().nullable(),
   revision: z.number().int().nonnegative(), conversations: conversationsSchema,
   assets: z.array(z.unknown()).max(1000).optional(),
+  scripts: z.array(z.unknown()).max(64).optional(),
+  lookSettings: z.record(z.string().max(120), z.strictObject({ direction: z.string().max(600), anchorId: z.uuid().nullable(), styleId: z.uuid().nullable() })).optional(),
 });
 export function createProject(scene: SceneDocument | null = createDocument()): ProjectDocument {
   return { format: 'LittleTake.project', version: 3, name: scene?.name ?? 'Untitled project', scenes: scene ? [scene] : [],
     activeSceneId: scene?.id ?? null, activeShotId: scene?.shots[0]?.id ?? null, revision: 0, conversations: createConversations() };
 }
-export function parseProject(text: string): ProjectDocument {
-  if (text.length > MAX_PROJECT_SIZE) throw new Error('Project files must be smaller than 20 MB.');
+export function parseProject(text: string, recoverInterrupted = true): ProjectDocument {
+  if (new TextEncoder().encode(text).byteLength > MAX_PROJECT_SIZE) throw new Error('Project files must be smaller than 20 MB.');
   let raw = JSON.parse(text);
   const migrating = raw?.format === 'LittleTake.project' && (raw.version === 1 || raw.version === 2);
   if (raw?.format === 'LittleTake.project' && raw.version === 1) {
@@ -46,14 +49,14 @@ export function parseProject(text: string): ProjectDocument {
       operation.asset = asset;
     }
   }
-  const value = projectSchema.parse(raw), content = validateProjectContent({ name: value.name, scenes: value.scenes, ...(value.assets ? { assets: value.assets } : {}) });
-  const { assets: _rawAssets, ...metadata } = value;
+  const value = projectSchema.parse(raw), content = validateProjectContent({ name: value.name, scenes: value.scenes, ...(value.assets ? { assets: value.assets } : {}), ...(value.scripts ? {scripts:value.scripts} : {}) });
+  const { assets: _rawAssets, scripts: _rawScripts, ...metadata } = value;
   const project: ProjectDocument = { ...metadata, ...content };
   const active = project.scenes.find(scene => scene.id === project.activeSceneId);
   if ((project.activeSceneId !== null && !active) || (project.activeShotId !== null && !active?.shots.some(shot => shot.id === project.activeShotId)))
     throw new Error('The saved scene or shot selection is invalid.');
   for (const thread of project.conversations.threads) for (const message of thread.messages) {
-    if (message.role === 'user' && message.status === 'pending') {
+    if (recoverInterrupted && message.role === 'user' && message.status === 'pending') {
       message.status = 'stopped'; message.detail = 'This response was interrupted. Retry when you are ready.';
     }
     if (message.role === 'assistant' && message.edit?.status === 'pending' && (migrating || message.edit.revision !== project.revision))
@@ -62,10 +65,10 @@ export function parseProject(text: string): ProjectDocument {
   return project;
 }
 export function serializeProject(project: ProjectDocument): string {
-  const text=JSON.stringify(project);if(text.length>MAX_PROJECT_SIZE)throw new Error('Project files must be smaller than 20 MB.');return text;
+  const text=JSON.stringify(project);if(new TextEncoder().encode(text).byteLength>MAX_PROJECT_SIZE)throw new Error('Project files must be smaller than 20 MB.');return text;
 }
 
-/** Scene and conversations share one local write, so an applied edit and its receipt stay together. */
+/** Legacy browser saves are retained for one-time migration into the local project workspace. */
 export class ProjectStorage {
   private saved: string | null = null;
   private recovery: string | null = null;

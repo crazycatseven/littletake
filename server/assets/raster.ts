@@ -3,7 +3,7 @@ import { deflateSync } from 'node:zlib';
 type Point = { x: number; y: number; z: number };
 
 /** Orthographic triangle coverage with a depth test at each pixel, independent of draw order. */
-export function rasterTriangle(pixels: Uint8Array, depth: Float64Array, width: number, height: number, triangle: Point[], rgb: number[]) {
+export function rasterTriangle(pixels: Uint8Array, depth: Float64Array, width: number, height: number, triangle: Point[], rgb: number[],owner?:{pixels:Uint16Array;id:number}) {
   const [a, b, c] = triangle;
   const edge = (u: Point, v: Point, x: number, y: number) => (v.x - u.x) * (y - u.y) - (v.y - u.y) * (x - u.x);
   const area = edge(a, b, c.x, c.y);
@@ -16,6 +16,7 @@ export function rasterTriangle(pixels: Uint8Array, depth: Float64Array, width: n
     const z = u * a.z + v * b.z + w * c.z, index = y * width + x;
     if (z >= depth[index]) continue;
     depth[index] = z;
+    if(owner)owner.pixels[index]=owner.id;
     pixels.set([...rgb, 255], index * 4);
   }
 }

@@ -8,6 +8,7 @@ export const constructionEdits = [
   z.strictObject({type:z.literal('set_construction'),construction:constructionSchema}),
   z.strictObject({type:z.literal('set_parameter'),id:identifier,value:z.number().finite()}),
   z.strictObject({type:z.literal('group_parts'),id:identifier,name:z.string().min(1).max(120),partIds:z.array(identifier).min(1).max(2048)}),
+  z.strictObject({type:z.literal('reparent_part'),id:z.string().min(1).max(2048),parentId:identifier.nullable()}),
   z.strictObject({type:z.literal('duplicate_subtree'),partId:z.string().min(1).max(2048)}),
   z.strictObject({type:z.literal('make_unique'),partId:z.string().min(1).max(2048)}),
   z.strictObject({type:z.literal('bake_construction')}),
@@ -20,6 +21,17 @@ export function drivenProperties(recipe: RecipeGeometry,id:string): Property[] {
   return [...(c?.bindings.filter(b=>b.partId===id).map(b=>b.property)??[]), ...(constraint ? ['position.x','position.y','position.z'] as Property[] : []), ...(constraint?.type==='span' ? ['rotation.x','rotation.y','rotation.z',('size.'+constraint.axis)] as Property[] : [])];
 }
 export function editConstruction(draft: RecipeGeometry, edit: ConstructionEdit) {
+  if(edit.type==='reparent_part') {
+    const part=draft.parts.find(p=>p.id===edit.id),parent=edit.parentId?draft.parts.find(p=>p.id===edit.parentId):null;
+    if(!part||(edit.parentId&&!parent))throw new Error('Select an editable source part and parent. Generated copies cannot be reparented.');
+    if(part.parentId===edit.parentId)return;
+    if(drivenProperties(draft,part.id).some(p=>p.startsWith('position.')||p.startsWith('rotation.')))throw new Error('Edit the part’s parameter or anchor bindings before changing its parent.');
+    let ancestor=parent;while(ancestor){if(ancestor.id===part.id)throw new Error('A part cannot be parented to itself or its descendants.');ancestor=ancestor.parentId?draft.parts.find(p=>p.id===ancestor!.parentId)!:null;}
+    const evaluated=evaluateAsset(draft),worlds=worldMatrices(evaluated.parts);
+    const rootFrame=new Matrix4().makeTranslation(...(draft.construction?.offset??[0,0,0]));
+    const matrix=(parent?worlds.get(parent.id)!:rootFrame).clone().invert().multiply(worlds.get(part.id)!);
+    setMatrix(part,matrix);part.parentId=edit.parentId;return;
+  }
   if(edit.type==='set_construction') { draft.construction=structuredClone(edit.construction); return; }
   if(edit.type==='set_parameter') {
     const parameter=draft.construction?.parameters.find(p=>p.id===edit.id); if(!parameter)throw new Error('Parameter not found: '+edit.id);

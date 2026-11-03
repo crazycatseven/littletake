@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { icon } from '../icons';
 import { MenuTexture } from './texture';
 import { keyframeAtTimeline, xrTimelineSvg, type XRTimelineState } from './timeline';
 import type { XRRecordingState } from './recording';
@@ -19,18 +20,12 @@ export function xrRecordingSvg(state: XRRecordingState, hovered: ReadonlySet<num
     <g font-family="Segoe UI, Arial, sans-serif"><circle cx="36" cy="36" r="8" fill="${state.mode === 'recording' ? '#ff837a' : active ? '#ffbd66' : '#789084'}"/><text x="58" y="45" fill="#f6f3e9" font-size="26">${status}</text>
     ${labels.map((label,i)=>{const x=24+i*352,hover=enabled[i]&&hovered.has(XR_RECORD+i);return `<rect x="${x}" y="68" width="336" height="88" rx="12" fill="${hover?'#c9f86b':'#2b403b'}" stroke="${enabled[i]?'#c9f86b':'#587167'}" stroke-width="${hover?5:2}"/><text x="${x+168}" y="123" text-anchor="middle" fill="${hover?'#10231e':enabled[i]?'#f6f3e9':'#a4b5ae'}" font-size="32">${label}</text>`;}).join('')}</g></svg>`;
 }
-const icons = {
-  camera: '<rect x="-24" y="-16" width="33" height="32" rx="5"/><path d="m9-8 16-9v34L9 8"/>',
-  free: '<path d="M-24-9v-14h14M10-23h14v14M24 9v14H10M-10 23h-14V9"/><circle r="8"/>',
-  timeline: '<path d="M-24 0h48M-14-12v24M0-20v40M14-12v24"/>',
-  exit: '<path d="M-3-23h-17v46H-3M-4 0h29m-10-11L26 0 15 11"/>',
-};
 
 /** Shared SVG source for browser textures and offline visual verification. */
 export function xrMenuSvg(state: XRMenuState, hovered: ReadonlySet<number> = new Set()): string {
   const actions = [3, 5, 2];
   const labels = [state.hasCamera ? state.following ? 'Free view' : 'Follow camera' : 'No camera', state.timeline ? 'Exit timeline' : 'Timeline', 'Exit VR'];
-  const symbols = [state.following ? icons.free : icons.camera, icons.timeline, icons.exit];
+  const symbols = [state.following ? 'focus' : 'camera', 'timeline', 'exit'] as const;
   const cells = actions.map((action, i) => {
     const disabled = action === 3 && !state.hasCamera;
     const hover = !disabled && hovered.has(action), active = action === 5 && state.timeline || action === 3 && state.following;
@@ -38,21 +33,21 @@ export function xrMenuSvg(state: XRMenuState, hovered: ReadonlySet<number> = new
     const ink = disabled ? '#789084' : hover ? '#10231e' : action === 2 ? '#efc9b4' : '#f6f3e9';
     const x = 120 + i * 240;
     return `<g><circle cx="${x}" cy="160" r="90" fill="${fill}" stroke="${hover ? '#f6f3e9' : active ? '#c9f86b' : '#587167'}" stroke-width="${hover || active ? 6 : 3}"/>
-      <g transform="translate(${x} 160) scale(1.3)" fill="none" stroke="${ink}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">${symbols[i]}</g>
-      ${active ? `<circle cx="${x + 65}" cy="95" r="16" fill="#c9f86b"/><path d="m${x + 57} 95 6 6 11-13" fill="none" stroke="#10231e" stroke-width="4"/>` : ''}</g>`;
+      ${icon(symbols[i],{x:x-38,y:122,width:76,height:76,color:ink})}
+      ${active ? `<circle cx="${x + 65}" cy="95" r="16" fill="#c9f86b"/>${icon('check',{x:x+53,y:83,width:24,height:24,color:'#10231e','stroke-width':3})}` : ''}</g>`;
   }).join('');
   const titleActive = state.dragging || hovered.has(XR_MENU_DRAG);
   const hoveredIndex = actions.findIndex(action => hovered.has(action));
   const hint = state.dragging ? 'Release to place' : titleActive ? 'Hold grip to move' : hoveredIndex >= 0 ? labels[hoveredIndex] : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="320" viewBox="0 0 720 320">
     <rect x="240" y="10" width="240" height="40" rx="20" fill="${state.dragging ? '#ffbd66' : titleActive ? '#c9f86b' : '#182b26'}" stroke="#587167" stroke-width="2"/>
-    <path d="M300 26h120m-120 8h120" stroke="${titleActive ? '#10231e' : '#c7d6ce'}" stroke-width="4" stroke-linecap="round"/>
+    ${icon('grip-horizontal',{x:326,y:14,width:68,height:32,color:titleActive?'#10231e':'#c7d6ce'})}
     ${cells}${hint ? `<rect x="200" y="268" width="320" height="48" rx="12" fill="#182b26"/><text x="360" y="301" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" fill="#f6f3e9" font-size="28">${hint}</text>` : ''}</svg>`;
 }
 export function xrMenuHandleSvg(expanded: boolean, hovered = false): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
     <circle cx="100" cy="100" r="90" fill="${hovered ? '#c9f86b' : '#182b26'}" stroke="${hovered ? '#f6f3e9' : '#c9f86b'}" stroke-width="${hovered ? 6 : 3}"/>
-    <path d="${expanded ? 'm80 80 40 40m0-40-40 40' : 'M70 78h60M70 100h60M70 122h60'}" fill="none" stroke="${hovered ? '#10231e' : '#f6f3e9'}" stroke-width="5.2" stroke-linecap="round"/>
+    ${icon(expanded?'close':'menu',{x:60,y:60,width:80,height:80,color:hovered?'#10231e':'#f6f3e9'})}
     <title>${expanded ? 'Close menu' : 'Open menu'}</title></svg>`;
 }
 

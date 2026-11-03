@@ -1,0 +1,1571 @@
+{
+  "analysis": {
+    "summary": "Audit corrects identity and action: purple-uniform concierge and lobby boy converse outside cream entrance, enter through door held by top-hat doorman in long dark coat, then walk through red-carpeted grand lobby with reception counter, illuminated arches, palms and curved wood desks while concierge writes. Added doorman as tracked supporting principal=false in exterior background and interior door-holding; corrected lobby boy at entry as walking not door-holding and right-edge walker as lobby boy with face hidden facing back.",
+    "entities": [
+      {
+        "name": "concierge",
+        "description": "older light-skinned man with slicked blond hair and mustache in purple concierge tailcoat with red piping, white shirt and black bow tie",
+        "color": "#5B2A86",
+        "principal": true
+      },
+      {
+        "name": "lobby_boy",
+        "description": "young dark-haired man in purple bellhop tunic and trousers with LOBBY BOY pillbox cap",
+        "color": "#5B2A86",
+        "principal": true
+      },
+      {
+        "name": "doorman",
+        "description": "middle-aged man in long dark double-breasted greatcoat with brass buttons and black top hat, door attendant",
+        "color": "#232333",
+        "principal": false
+      },
+      {
+        "name": "entrance_doors",
+        "description": "tall cream wood double entrance doors with glass panels and metal handles",
+        "color": "#E8C99A",
+        "principal": false
+      },
+      {
+        "name": "reception_counter",
+        "description": "long light wood reception counter at far lobby wall",
+        "color": "#D8BE96",
+        "principal": false
+      },
+      {
+        "name": "arch_wall",
+        "description": "row of three illuminated arched niches above reception counter",
+        "color": "#F2E2C4",
+        "principal": false
+      },
+      {
+        "name": "curved_desk",
+        "description": "curved light wood lobby side desk counter passed while walking",
+        "color": "#D8BE96",
+        "principal": false
+      }
+    ],
+    "shots": [
+      {
+        "start": 0,
+        "duration": 1.8761666666666668,
+        "framing": "waist_up",
+        "description": "static symmetrical medium shot outside hotel entrance; cream double doors with glass, chandelier above, red mat; lobby boy on left gestures speaking, concierge on right writes in notepad; doorman stands centered in doorway background"
+      },
+      {
+        "start": 1.8761666666666668,
+        "duration": 3.628625,
+        "framing": "full_body",
+        "description": "static wide shot inside grand lobby; red patterned carpet, marble walls, tall palm, long reception counter with three illuminated arches; doorman holds left door leaf open as concierge and lobby boy enter and walk left to right across frame"
+      },
+      {
+        "start": 5.504791666666667,
+        "duration": 6.506500333333333,
+        "framing": "chest_up",
+        "description": "moving close tracking shot following concierge writing in notepad and lobby boy beside him walking through lobby; red carpet, blurred arches, palms and curved wood desk pass in background; camera moves with them maintaining chest-up framing"
+      }
+    ],
+    "frames": [
+      {
+        "time": 0.041,
+        "shotIndex": 0,
+        "subjects": [
+          {
+            "name": "lobby_boy",
+            "box": [
+              0.1296875,
+              0.30833333333333335,
+              0.5078125,
+              0.9777777777777777
+            ],
+            "headBox": [
+              0.2484375,
+              0.4083333333333333,
+              0.3484375,
+              0.5611111111111111
+            ],
+            "bodyRegionId": "p31",
+            "headRegionId": "f2",
+            "facing": "left",
+            "bodyFacing": "front",
+            "action": "speaking and gesturing with right hand toward concierge"
+          },
+          {
+            "name": "concierge",
+            "box": [
+              0.5296875,
+              0.19166666666666668,
+              0.853125,
+              0.9805555555555555
+            ],
+            "headBox": [
+              0.66875,
+              0.24722222222222223,
+              0.7718749999999999,
+              0.46944444444444444
+            ],
+            "bodyRegionId": "p8",
+            "headRegionId": "f13",
+            "facing": "left",
+            "bodyFacing": "left",
+            "action": "holding pencil and notepad looking down writing"
+          },
+          {
+            "name": "doorman",
+            "box": [
+              0.453125,
+              0.3416666666666667,
+              0.55625,
+              0.8527777777777777
+            ],
+            "headBox": [
+              0.4921875,
+              0.38055555555555554,
+              0.521875,
+              0.4388888888888889
+            ],
+            "bodyRegionId": "p13",
+            "headRegionId": "f7",
+            "facing": "front",
+            "bodyFacing": "front",
+            "action": "standing at attention in center doorway background with hands behind back"
+          },
+          {
+            "name": "entrance_doors",
+            "box": [
+              0.13,
+              0.045,
+              0.865,
+              0.975
+            ],
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null,
+            "facing": "front",
+            "bodyFacing": null,
+            "action": "static"
+          }
+        ],
+        "setting": "outside hotel entrance with tall cream double doors, glass panels, chandelier above, warm light"
+      },
+      {
+        "time": 0.916875,
+        "shotIndex": 0,
+        "subjects": [
+          {
+            "name": "lobby_boy",
+            "box": [
+              0.1734375,
+              0.2861111111111111,
+              0.4453125,
+              0.9777777777777777
+            ],
+            "headBox": [
+              0.29375,
+              0.375,
+              0.390625,
+              0.5444444444444444
+            ],
+            "bodyRegionId": "p27",
+            "headRegionId": "f3",
+            "facing": "right",
+            "bodyFacing": "front",
+            "action": "speaking and pointing toward concierge"
+          },
+          {
+            "name": "concierge",
+            "box": [
+              0.5328125,
+              0.18611111111111112,
+              0.85,
+              0.9805555555555555
+            ],
+            "headBox": [
+              0.6703125,
+              0.225,
+              0.7828125,
+              0.4583333333333333
+            ],
+            "bodyRegionId": "p32",
+            "headRegionId": "f17",
+            "facing": "left",
+            "bodyFacing": "left",
+            "action": "holding pencil and notepad looking down"
+          },
+          {
+            "name": "doorman",
+            "box": [
+              0.4515625,
+              0.34444444444444444,
+              0.55625,
+              0.8555555555555555
+            ],
+            "headBox": [
+              0.4921875,
+              0.38055555555555554,
+              0.5234375,
+              0.43333333333333335
+            ],
+            "bodyRegionId": "p12",
+            "headRegionId": "f18",
+            "facing": "front",
+            "bodyFacing": "front",
+            "action": "standing at attention in center doorway background"
+          },
+          {
+            "name": "entrance_doors",
+            "box": [
+              0.13,
+              0.045,
+              0.865,
+              0.975
+            ],
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null,
+            "facing": "front",
+            "bodyFacing": null,
+            "action": "static"
+          }
+        ],
+        "setting": "outside hotel entrance with tall cream double doors, glass panels, chandelier above, warm light"
+      },
+      {
+        "time": 1.8344583333333333,
+        "shotIndex": 0,
+        "subjects": [
+          {
+            "name": "lobby_boy",
+            "box": [
+              0.1296875,
+              0.2916666666666667,
+              0.428125,
+              0.9805555555555555
+            ],
+            "headBox": [
+              0.2953125,
+              0.3888888888888889,
+              0.3921875,
+              0.5555555555555556
+            ],
+            "bodyRegionId": "p35",
+            "headRegionId": "f6",
+            "facing": "right",
+            "bodyFacing": "front",
+            "action": "speaking with hands held low"
+          },
+          {
+            "name": "concierge",
+            "box": [
+              0.515625,
+              0.19444444444444445,
+              0.8375,
+              0.9805555555555555
+            ],
+            "headBox": [
+              0.65,
+              0.2611111111111111,
+              0.7453125,
+              0.475
+            ],
+            "bodyRegionId": "p0",
+            "headRegionId": "f0",
+            "facing": "left",
+            "bodyFacing": "left",
+            "action": "holding pencil and notepad looking down writing"
+          },
+          {
+            "name": "doorman",
+            "box": [
+              0.4515625,
+              0.34444444444444444,
+              0.55625,
+              0.8555555555555555
+            ],
+            "headBox": [
+              0.4921875,
+              0.38055555555555554,
+              0.521875,
+              0.4388888888888889
+            ],
+            "bodyRegionId": "p18",
+            "headRegionId": "f9",
+            "facing": "front",
+            "bodyFacing": "front",
+            "action": "standing at attention in center doorway background"
+          },
+          {
+            "name": "entrance_doors",
+            "box": [
+              0.13,
+              0.045,
+              0.865,
+              0.975
+            ],
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null,
+            "facing": "front",
+            "bodyFacing": null,
+            "action": "static"
+          }
+        ],
+        "setting": "outside hotel entrance with tall cream double doors, glass panels, chandelier above, warm light"
+      },
+      {
+        "time": 1.8761666666666668,
+        "shotIndex": 1,
+        "subjects": [
+          {
+            "name": "doorman",
+            "box": [
+              0.196875,
+              0.24166666666666667,
+              0.4140625,
+              0.85
+            ],
+            "headBox": [
+              0.3078125,
+              0.2916666666666667,
+              0.3421875,
+              0.3527777777777778
+            ],
+            "bodyRegionId": "p25",
+            "headRegionId": "f14",
+            "facing": "left",
+            "bodyFacing": "front",
+            "action": "standing holding left entrance door leaf open with right arm extended"
+          },
+          {
+            "name": "entrance_doors",
+            "box": [
+              0.128,
+              0.06,
+              0.35,
+              0.885
+            ],
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null,
+            "facing": "front",
+            "bodyFacing": null,
+            "action": "static"
+          },
+          {
+            "name": "reception_counter",
+            "box": [
+              0.44,
+              0.44,
+              0.76,
+              0.552
+            ],
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null,
+            "facing": "front",
+            "bodyFacing": null,
+            "action": "static"
+          },
+          {
+            "name": "arch_wall",
+            "box": [
+              0.44,
+              0.242,
+              0.865,
+              0.44
+            ],
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null,
+            "facing": "front",
+            "bodyFacing": null,
+            "action": "static"
+          }
+        ],
+        "setting": "grand hotel lobby interior with red patterned carpet, marble walls, long reception counter under illuminated arches"
+      },
+      {
+        "time": 3.669625,
+        "shotIndex": 1,
+        "subjects": [
+          {
+            "name": "lobby_boy",
+            "box": [
+              0.1578125,
+              0.3,
+              0.2203125,
+              0.8805555555555555
+            ],
+            "headBox": [
+              0.1640625,
+              0.33611111111111114,
+              0.1984375,
+              0.4
+            ],
+            "bodyRegionId": "p21",
+            "headRegionId": "f11",
+            "facing": "right",
+            "bodyFacing": "right",
+            "action": "entering through doorway and walking left to right following concierge"
+          },
+          {
+            "name": "concierge",
+            "box": [
+              0.321875,
+              0.25833333333333336,
+              0.434375,
+              0.8972222222222223
+            ],
+            "headBox": [
+              0.35625,
+              0.28055555555555556,
+              0.4,
+              0.35555555555555557
+            ],
+            "bodyRegionId": "p9",
+            "headRegionId": "f16",
+            "facing": "right",
+            "bodyFacing": "right",
+            "action": "walking briskly left to right through doorway into lobby"
+          },
+          {
+            "name": "entrance_doors",
+            "box": [
+              0.128,
+              0.06,
+              0.363,
+              0.89
+            ],
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null,
+            "facing": "front",
+            "bodyFacing": null,
+            "action": "static"
+          },
+          {
+            "name": "reception_counter",
+            "box": [
+              0.44,
+              0.44,
+              0.76,
+              0.55
+            ],
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null,
+            "facing": "front",
+            "bodyFacing": null,
+            "action": "static"
+          },
+          {
+            "name": "arch_wall",
+            "box": [
+              0.44,
+              0.24,
+              0.865,
+              0.44
+            ],
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null,
+            "facing": "front",
+            "bodyFacing": null,
+            "action": "static"
+          }
+        ],
+        "setting": "grand hotel lobby interior with red carpet, open entrance leaf on left, reception behind"
+      },
+      {
+        "time": 5.4630833333333335,
+        "shotIndex": 1,
+        "subjects": [
+          {
+            "name": "doorman",
+            "box": [
+              0.2375,
+              0.24444444444444444,
+              0.390625,
+              0.8277777777777777
+            ],
+            "headBox": [
+              0.3109375,
+              0.29444444444444445,
+              0.34375,
+              0.35
+            ],
+            "bodyRegionId": "p23",
+            "headRegionId": "f12",
+            "facing": "front",
+            "bodyFacing": "front",
+            "action": "standing holding entrance door leaf open with left hand"
+          },
+          {
+            "name": "lobby_boy",
+            "box": [
+              0.7609375,
+              0.2972222222222222,
+              0.865625,
+              0.8694444444444445
+            ],
+            "headBox": null,
+            "bodyRegionId": "p17",
+            "headRegionId": null,
+            "facing": "back",
+            "bodyFacing": "back",
+            "action": "walking away to the right across lobby, back to camera"
+          },
+          {
+            "name": "entrance_doors",
+            "box": [
+              0.13,
+              0.06,
+              0.35,
+              0.9
+            ],
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null,
+            "facing": "front",
+            "bodyFacing": null,
+            "action": "static"
+          },
+          {
+            "name": "reception_counter",
+            "box": [
+              0.44,
+              0.435,
+              0.76,
+              0.55
+            ],
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null,
+            "facing": "front",
+            "bodyFacing": null,
+            "action": "static"
+          },
+          {
+            "name": "arch_wall",
+            "box": [
+              0.44,
+              0.24,
+              0.865,
+              0.44
+            ],
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null,
+            "facing": "front",
+            "bodyFacing": null,
+            "action": "static"
+          }
+        ],
+        "setting": "grand hotel lobby interior with red carpet, entrance leaf held open, reception and arches in back"
+      },
+      {
+        "time": 5.504791666666667,
+        "shotIndex": 2,
+        "subjects": [
+          {
+            "name": "concierge",
+            "box": [
+              0.171875,
+              0.12222222222222222,
+              0.6671875,
+              0.9805555555555555
+            ],
+            "headBox": [
+              0.328125,
+              0.22777777777777777,
+              0.49375,
+              0.5666666666666667
+            ],
+            "bodyRegionId": "p20",
+            "headRegionId": "f10",
+            "facing": "right",
+            "bodyFacing": "three_quarter",
+            "action": "walking while writing in notepad held in left hand"
+          },
+          {
+            "name": "lobby_boy",
+            "box": [
+              0.4296875,
+              0.2916666666666667,
+              0.6046875,
+              0.8555555555555555
+            ],
+            "headBox": [
+              0.475,
+              0.4,
+              0.5765625,
+              0.5972222222222222
+            ],
+            "bodyRegionId": "p33",
+            "headRegionId": "f8",
+            "facing": "front",
+            "bodyFacing": "front",
+            "action": "walking close beside concierge looking toward him"
+          }
+        ],
+        "setting": "lobby interior close tracking with red carpet, blurred arches and palms behind"
+      },
+      {
+        "time": 8.758041666666667,
+        "shotIndex": 2,
+        "subjects": [
+          {
+            "name": "concierge",
+            "box": [
+              0.159375,
+              0.08888888888888889,
+              0.6515625,
+              0.9833333333333333
+            ],
+            "headBox": [
+              0.309375,
+              0.1638888888888889,
+              0.4796875,
+              0.525
+            ],
+            "bodyRegionId": "p2",
+            "headRegionId": "f1",
+            "facing": "right",
+            "bodyFacing": "three_quarter",
+            "action": "continuing to walk and write while speaking to the right"
+          },
+          {
+            "name": "lobby_boy",
+            "box": [
+              0.440625,
+              0.28888888888888886,
+              0.6546875,
+              0.9333333333333333
+            ],
+            "headBox": [
+              0.5328125,
+              0.41944444444444445,
+              0.6359375,
+              0.5861111111111111
+            ],
+            "bodyRegionId": "p34",
+            "headRegionId": "f19",
+            "facing": "right",
+            "bodyFacing": "three_quarter",
+            "action": "walking beside concierge looking down at notepad"
+          },
+          {
+            "name": "curved_desk",
+            "box": [
+              0.13,
+              0.53,
+              0.87,
+              0.978
+            ],
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null,
+            "facing": "front",
+            "bodyFacing": null,
+            "action": "static"
+          }
+        ],
+        "setting": "lobby interior tracking past curved wood desk, red carpet and arched lights"
+      },
+      {
+        "time": 11.969583333333333,
+        "shotIndex": 2,
+        "subjects": [
+          {
+            "name": "concierge",
+            "box": [
+              0.1296875,
+              0.06666666666666667,
+              0.5859375,
+              0.9805555555555555
+            ],
+            "headBox": [
+              0.221875,
+              0.1527777777777778,
+              0.4015625,
+              0.5055555555555555
+            ],
+            "bodyRegionId": "p16",
+            "headRegionId": "f4",
+            "facing": "right",
+            "bodyFacing": "three_quarter",
+            "action": "walking while speaking holding notepad"
+          },
+          {
+            "name": "lobby_boy",
+            "box": [
+              0.4234375,
+              0.2916666666666667,
+              0.6640625,
+              0.875
+            ],
+            "headBox": [
+              0.5296875,
+              0.4111111111111111,
+              0.63125,
+              0.5861111111111111
+            ],
+            "bodyRegionId": "p29",
+            "headRegionId": "f5",
+            "facing": "front",
+            "bodyFacing": "front",
+            "action": "walking beside concierge listening"
+          },
+          {
+            "name": "curved_desk",
+            "box": [
+              0.59,
+              0.55,
+              0.868,
+              0.968
+            ],
+            "headBox": null,
+            "bodyRegionId": null,
+            "headRegionId": null,
+            "facing": "front",
+            "bodyFacing": null,
+            "action": "static"
+          }
+        ],
+        "setting": "lobby interior tracking with marble pedestals, plants and arched lights behind"
+      }
+    ],
+    "assumptions": [
+      "Doorman in black top hat and long dark double-breasted coat tracked as supporting principal=false; same individual in exterior background and interior door-holder based on face, coat and buttons.",
+      "Background reception clerks and far-right attendant omitted as incidental crowds with no interaction with leads.",
+      "Boxes normalized in full 1280x720 frame including black side bars; y=0 is top.",
+      "SAM bodyRegionId and headRegionId are local per frame; supplied ids used verbatim, headRegionId=null where face hidden.",
+      "Person hidden behind door leaf not assigned another visible region; occluded doorman at 3.669625 not tracked.",
+      "Facing from nose direction in image; back means face hidden.",
+      "Camera static for shots 0-1 and tracking with subjects for shot 2.",
+      "Genuine ambiguity: p17 at 5.4630833333333335 face hidden, identity as lobby_boy inferred from purple uniform cap, dark trousers and follow-sequence with concierge already exited right; some uncertainty remains."
+    ]
+  },
+  "frames": [
+    {
+      "time": 0.041,
+      "faceLandmarks": [
+        {
+          "confidence": 0.9224627774960046,
+          "box": [
+            0.2437367420511296,
+            0.3694960797837368,
+            0.3258878503127048,
+            0.5628963107853143
+          ],
+          "points": [
+            [
+              0.25241057574748993,
+              0.44073397914568585
+            ],
+            [
+              0.2723486915230751,
+              0.439604095949067
+            ],
+            [
+              0.24519468545913697,
+              0.4776217990451389
+            ],
+            [
+              0.2575791016221046,
+              0.5155568493737115
+            ],
+            [
+              0.2767082486301661,
+              0.5140679200490316
+            ]
+          ]
+        },
+        {
+          "confidence": 0.9035201357868686,
+          "box": [
+            0.6678635987178984,
+            0.25416730326176407,
+            0.74610616837576,
+            0.4705099442095155
+          ],
+          "points": [
+            [
+              0.6818581752479076,
+              0.3361948768297831
+            ],
+            [
+              0.7082039952278137,
+              0.3358558456103007
+            ],
+            [
+              0.6849387407302856,
+              0.3770898395114475
+            ],
+            [
+              0.6869754359126091,
+              0.4121591885884603
+            ],
+            [
+              0.7110324114561081,
+              0.40991803805033367
+            ]
+          ]
+        },
+        {
+          "confidence": 0.8691872117744222,
+          "box": [
+            0.4962403732479248,
+            0.38110035303363754,
+            0.5213441123127308,
+            0.43320033242507555
+          ],
+          "points": [
+            [
+              0.5027774799615145,
+              0.39853114717536503
+            ],
+            [
+              0.5134112499654293,
+              0.39870623581939274
+            ],
+            [
+              0.5074578521773219,
+              0.4092445347044203
+            ],
+            [
+              0.5033630080521106,
+              0.41713424788581
+            ],
+            [
+              0.5114374827593565,
+              0.4191797653834025
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "time": 0.916875,
+      "faceLandmarks": [
+        {
+          "confidence": 0.9067213242881422,
+          "box": [
+            0.6713223243801607,
+            0.23777141132401328,
+            0.7472129156143652,
+            0.4548159298786167
+          ],
+          "points": [
+            [
+              0.6830814361572266,
+              0.31944437821706134
+            ],
+            [
+              0.6993404254317284,
+              0.31837132771809895
+            ],
+            [
+              0.6779445812106133,
+              0.3613689601421356
+            ],
+            [
+              0.6886865302920342,
+              0.39936771127912735
+            ],
+            [
+              0.7043114505708218,
+              0.39618166552649603
+            ]
+          ]
+        },
+        {
+          "confidence": 0.9021968964775422,
+          "box": [
+            0.31983303121990725,
+            0.3655956197915288,
+            0.38303608305983977,
+            0.5351521178280831
+          ],
+          "points": [
+            [
+              0.3561853222548962,
+              0.4262712730301751
+            ],
+            [
+              0.373141285777092,
+              0.42517655425601536
+            ],
+            [
+              0.3745362862944603,
+              0.45238396856519913
+            ],
+            [
+              0.3564300902187824,
+              0.48742411931355795
+            ],
+            [
+              0.37180420458316804,
+              0.4873384926054213
+            ]
+          ]
+        },
+        {
+          "confidence": 0.8764485874410748,
+          "box": [
+            0.4957917712905829,
+            0.3794492497393718,
+            0.5213302589675959,
+            0.43303793128835855
+          ],
+          "points": [
+            [
+              0.5025364637374878,
+              0.3973158907559183
+            ],
+            [
+              0.5133642628788948,
+              0.3971559411949582
+            ],
+            [
+              0.5075517590157688,
+              0.4080862495634291
+            ],
+            [
+              0.5033972036093474,
+              0.41673508750067817
+            ],
+            [
+              0.5118569582700729,
+              0.4181689990891351
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "time": 1.8344583333333333,
+      "faceLandmarks": [
+        {
+          "confidence": 0.9067123542857363,
+          "box": [
+            0.3203105143942416,
+            0.38585682628663986,
+            0.38812719958643316,
+            0.5435178685375789
+          ],
+          "points": [
+            [
+              0.35445261299610137,
+              0.4447885327868991
+            ],
+            [
+              0.3791837960481644,
+              0.4431206067403158
+            ],
+            [
+              0.3772168219089508,
+              0.4763512796825833
+            ],
+            [
+              0.3562756940722466,
+              0.5042351643244426
+            ],
+            [
+              0.3754400610923767,
+              0.5033168315887451
+            ]
+          ]
+        },
+        {
+          "confidence": 0.8961367988251332,
+          "box": [
+            0.6527987698375777,
+            0.25535042491627147,
+            0.7302472552001879,
+            0.47297492616303355
+          ],
+          "points": [
+            [
+              0.664373853802681,
+              0.3412413544125027
+            ],
+            [
+              0.6814702369272709,
+              0.33684238725238375
+            ],
+            [
+              0.6612385869026184,
+              0.3845598247316149
+            ],
+            [
+              0.6750115835107863,
+              0.42258063952128094
+            ],
+            [
+              0.689202357828617,
+              0.41642256842719183
+            ]
+          ]
+        },
+        {
+          "confidence": 0.8708314217764083,
+          "box": [
+            0.49618702766694145,
+            0.3807254814212943,
+            0.5212282395621387,
+            0.43310182659770796
+          ],
+          "points": [
+            [
+              0.5032325986772775,
+              0.398669388724698
+            ],
+            [
+              0.5137957356870174,
+              0.3983559770716561
+            ],
+            [
+              0.5084119088947773,
+              0.40928673810429045
+            ],
+            [
+              0.5042765840888024,
+              0.4171326557795207
+            ],
+            [
+              0.512432736903429,
+              0.4188349525133769
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "time": 1.8761666666666668,
+      "faceLandmarks": [
+        {
+          "confidence": 0.86496538291256,
+          "box": [
+            0.3070226032043777,
+            0.2792855250244118,
+            0.33661077919053217,
+            0.343530889278838
+          ],
+          "points": [
+            [
+              0.31225338354706766,
+              0.3015412191549937
+            ],
+            [
+              0.3215940222144127,
+              0.30125830156935585
+            ],
+            [
+              0.31387274116277697,
+              0.3145629644393921
+            ],
+            [
+              0.313631534576416,
+              0.3280918412738376
+            ],
+            [
+              0.32124850526452065,
+              0.32752225663926865
+            ]
+          ]
+        },
+        {
+          "confidence": 0.8250840659499636,
+          "box": [
+            0.8109878591746289,
+            0.34169121925442875,
+            0.8214568026810687,
+            0.3648554118698558
+          ],
+          "points": [
+            [
+              0.8136950614862144,
+              0.3505784687068727
+            ],
+            [
+              0.819072587043047,
+              0.35043088528845046
+            ],
+            [
+              0.8162400368601084,
+              0.35555463698175216
+            ],
+            [
+              0.8141653971746564,
+              0.3562832259469562
+            ],
+            [
+              0.8178037434816361,
+              0.35978505081600615
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "time": 3.669625,
+      "faceLandmarks": [
+        {
+          "confidence": 0.8512640770634363,
+          "box": [
+            0.8105847346290898,
+            0.3421028067287539,
+            0.8211523902908017,
+            0.36528934144807507
+          ],
+          "points": [
+            [
+              0.8134671187959611,
+              0.35084097219838034
+            ],
+            [
+              0.8188696093857288,
+              0.3508353677060869
+            ],
+            [
+              0.8158888321369886,
+              0.3558565050363541
+            ],
+            [
+              0.8136590451933443,
+              0.3562756223811044
+            ],
+            [
+              0.8175257183611393,
+              0.36000863711039227
+            ]
+          ]
+        },
+        {
+          "confidence": 0.8184503087140633,
+          "box": [
+            0.3709520195413648,
+            0.28306977479614975,
+            0.40086596191038504,
+            0.35701009436821113
+          ],
+          "points": [
+            [
+              0.388782215397805,
+              0.3149977084663179
+            ],
+            [
+              0.3954587563872337,
+              0.31394721269607545
+            ],
+            [
+              0.39765351861715315,
+              0.3281215402815077
+            ],
+            [
+              0.3906230116263032,
+              0.336074169476827
+            ],
+            [
+              0.39536703303456305,
+              0.33903409110175237
+            ]
+          ]
+        },
+        {
+          "confidence": 0.792919256753779,
+          "box": [
+            0.1757957743393305,
+            0.32838369999612416,
+            0.19988794346283645,
+            0.39053219430031005
+          ],
+          "points": [
+            [
+              0.1927725337445736,
+              0.35150033268663616
+            ],
+            [
+              0.19655801877379417,
+              0.35086437662442527
+            ],
+            [
+              0.20093648582696916,
+              0.36242525577545165
+            ],
+            [
+              0.19474088549613952,
+              0.37373083432515464
+            ],
+            [
+              0.19647063463926315,
+              0.37545440196990965
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "time": 5.4630833333333335,
+      "faceLandmarks": [
+        {
+          "confidence": 0.8335573555763383,
+          "box": [
+            0.8104188058616352,
+            0.3413738905688977,
+            0.8212612029074002,
+            0.3652402395042258
+          ],
+          "points": [
+            [
+              0.8133519071154296,
+              0.3500280926624934
+            ],
+            [
+              0.8187090408056974,
+              0.34980337619781493
+            ],
+            [
+              0.8158928114920855,
+              0.35551338228914475
+            ],
+            [
+              0.8138635280542076,
+              0.35801229808065627
+            ],
+            [
+              0.8176861748099327,
+              0.35988330178790623
+            ]
+          ]
+        },
+        {
+          "confidence": 0.7604880415600782,
+          "box": [
+            0.3102837662530072,
+            0.2834757611366164,
+            0.3400386889147632,
+            0.34498633094508935
+          ],
+          "points": [
+            [
+              0.3159751586616039,
+              0.30442136857244706
+            ],
+            [
+              0.327162279933691,
+              0.30451924006144204
+            ],
+            [
+              0.3186803927645087,
+              0.31745163069831
+            ],
+            [
+              0.31747628590092064,
+              0.3296755684746636
+            ],
+            [
+              0.3265345498919487,
+              0.32967961099412707
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "time": 5.504791666666667,
+      "faceLandmarks": [
+        {
+          "confidence": 0.924049700807179,
+          "box": [
+            0.48210871747788486,
+            0.3887402026492043,
+            0.5715871832603544,
+            0.5938432751128061
+          ],
+          "points": [
+            [
+              0.5070808708667756,
+              0.4627174059549967
+            ],
+            [
+              0.5484968081116677,
+              0.48483999537097083
+            ],
+            [
+              0.5202278383076191,
+              0.5189865827560425
+            ],
+            [
+              0.49786908030509947,
+              0.5396104600694445
+            ],
+            [
+              0.5286369778215885,
+              0.5585136625501844
+            ]
+          ]
+        },
+        {
+          "confidence": 0.8469966952635358,
+          "box": [
+            0.37965640240916554,
+            0.25536594918434685,
+            0.5114007610677784,
+            0.5805642022252262
+          ],
+          "points": [
+            [
+              0.4631292700767517,
+              0.38829796181784737
+            ],
+            [
+              0.4748096317052841,
+              0.4046186695496241
+            ],
+            [
+              0.47960599064826964,
+              0.44441333611806233
+            ],
+            [
+              0.45192405581474304,
+              0.4948353449503581
+            ],
+            [
+              0.453120493888855,
+              0.5105118751525879
+            ]
+          ]
+        },
+        {
+          "confidence": 0.7209778355517007,
+          "box": [
+            0.18279844126406933,
+            0.0917604207725244,
+            0.215178115901315,
+            0.17585935860233998
+          ],
+          "points": [
+            [
+              0.2013400189578533,
+              0.12484897838698493
+            ],
+            [
+              0.20666719675064088,
+              0.1227010620964898
+            ],
+            [
+              0.21024530977010727,
+              0.13796375261412727
+            ],
+            [
+              0.20538222268223763,
+              0.15136627356211343
+            ],
+            [
+              0.20977290570735932,
+              0.15378741025924683
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "time": 8.758041666666667,
+      "faceLandmarks": [
+        {
+          "confidence": 0.918830621527071,
+          "box": [
+            0.5487859011710217,
+            0.40977342212073387,
+            0.6312133370816182,
+            0.5915616318529939
+          ],
+          "points": [
+            [
+              0.5870937012135983,
+              0.47446388536029394
+            ],
+            [
+              0.6215557128190994,
+              0.4762335472636753
+            ],
+            [
+              0.6143467009067536,
+              0.5154234329859416
+            ],
+            [
+              0.5881594702601433,
+              0.5457184102800158
+            ],
+            [
+              0.614935576915741,
+              0.5477518876393636
+            ]
+          ]
+        },
+        {
+          "confidence": 0.8990786621389395,
+          "box": [
+            0.3561438172790129,
+            0.17830466265957845,
+            0.4854107827213686,
+            0.5174964576746229
+          ],
+          "points": [
+            [
+              0.4415202528238297,
+              0.32533286809921264
+            ],
+            [
+              0.4634382247924805,
+              0.31148100859589045
+            ],
+            [
+              0.47981075048446653,
+              0.3748739613427056
+            ],
+            [
+              0.4458667397499084,
+              0.44443877538045246
+            ],
+            [
+              0.45941463112831116,
+              0.433920415242513
+            ]
+          ]
+        },
+        {
+          "confidence": 0.8551934726472267,
+          "box": [
+            0.6806357978346222,
+            0.3047501588068903,
+            0.7177910306987887,
+            0.3999250361453327
+          ],
+          "points": [
+            [
+              0.7058554247021676,
+              0.3442384969443083
+            ],
+            [
+              0.7104815155267715,
+              0.34416277416878277
+            ],
+            [
+              0.7141011729836464,
+              0.36318725479973685
+            ],
+            [
+              0.704308757558465,
+              0.37457002003987633
+            ],
+            [
+              0.7056406706571579,
+              0.38058434592352974
+            ]
+          ]
+        },
+        {
+          "confidence": 0.7977801097328012,
+          "box": [
+            0.1372008168878937,
+            0.3391652864818958,
+            0.2631860887822723,
+            0.648446480174344
+          ],
+          "points": [
+            [
+              0.1967006266117096,
+              0.471952842341529
+            ],
+            [
+              0.242317795753479,
+              0.5015048503875732
+            ],
+            [
+              0.21942420601844786,
+              0.5568174097273085
+            ],
+            [
+              0.17888921909034253,
+              0.5765034993489583
+            ],
+            [
+              0.212663933634758,
+              0.6036133024427626
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "time": 11.969583333333333,
+      "faceLandmarks": [
+        {
+          "confidence": 0.9059466781949235,
+          "box": [
+            0.5459889914951618,
+            0.4043272297557695,
+            0.6356453511752789,
+            0.5843915580733117
+          ],
+          "points": [
+            [
+              0.5875791192054749,
+              0.46214132573869493
+            ],
+            [
+              0.6225990861654281,
+              0.4855529016918606
+            ],
+            [
+              0.6054390132427215,
+              0.5154025422202216
+            ],
+            [
+              0.5744429563172162,
+              0.53050643603007
+            ],
+            [
+              0.6015240609645843,
+              0.5511157247755263
+            ]
+          ]
+        },
+        {
+          "confidence": 0.9006486830861039,
+          "box": [
+            0.2735147113482155,
+            0.16354849989143389,
+            0.39804760417540896,
+            0.5249975006951817
+          ],
+          "points": [
+            [
+              0.36041163504123686,
+              0.31373071786430146
+            ],
+            [
+              0.3806370735168457,
+              0.3166051583157645
+            ],
+            [
+              0.3923060178756714,
+              0.3758730888366699
+            ],
+            [
+              0.3533215939998627,
+              0.44010400772094727
+            ],
+            [
+              0.3659881830215454,
+              0.44409493340386286
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

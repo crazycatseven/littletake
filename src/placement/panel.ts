@@ -1,3 +1,4 @@
+import { icon } from '../icons';
 import './panel.css';
 
 export interface PrecisionSettings { space: 'world' | 'local'; snap: boolean; move: number; rotate: number }
@@ -9,7 +10,7 @@ export class PlacementPanel {
   constructor(private root: HTMLElement, change: (settings: PrecisionSettings) => void, align: (axis: number, edge: AlignmentEdge) => void) {
     root.className = 'placement-tools';
     root.innerHTML = `<button data-space title="Move and rotate axes · Scaling uses local axes" aria-label="Transform space">World</button>
-      <div class="snap-control"><button data-snap aria-pressed="false" title="Snap viewport movement and rotation">Snap</button><details><summary aria-label="Snap settings">⌄</summary><div class="placement-popover"><strong>Snap increments</strong><label>Move · meters<input data-step="move" aria-label="Move snap increment" type="number" min="0.01" max="100" step="0.01" value="0.25"></label><label>Rotate · degrees<input data-step="rotate" aria-label="Rotation snap increment" type="number" min="1" max="180" step="1" value="15"></label><p>Applied while dragging the transform handles.</p></div></details></div>
+      <div class="snap-control"><button data-snap aria-pressed="false" title="Snap viewport movement and rotation">Snap</button><details><summary aria-label="Snap settings">${icon('chevron-down')}</summary><div class="placement-popover"><strong>Snap increments</strong><label>Move · meters<input data-step="move" aria-label="Move snap increment" type="number" min="0.01" max="100" step="0.01" value="0.25"></label><label>Rotate · degrees<input data-step="rotate" aria-label="Rotation snap increment" type="number" min="1" max="180" step="1" value="15"></label><p>Applied while dragging the transform handles.</p></div></details></div>
       <details class="alignment-menu"><summary>Align</summary><div class="placement-popover"><strong>Align in world space</strong><p data-reference>Select two visible objects.</p>${[['X','Left','Center','Right'],['Y','Bottom','Center','Top'],['Z','Back','Center','Front']].map(([axis,...labels],i)=>`<div class="alignment-row"><span>${axis}</span>${labels.map((label,j)=>`<button data-align="${i}" data-edge="${['min','center','max'][j]}" aria-label="Align ${axis} ${label}">${label}</button>`).join('')}</div>`).join('')}<p>The reference stays in place. Motion paths move with each object.</p></div></details>`;
     root.addEventListener('click', event => {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button');

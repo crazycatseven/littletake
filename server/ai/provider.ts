@@ -1,5 +1,5 @@
 /** App-owned request types. Provider SDK/HTTP types stay inside their adapter. */
-export type AIContent = { type: 'text'; text: string } | { type: 'video'; dataUrl: string } | { type: 'image'; dataUrl: string };
+export type AIContent = { type: 'text'; text: string } | { type: 'video'; dataUrl: string } | { type: 'image'; dataUrl: string;reference?:boolean;provenance?:{dataRef:string;transform:Record<string,unknown>} };
 export interface StructuredRequest {
   instructions: string;
   content: AIContent[];
@@ -8,6 +8,8 @@ export interface StructuredRequest {
   schemaName: string;
   format?: 'json_schema' | 'json_object';
   signal?: AbortSignal;
+  reasoningEffort?: 'low' | 'medium' | 'high';
+  maxOutputTokens?: number;
   onOutput?(text: string): void;
 }
 export interface AIProvider {
@@ -15,10 +17,12 @@ export interface AIProvider {
   readonly model: string;
   generateObject(request: StructuredRequest): Promise<unknown>;
   generateToolTurn?(request: ToolRequest): Promise<ToolResponse>;
+  segmentMedia?(media:Extract<AIContent,{type:'image'|'video'}>,concept:string,signal?:AbortSignal):Promise<SegmentedFrame[]>;
 }
+export interface SegmentedFrame {index:number;regions:{id:string;box:[number,number,number,number];confidence:number}[]}
 
 export interface ToolDefinition { name: string; description: string; parameters: Record<string, unknown> }
-export interface ToolRequest { instructions: string; input: unknown[]; tools: ToolDefinition[]; schema: Record<string, unknown>; signal?: AbortSignal }
+export interface ToolRequest { instructions: string; input: unknown[]; tools: ToolDefinition[]; schema: Record<string, unknown>; signal?: AbortSignal; reasoningEffort?:StructuredRequest['reasoningEffort']; parallelCalls?:boolean;onResponse?(response:unknown):void }
 export interface ToolResponse { output: unknown[]; calls: { id: string; name: string; arguments: string }[]; text: string }
 
 export class AIError extends Error {

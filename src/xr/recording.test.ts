@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Euler, MathUtils, Quaternion } from 'three';
-import { createObject, createCamera, createShot, evaluateFov, evaluateTransform, History } from '../model';
+import { createObject, createCamera, createShot, createEmptyScene, evaluateFov, evaluateTransform, History } from '../model';
 import { validateAnimation } from '../animation/model';
 import { XRRecording, processRecording, interpolatePose, type PoseSample } from './recording';
+import { localTransform, worldTransform } from '../placement/hierarchy';
+import { XRKeyframeReader } from './timeline';
 import type { SceneObject, Transform } from '../types';
 
 const pose = (x: number, yaw = 0): Transform => ({ position: [x, 0, -2], rotation: [0, yaw, 0], scale: [1, 1, 1] });
@@ -115,4 +117,29 @@ test('camera take preserves lens animation and shot binding while recording tran
   assert.ok(Math.abs(evaluateTransform(result, 2).rotation[1]-60)<1e-6);
   const history = new History(camera); history.commit(result);
   assert.deepEqual(history.undo(), original);
+});
+
+
+test('parented camera recording preserves world motion and camera timeline keys', () => {
+  const scene = createEmptyScene('scene', 'Scene'), parent = createObject('cube', 1);
+  parent.transform = pose(10, 90);
+  parent.animation = {takes: [], curves: {'position.x': [
+    {time: 0, value: 10, interpolation: 'linear'}, {time: 2, value: 12, interpolation: 'linear'},
+  ]}};
+  const camera = createCamera('camera', 'Camera'); camera.parentId = parent.id; camera.transform = pose(0);
+  scene.objects = [parent]; scene.cameras = [camera];
+  const original = structuredClone(scene), start = worldTransform(scene, camera.id, 0);
+  const take = new XRRecording(camera, 0, 2); take.begin(0);
+  for (let i=1; i<=30; i++) {
+    const desired = structuredClone(start); desired.position[0] += i/30;
+    const now = i*1000/30;
+    take.sample(localTransform(scene, camera.id, desired, take.sampleTime(now)), now);
+  }
+  take.stop(); assert.deepEqual(scene, original);
+  const result = take.apply(), preview = {...scene, cameras: [result]};
+  assert.equal(result.parentId, parent.id);
+  const keys = new XRKeyframeReader().read(result, 2)!; assert.ok(keys.frames.length >= 2);
+  const end = worldTransform(preview, result.id, 1);
+  assert.ok(Math.abs(end.position[0] - start.position[0] - 1) < 1e-6);
+  assert.ok(q(end).angleTo(q(start)) < 1e-6);
 });

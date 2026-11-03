@@ -3,6 +3,7 @@ import { animationFor, evaluateTransform } from '../model';
 import { emptyAnimation, keepRecordedTake } from '../animation/model';
 import { transformSchema } from '../performance/motion';
 import type { SceneEntity, Transform } from '../types';
+import { eulerDegrees } from '../rotation';
 
 export type XRRecordAction = 'record' | 'preview' | 'apply' | 'discard';
 export interface XRRecordingState {
@@ -15,8 +16,7 @@ export interface XRRecordingState {
 export interface PoseSample { time: number; transform: Transform }
 const quaternion = (pose: Transform) => new Quaternion().setFromEuler(new Euler(...pose.rotation.map(MathUtils.degToRad) as [number, number, number]));
 function rotation(q: Quaternion): Transform['rotation'] {
-  const e = new Euler().setFromQuaternion(q);
-  return [e.x, e.y, e.z].map(MathUtils.radToDeg) as Transform['rotation'];
+  return eulerDegrees(q);
 }
 export function interpolatePose(a: Transform, b: Transform, t: number): Transform {
   return { position: new Vector3(...a.position).lerp(new Vector3(...b.position), t).toArray(),
@@ -94,9 +94,10 @@ export class XRRecording<T extends SceneEntity = SceneEntity> {
     this.mode = 'recording'; this.startedAt = now;
     this.raw = [{ time: this.start, transform: structuredClone(this.pose) }];
   }
+  sampleTime(now: number): number { return Math.min(this.duration, this.start + Math.max(0, now - this.startedAt) / 1000); }
   sample(pose: Transform, now: number): void {
     if (this.mode !== 'recording') return;
-    const next = { time: Math.min(this.duration, this.start + Math.max(0, now - this.startedAt) / 1000), transform: transformSchema.parse(pose) };
+    const next = { time: this.sampleTime(now), transform: transformSchema.parse(pose) };
     if (next.time < this.last.time) return;
     // Fixed-rate resampling makes filtering independent of headset refresh rate.
     for (let at = this.start + this.raw.length / 30; at <= next.time + 1e-9; at = this.start + this.raw.length / 30) {
@@ -115,7 +116,7 @@ export class XRRecording<T extends SceneEntity = SceneEntity> {
     const current = animationFor(this.before) ?? emptyAnimation();
     let n = 1; while (current.takes.some(take => take.id === `xr-take-${n}`)) n++;
     this.result = { ...structuredClone(this.before), track: null,
-      animation: keepRecordedTake(current, `xr-take-${n}`, this.processed, this.duration) };
+      animation: keepRecordedTake(current, `xr-take-${n}`, this.processed, this.duration, { recordScale: false }) };
     this.mode = 'review'; this.time = this.start;
   }
   cancelGrip(): void {

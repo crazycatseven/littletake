@@ -1,14 +1,25 @@
+import { validateParents } from './placement/hierarchy.ts';
+export { evaluateTransform } from './animation/model.ts';
 import { Euler, MathUtils, Matrix4, Quaternion, Vector3 } from 'three';
-import type { PrimitiveKind, SceneDocument, SceneEntity, SceneObject, SceneCamera, Shot, Transform, Vec3 } from './types.ts';
-import { assetReferenceSchema, migrateAssetValue } from './assets/model.ts';
+import { z } from 'zod';
+import { applyChanges, changesBetween, type Change } from './project/changes.ts';
+import { newId } from './id.ts';
+
+import type { MotionTrack, PrimitiveKind, SceneDocument, SceneEntity, SceneObject, SceneCamera, Shot, Transform, Vec3 } from './types.ts';
+import { assetReferenceSchema, jointAnglesSchema, migrateAssetValue } from './assets/model.ts';
 import { componentsSchema } from './components/model.ts';
 import { samplesSchema } from './performance/motion.ts';
-import { emptyAnimation, evaluateAnimatedTransform, evaluateProperty, migrateMotionTrack, validateAnimation, type PropertyAnimation } from './animation/model.ts';
+import { evaluateTransform, emptyAnimation, evaluateAnimatedTransform, evaluateProperty, isJointProperty, migrateMotionTrack, propertyPaths, validateAnimation, type PropertyAnimation, type PropertyPath } from './animation/model.ts';
+import { sceneLookSchema } from './scene-edit/look.ts';
+import { pathSchema } from './motion-paths/model.ts';
+
 
 const KINDS: readonly PrimitiveKind[] = ['cube', 'sphere', 'cylinder', 'cone', 'plane', 'human'];
 const COLORS = ['#f0a06d', '#80aaa0', '#9b99c8', '#d9bb72', '#9fb9cf', '#b98e97'];
 const MAX_JSON_LENGTH = 20_000_000;
 export const MAX_CAMERAS = 128;
+/** Normalized visible image rectangle; black source mattes do not change lens projection. */
+export const frameBoundsSchema = z.tuple([z.number().min(0).max(1),z.number().min(0).max(1),z.number().min(0).max(1),z.number().min(0).max(1)]).refine(bounds=>bounds[2]-bounds[0]>=.5&&bounds[3]-bounds[1]>=.5);
 const copyTransform = (t: Transform): Transform => ({ position: [...t.position], rotation: [...t.rotation], scale: [...t.scale] });
 
 export function createObject<K extends Exclude<PrimitiveKind,'asset'>>(kind: K, index: number): SceneObject & {kind:K} {
@@ -77,6 +88,33 @@ export function ensureAnimation(entity: SceneEntity): PropertyAnimation {
 export function evaluateFov(camera: SceneCamera, time: number): number {
   return evaluateProperty(camera.animation, 'fov', camera.fov, time);
 }
+/** Static instance angles are the defaults; keyed joints use the shared scalar curves. */
+export function evaluateJointAngles(object: SceneObject, time: number): Record<string, number> {
+  const angles = { ...object.jointAngles };
+  for (const path of Object.keys(object.animation?.curves ?? {})) if (isJointProperty(path)) {
+    const partId = path.slice(12);
+    angles[partId] = evaluateProperty(object.animation, path, angles[partId] ?? 0, time);
+  }
+  return angles;
+}
+/** Root motion edits replace only transform channels; joints and other property curves survive. */
+export function setTransformMotion(entity: SceneEntity, track: MotionTrack | null, time: number): void {
+  const previous = animationFor(entity), rootPaths = new Set([...propertyPaths('position'), ...propertyPaths('rotation'), ...propertyPaths('scale')]);
+  const retained = Object.entries(previous?.curves ?? {}).filter(([path, keys]) => !rootPaths.has(path as PropertyPath) && keys?.length);
+  entity.transform = track ? structuredClone(track.from) : evaluateTransform(entity, time);
+  if (!retained.length) { delete entity.animation; entity.track = structuredClone(track); return; }
+  const next = track ? migrateMotionTrack(track) : emptyAnimation();
+  const retainedTakes = structuredClone(previous!.takes.filter(take => retained.some(([, keys]) => keys!.some(key => key.take === take.id))));
+  const ids = new Set(retainedTakes.map(take => take.id));
+  for (const take of next.takes) {
+    const old = take.id; let suffix = 1;
+    while (ids.has(take.id)) take.id = `legacy-motion-${suffix++}`;
+    if (take.id !== old) for (const keys of Object.values(next.curves)) for (const key of keys ?? []) if (key.take === old) key.take = take.id;
+    ids.add(take.id);
+  }
+  for (const [path, keys] of retained) next.curves[path as PropertyPath] = structuredClone(keys!);
+  next.takes.push(...retainedTakes); entity.animation = next; entity.track = null;
+}
 export function evaluateComponents(object: SceneObject, time: number): SceneObject['components'] {
   if (!object.animation || !object.components?.some(component => component.type === 'pivot')) return object.components;
   return object.components.map(component => component.type === 'pivot' ? {
@@ -84,31 +122,6 @@ export function evaluateComponents(object: SceneObject, time: number): SceneObje
   } : component);
 }
 
-export function evaluateTransform(entity: SceneEntity, time: number): Transform {
-  if (!Number.isFinite(time)) throw new Error('Playback time must be finite.');
-  if (entity.animation) return evaluateAnimatedTransform(entity.animation, entity.transform, time);
-  const track = entity.track;
-  if (!track) return copyTransform(entity.transform);
-  let alpha = MathUtils.clamp((time - track.start) / track.duration, 0, 1);
-  if (alpha === 0) return copyTransform(track.from);
-  if (alpha === 1) return copyTransform(track.to);
-  let from = track.from, to = track.to;
-  if (track.samples?.length) {
-    let low = 0, high = track.samples.length;
-    while (low < high) { const mid = (low + high) >>> 1; if (track.samples[mid].at < alpha) low = mid + 1; else high = mid; }
-    const before = track.samples[low - 1], after = track.samples[low];
-    from = before?.transform ?? track.from; to = after?.transform ?? track.to;
-    alpha = (alpha - (before?.at ?? 0)) / ((after?.at ?? 1) - (before?.at ?? 0));
-  }
-  const linear = (a: Vec3, b: Vec3): Vec3 => a.map((v, i) => MathUtils.lerp(v, b[i], alpha)) as Vec3;
-  const quaternion = (rotation: Vec3) => new Quaternion().setFromEuler(new Euler(...rotation.map(MathUtils.degToRad) as Vec3, 'XYZ'));
-  const rotation = new Euler().setFromQuaternion(quaternion(from.rotation).slerp(quaternion(to.rotation), alpha), 'XYZ');
-  return {
-    position: linear(from.position, to.position),
-    rotation: [rotation.x, rotation.y, rotation.z].map(MathUtils.radToDeg) as Vec3,
-    scale: linear(from.scale, to.scale),
-  };
-}
 
 function fail(path: string, detail: string): never { throw new Error(`${path}: ${detail}`); }
 function record(value: unknown, keys: string[], path: string, optional: string[] = []): Record<string, unknown> {
@@ -215,11 +228,16 @@ export function shotCamera(scene: SceneDocument, shotId: string | null): SceneCa
   const shot = scene.shots.find(item => item.id === shotId);
   return scene.cameras.find(camera => camera.id === shot?.cameraId);
 }
+/** Half-open shot ranges make the cut happen exactly at the next shot's start.
+ * Overlapping manually authored shots use the most recently started shot. */
+export function shotAtTime(scene: SceneDocument, time: number): Shot | undefined {
+  return scene.shots.filter(shot => time >= shot.start && (time < shot.start + shot.duration || (time === scene.duration && time === shot.start + shot.duration)))
+    .sort((a, b) => b.start - a.start)[0];
+}
 /** Create the first shot in an empty scene, or explicitly duplicate a shot with its own camera. */
 export function addIndependentShot(scene: SceneDocument, source?: Shot): Shot {
   if (scene.shots.length >= 100 || scene.cameras.length >= MAX_CAMERAS) throw new Error('Scene camera or shot limit reached.');
-  const ids = new Set([...scene.objects, ...scene.cameras, ...scene.shots].map(item => item.id));
-  const next = (prefix: string) => { let n = 1; while (ids.has(`${prefix}-${n}`)) n++; const id = `${prefix}-${n}`; ids.add(id); return id; };
+  const next = (prefix: string) => `${prefix}-${newId()}`;
   const original = source ? shotCamera(scene, source.id) : undefined;
   if (source && !original) throw new Error('Shot camera is missing.');
   const camera = original ? structuredClone(original) : createCamera(next('camera'), `Camera ${scene.cameras.length + 1}`);
@@ -238,7 +256,7 @@ export function validateDocument(value: unknown): SceneDocument {
     return { format: 'LittleTake.scene', version: 3, id: 'scene-1', name: old.name, duration: old.duration, objects: old.objects,
       cameras: [camera], shots: [createShot(camera, `shot-${shotIndex}`, old.duration, 'Shot 1')] };
   }
-  const doc = record(value, ['format', 'version', 'id', 'name', 'duration', 'objects', 'cameras', 'shots'], 'scene', ['fps']);
+  const doc = record(value, ['format', 'version', 'id', 'name', 'duration', 'objects', 'cameras', 'shots'], 'scene', ['fps','look','paths']);
   if (doc.format !== 'LittleTake.scene' || (doc.version !== 2 && doc.version !== 3)) fail('scene', 'unsupported format or version');
   const legacy = doc.version === 2;
   const duration = number(doc.duration, 1, 60, 'scene.duration');
@@ -252,7 +270,7 @@ export function validateDocument(value: unknown): SceneDocument {
   };
   const objects: SceneObject[] = list(doc.objects, 100, 'scene.objects').map((value, index) => {
     const path = 'scene.objects[' + index + ']';
-    const item = record(value, ['id', 'name', 'kind', 'color', 'transform', 'track'], path, ['animation', 'asset', 'components', 'hidden']);
+    const item = record(value, ['id', 'name', 'kind', 'color', 'transform', 'track'], path, ['parentId', 'animation', 'asset', 'jointAngles', 'components', 'hidden']);
     if (item.hidden !== undefined && typeof item.hidden !== 'boolean') fail(path + '.hidden', 'expected a boolean');
     if (!KINDS.includes(item.kind as PrimitiveKind) && item.kind !== 'asset') fail(path, 'unsupported primitive');
     if ((item.kind === 'asset') !== (item.asset !== undefined)) fail(path, 'Compound objects require an asset reference.');
@@ -262,23 +280,26 @@ export function validateDocument(value: unknown): SceneDocument {
     const components = item.components === undefined ? undefined : componentsSchema.parse(item.components);
     if (track && animation) fail(path, 'an entity cannot have both legacy motion and property animation');
     if (animation?.curves.fov?.length) fail(path, 'field of view is only available on cameras');
+    if (!item.asset && (item.jointAngles !== undefined || Object.keys(animation?.curves ?? {}).some(isJointProperty))) fail(path, 'joint angles require an asset instance');
     if (animation && Object.keys(animation.curves).some(key=>key.startsWith('pivot.')) && !components?.some(component=>component.type==='pivot')) fail(path, 'pivot animation requires a pivot component');
-    return { id: identifier(item.id, path + '.id'), name: text(item.name, 120, path + '.name'), kind: item.kind as PrimitiveKind, color: item.color,
+    return { id: identifier(item.id, path + '.id'), name: text(item.name, 120, path + '.name'), ...(item.parentId !== undefined ? {parentId: identifier(item.parentId,path+'.parentId',false)} : {}), kind: item.kind as PrimitiveKind, color: item.color,
       transform: transform(item.transform, path + '.transform'), track, ...(animation ? { animation } : {}),
       ...(item.asset !== undefined ? { asset: assetReferenceSchema.parse(migrateAssetValue(item.asset)) } : {}),
+      ...(item.jointAngles !== undefined ? { jointAngles: jointAnglesSchema.parse(item.jointAngles) } : {}),
       ...(components ? { components } : {}),
       ...(item.hidden === true ? { hidden: true } : {}) };
   });
   const cameras: SceneCamera[] = list(doc.cameras, legacy ? 24 : MAX_CAMERAS, 'scene.cameras').map((value, index) => {
     const path = 'scene.cameras[' + index + ']';
-    const item = record(value, ['id', 'name', 'fov', 'transform', 'track'], path, ['animation']);
+    const item = record(value, ['id', 'name', 'fov', 'transform', 'track'], path, ['parentId', 'animation', 'frameBounds']);
     if (legacy && item.track !== null) fail(path, 'v2 camera setups must be static');
     const track = motion(item.track, duration, path + '.track');
     const animation = item.animation === undefined ? undefined : validateAnimation(item.animation, duration);
     if (track && animation) fail(path, 'an entity cannot have both legacy motion and property animation');
     if (animation && Object.keys(animation.curves).some(key=>key.startsWith('pivot.'))) fail(path, 'cameras cannot have pivot components');
-    return { id: identifier(item.id, path + '.id'), name: text(item.name, 120, path + '.name'), fov: number(item.fov, 10, 120, path + '.fov'),
-      transform: transform(item.transform, path + '.transform'), track, ...(animation ? { animation } : {}) };
+    if (animation && Object.keys(animation.curves).some(isJointProperty)) fail(path, 'cameras cannot animate asset joints');
+    return { id: identifier(item.id, path + '.id'), name: text(item.name, 120, path + '.name'), ...(item.parentId !== undefined ? {parentId: identifier(item.parentId,path+'.parentId',false)} : {}), fov: number(item.fov, 10, 120, path + '.fov'),
+      transform: transform(item.transform, path + '.transform'), track, ...(animation ? { animation } : {}), ...(item.frameBounds === undefined ? {} : {frameBounds: frameBoundsSchema.parse(item.frameBounds)}) };
   });
   const legacyFraming = new Map<string, Pick<SceneCamera, 'fov' | 'transform' | 'track'>>();
   const shots: Shot[] = list(doc.shots, 100, 'scene.shots').map((value, index) => {
@@ -309,7 +330,12 @@ export function validateDocument(value: unknown): SceneDocument {
       cameras.push({ id, name: `${shot.name.slice(0, 110)} camera`, ...framing }); shot.cameraId = id;
     }
   }
-  return { format: 'LittleTake.scene', version: 3, id: identifier(doc.id, 'scene.id', false), name: text(doc.name, 120, 'scene.name'), duration, ...(doc.fps !== undefined ? {fps: doc.fps as 24 | 30} : {}), objects, cameras, shots };
+  const paths = doc.paths === undefined ? undefined : list(doc.paths,100,'scene.paths').map(value=>pathSchema.parse(value));
+  for(const path of paths??[])identifier(path.id,'scene.paths.id');
+  for(const object of objects){const follow=object.components?.find(c=>c.type==='followPath');if(follow?.type==='followPath'&&follow.pathId&&!paths?.some(p=>p.id===follow.pathId))fail(object.id,'follow path must belong to this scene');if(object.animation?.curves['followPath.progress']?.length&&!follow)fail(object.id,'path progress animation requires Follow Path');}
+  if(cameras.some(camera=>camera.animation?.curves['followPath.progress']?.length))fail('scene.cameras','cameras cannot animate path progress');
+  validateParents([...objects,...cameras]);
+  return { format: 'LittleTake.scene', version: 3, id: identifier(doc.id, 'scene.id', false), name: text(doc.name, 120, 'scene.name'), duration, ...(doc.fps !== undefined ? {fps: doc.fps as 24 | 30} : {}), objects, cameras, shots, ...(paths ? {paths} : {}), ...(doc.look !== undefined ? {look:sceneLookSchema.parse(doc.look)} : {}) };
 }
 
 export function serializeDocument(doc: SceneDocument): string { return JSON.stringify(validateDocument(doc), null, 2); }
@@ -319,27 +345,31 @@ export function parseDocument(json: string): SceneDocument {
 }
 
 export class History<T extends object = SceneDocument> {
-  private past: T[] = [];
-  private future: T[] = [];
+  private past: Change[][] = [];
+  private future: Change[][] = [];
+  private current!: T;
   constructor(initial: T) { this.reset(initial); }
-  get canUndo(): boolean { return this.past.length > 1; }
+  get canUndo(): boolean { return this.past.length > 0; }
   get canRedo(): boolean { return this.future.length > 0; }
   commit(doc: T): void {
-    this.future = [];
-    if (JSON.stringify(this.past[this.past.length - 1]) === JSON.stringify(doc)) return;
-    this.past.push(structuredClone(doc));
-    if (this.past.length > 100) this.past.shift();
+    const changes = changesBetween(this.current, doc); if (!changes.length) return;
+    this.future = []; this.past.push(changes); this.current = structuredClone(doc);
+    if (this.past.length > 99) this.past.shift();
   }
   undo(): T | null {
     if (!this.canUndo) return null;
-    this.future.push(this.past.pop()!);
-    return structuredClone(this.past[this.past.length - 1]);
+    return this.travel(this.past, this.future);
   }
   redo(): T | null {
     if (!this.canRedo) return null;
-    const doc = this.future.pop()!;
-    this.past.push(doc);
-    return structuredClone(doc);
+    return this.travel(this.future, this.past);
   }
-  reset(doc: T): void { this.past = [structuredClone(doc)]; this.future = []; }
+  private travel(from: Change[][], to: Change[][]): T {
+    const inverse = from.pop()!.slice().reverse().map(change => ({ ...change, before: change.after, after: change.before, guard: true })).sort((a, b) => Number(!!a.order) - Number(!!b.order));
+    const next = applyChanges(this.current, inverse);
+    to.push(changesBetween(this.current, next)); this.current = next; return structuredClone(next);
+  }
+  /** Remote edits update the current state, but never become this user's undo steps. */
+  receive(doc: T): void { this.current = structuredClone(doc); }
+  reset(doc: T): void { this.current = structuredClone(doc); this.past = []; this.future = []; }
 }

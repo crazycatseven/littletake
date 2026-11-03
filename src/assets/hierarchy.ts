@@ -7,8 +7,9 @@ export function bindHierarchyAssets(root:HTMLElement,source:(id:string)=>Hierarc
   const objectAt=(target:EventTarget|null)=> (target as HTMLElement|null)?.closest<HTMLElement>('[data-prefab-object]');
   root.addEventListener('dragstart',event=>{
     const row=objectAt(event.target),value=row&&source(row.dataset.prefabObject!);
+    if(!row)return;
     if(!value||!event.dataTransfer){event.preventDefault();return;}
-    close();event.dataTransfer.effectAllowed='copy';event.dataTransfer.setData(SCENE_OBJECT_DRAG,JSON.stringify(value));event.dataTransfer.setData('text/plain',row!.textContent??'Scene object');dragStarted();
+    close();event.dataTransfer.effectAllowed='copyMove';event.dataTransfer.setData(SCENE_OBJECT_DRAG,JSON.stringify(value));event.dataTransfer.setData('text/plain',row.textContent??'Scene object');dragStarted();
   });
   const show=(row:HTMLElement,x:number,y:number)=>{
     const value=source(row.dataset.prefabObject!);if(!value)return;

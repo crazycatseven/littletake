@@ -132,11 +132,17 @@ export class AssetLibrary {
     });
   }
   async saveJob(job: { id: string; [key: string]: unknown }): Promise<void> {
+    return this.writing(()=>this.writeJob(job));
+  }
+  private async writeJob(job: { id: string; [key: string]: unknown }): Promise<void> {
     assetReferenceSchema.shape.id.parse(job.id); await mkdir(path.join(this.directory, 'jobs'), { recursive: true });
-    const file = path.join(this.directory, 'jobs', job.id + '.json'), temp = file + '.tmp';
-    await writeFile(temp, JSON.stringify(job)); await rename(temp, file);
+    const file = path.join(this.directory, 'jobs', job.id + '.json'), temp = file + '.' + crypto.randomUUID() + '.tmp';
+    await writeFile(temp, JSON.stringify(job),{flag:'wx'});try{await rename(temp,file);}finally{await unlink(temp).catch(()=>{});}
   }
   async readJob(id: string): Promise<Record<string, unknown>> {
+    return this.writing(()=>this.readJobFile(id));
+  }
+  private async readJobFile(id: string): Promise<Record<string, unknown>> {
     assetReferenceSchema.shape.id.parse(id);
     return JSON.parse(await readFile(path.join(this.directory, 'jobs', id + '.json'), 'utf8'));
   }

@@ -1,15 +1,17 @@
 import { z } from 'zod';
-import { Box3, Group, Mesh, MeshStandardMaterial, BoxGeometry, SphereGeometry, CylinderGeometry, ConeGeometry, Vector3, MathUtils } from 'three';
+import { Box3, Group, Mesh, MeshStandardMaterial, BoxGeometry, SphereGeometry, CylinderGeometry, ConeGeometry, Matrix4, Vector3, MathUtils } from 'three';
 import type { Vec3 } from '../types.ts';
 import { componentsSchema } from '../components/model.ts';
 import { motionSchema, transformSchema } from '../performance/motion.ts';
-import { animationSchema, validateAnimation } from '../animation/model.ts';
+import { animationSchema, isJointProperty, validateAnimation, type PropertyAnimation } from '../animation/model.ts';
 
 import { vector, identifier, partSchema, constructionSchema } from './toolkit/schema.ts';
 import { evaluateAsset } from './toolkit/evaluate.ts';
+import { upgradeHumanProxyParts } from './human.ts';
 export { evaluateAsset } from './toolkit/evaluate.ts';
 
 export const assetReferenceSchema = z.strictObject({ id: identifier });
+export const jointAnglesSchema = z.record(z.string().min(1).max(2048), z.number().min(-360).max(360));
 export const assetRecipeSchema = z.strictObject({
   name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(1200), tags: z.array(z.string().trim().min(1).max(64)).min(1).max(20),
   parts: z.array(partSchema).min(1).max(2048), construction: constructionSchema.optional(),
@@ -17,7 +19,7 @@ export const assetRecipeSchema = z.strictObject({
 export const assetSchema = assetRecipeSchema.extend({
   id: identifier, source: z.enum(['builtin', 'generated', 'edited']), createdAt: z.string(),
   bounds: z.strictObject({ min: vector(-1000, 1000), max: vector(-1000, 1000), size: vector(0.001, 1000) }),
-  template: z.strictObject({ components: componentsSchema, track: motionSchema.nullable(), transform: transformSchema.optional(), animation: animationSchema.optional() }).optional(),
+  template: z.strictObject({ components: componentsSchema.refine(items=>!items.some(c=>c.type==='script'),'Project scripts attach to scene instances, not shared prefab templates.'), track: motionSchema.nullable(), transform: transformSchema.optional(), animation: (animationSchema as z.ZodType<PropertyAnimation>).optional(), jointAngles: jointAnglesSchema.optional() }).optional(),
 });
 export type AssetRecipe = z.infer<typeof assetRecipeSchema>;
 export type AssetDefinition = z.infer<typeof assetSchema>;
@@ -69,33 +71,62 @@ export function recipeBounds(recipe: AssetRecipe): AssetDefinition['bounds'] {
 /** Joint axes live inside the already-rotated part node, shared by sandbox and expert previews. */
 export function poseAssetJoints(root: Group, recipe: AssetRecipe, angles: Record<string, number>): void {
   const evaluated = root.userData.evaluated as ReturnType<typeof evaluateAsset> ?? evaluateAsset(recipe);
+  const joints = new Map(evaluated.parts.filter(part => part.joint).map(part => [part.id, part.joint!]));
   for (const [id, angle] of Object.entries(angles)) {
-    const part = evaluated.parts.find(p => p.id === id);
-    if (!part?.joint || !Number.isFinite(angle) || angle < part.joint.min || angle > part.joint.max) throw new Error('Invalid joint test pose: ' + id);
-    root.traverse(node => { if (node.userData.partId === id) node.children[0].rotation[part.joint!.axis] = MathUtils.degToRad(angle); });
+    const joint = joints.get(id);
+    if (!joint || !Number.isFinite(angle) || angle < joint.min || angle > joint.max) throw new Error('Invalid joint test pose: ' + id);
   }
+  // Reset unposed joints too, so scrubbing backwards or deleting a curve cannot leave a stale pose.
+  root.traverse(node => {
+    const joint = joints.get(node.userData.partId); if (!joint) return;
+    const pivot = node.children[0]; pivot.rotation.set(0, 0, 0);
+    pivot.rotation[joint.axis] = MathUtils.degToRad(angles[node.userData.partId] ?? 0);
+  });
   root.updateMatrixWorld(true);
+}
+export function validateJointAngles(recipe: AssetRecipe, angles: Record<string, number>, animation?: PropertyAnimation): void {
+  const joints = new Map(evaluateAsset(recipe).parts.filter(part => part.joint).map(part => [part.id, part.joint!]));
+  const check = (id: string, values: number[]) => {
+    const joint = joints.get(id);
+    if (!joint || values.some(angle => !Number.isFinite(angle) || angle < joint.min || angle > joint.max)) throw new Error('Invalid asset joint angle: ' + id);
+  };
+  for (const [id, angle] of Object.entries(angles)) check(id, [angle]);
+  for (const [path, keys] of Object.entries(animation?.curves ?? {})) if (isJointProperty(path)) check(path.slice(12), keys!.map(key => key.value));
+}
+/** Bounds in the asset's own space, reusing live geometry instead of rebuilding a prefab each frame. */
+export function assetGroupBounds(root: Group): Box3 {
+  root.updateWorldMatrix(true, true);
+  const bounds = new Box3(), inverse = root.matrixWorld.clone().invert(), matrix = new Matrix4();
+  root.traverse(node => {
+    if (!(node instanceof Mesh)) return;
+    if (!node.geometry.boundingBox) node.geometry.computeBoundingBox();
+    bounds.union(node.geometry.boundingBox!.clone().applyMatrix4(matrix.multiplyMatrices(inverse, node.matrixWorld)));
+  });
+  return bounds;
 }
 export function measureAsset(recipe: AssetRecipe, angles: Record<string, number> = {}) {
   const root = createAssetGroup(recipe);
   try {
+    angles = { ...(recipe as AssetDefinition).template?.jointAngles, ...angles };
     poseAssetJoints(root, recipe, angles); const box = new Box3().setFromObject(root, true);
     const joints: { partId: string; axisInPartSpace: string; axisInAssetSpace: number[]; pivotInAssetSpace: number[]; cylinderAxisInAssetSpace: number[] | null; poseDegrees: number }[] = [];
-    const evaluated = root.userData.evaluated as ReturnType<typeof evaluateAsset>;
+    const evaluated = root.userData.evaluated as ReturnType<typeof evaluateAsset>,positions=new Map<string,number[]>();
     root.traverse(node => {
-      const part = evaluated.parts.find(p => p.id === node.userData.partId); if (!part?.joint) return;
+      const part = evaluated.parts.find(p => p.id === node.userData.partId);if(part)positions.set(part.id,node.children[0].children[0].getWorldPosition(new Vector3()).toArray());if (!part?.joint) return;
       const pivot = node.children[0], mesh = pivot.children[0].children.find(c => c instanceof Mesh)!;
       const axis = new Vector3(part.joint.axis === 'x' ? 1 : 0, part.joint.axis === 'y' ? 1 : 0, part.joint.axis === 'z' ? 1 : 0);
       joints.push({ partId: part.id, axisInPartSpace: part.joint.axis, axisInAssetSpace: axis.transformDirection(node.matrixWorld).multiplyScalar(Math.sign(node.matrixWorld.determinant())).toArray(), pivotInAssetSpace: pivot.getWorldPosition(new Vector3()).toArray(), cylinderAxisInAssetSpace: part.kind === 'cylinder' ? new Vector3(0,1,0).transformDirection(mesh.matrixWorld).toArray() : null, poseDegrees: angles[part.id] ?? 0 });
     });
-    return { bounds: { min: box.min.toArray(), max: box.max.toArray(), size: box.getSize(new Vector3()).toArray() }, partCount: evaluated.parts.filter(p => p.kind !== 'group').length, sourcePartCount: recipe.parts.filter(p => p.kind !== 'group').length, nodeCount: evaluated.parts.length, parameters: evaluated.parameters, anchors: evaluated.anchors, parts: evaluated.parts.map(p=>({id:p.id,sourceId:p.sourceId,generatedBy:p.generatedBy})), joints };
+    return { bounds: { min: box.min.toArray(), max: box.max.toArray(), size: box.getSize(new Vector3()).toArray() }, partCount: evaluated.parts.filter(p => p.kind !== 'group').length, sourcePartCount: recipe.parts.filter(p => p.kind !== 'group').length, nodeCount: evaluated.parts.length, parameters: evaluated.parameters, anchors: evaluated.anchors, parts: evaluated.parts.map(p=>({id:p.id,sourceId:p.sourceId,generatedBy:p.generatedBy,positionInAssetSpace:positions.get(p.id)})), joints };
   } finally { disposeAssetGroup(root); }
 }
-export function createAsset(value: unknown, id: string, source: AssetDefinition['source'] = 'generated'): AssetDefinition {
+export function createAsset(value: unknown, id: string, source: AssetDefinition['source'] = 'generated',origin:'bottom-center'|'preserve'='bottom-center'): AssetDefinition {
   const recipe = validateRecipe(value), box = recipeBounds(recipe);
   const offset: Vec3 = [-(box.min[0] + box.max[0]) / 2, -box.min[1], -(box.min[2] + box.max[2]) / 2];
-  if (recipe.construction) recipe.construction.offset = recipe.construction.offset.map((v,i)=>v+offset[i]) as Vec3;
-  else for (const part of recipe.parts) if (part.parentId === null) part.position = part.position.map((v, i) => v + offset[i]) as Vec3;
+  if(origin==='bottom-center'){
+    if (recipe.construction) recipe.construction.offset = recipe.construction.offset.map((v,i)=>v+offset[i]) as Vec3;
+    else for (const part of recipe.parts) if (part.parentId === null) part.position = part.position.map((v, i) => v + offset[i]) as Vec3;
+  }
   return validateAsset({ ...recipe, id, source, createdAt: new Date().toISOString(), bounds: recipeBounds(recipe) });
 }
 /** Read compatibility only: current assets and references never serialize a prefab version. */
@@ -117,7 +148,11 @@ export function migrateAssetDefinitions(values: unknown[]): AssetDefinition[] {
   return [...latest.values()].map(entry => entry.asset);
 }
 export function validateAsset(value: unknown): AssetDefinition {
-  const asset = assetSchema.parse(migrateAssetValue(value)); validateRecipe(assetRecipeSchema.strip().parse(asset));
+  const asset = assetSchema.parse(migrateAssetValue(value));
+  if(!asset.construction)asset.parts=upgradeHumanProxyParts(asset.parts);
+  validateRecipe(assetRecipeSchema.strip().parse(asset));
+
+  if (asset.template?.jointAngles || asset.template?.animation) validateJointAngles(asset, asset.template.jointAngles ?? {}, asset.template.animation);
   if(asset.template?.animation){
     if(asset.template.track)throw new Error('A prefab cannot have both legacy motion and property animation.');
     asset.template.animation=validateAnimation(asset.template.animation,60);
@@ -133,5 +168,6 @@ export function validateAsset(value: unknown): AssetDefinition {
 export function assetSummary(asset: AssetDefinition) {
   const evaluated = evaluateAsset(asset);
   return { id: asset.id, name: asset.name, description: asset.description, tags: asset.tags, dimensions: asset.bounds.size,
+    colors:[...new Set(evaluated.parts.filter(part=>part.kind!=='group').map(part=>part.color))],
     bounds: asset.bounds, partCount: evaluated.parts.filter(p=>p.kind!=='group').length, sourcePartCount: asset.parts.filter(p=>p.kind!=='group').length, parameters: evaluated.parameters, movableParts: evaluated.parts.filter(p => p.joint).map(p => ({ id: p.id, name: p.name, joint: p.joint })) };
 }

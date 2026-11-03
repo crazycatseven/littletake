@@ -1,11 +1,12 @@
 import { Euler, MathUtils, Matrix4, Quaternion, Vector3 } from 'three';
 import { z } from 'zod';
-import type { MotionTrack, Transform, Vec3 } from '../types.ts';
+import type { SceneEntity, MotionTrack, Transform, Vec3 } from '../types.ts';
 
 const axes = ['x', 'y', 'z'] as const;
 export type AnimationAxis = typeof axes[number];
 export type VectorProperty = 'position' | 'rotation' | 'scale' | 'pivot';
-export type PropertyPath = `${VectorProperty}.${AnimationAxis}` | 'fov';
+export type JointPropertyPath = `jointAngles.${string}`;
+export type PropertyPath = `${VectorProperty}.${AnimationAxis}` | 'fov' | 'followPath.progress' | JointPropertyPath;
 export type Interpolation = 'linear' | 'constant' | 'smooth' | 'quaternion';
 export interface PropertyKey {
   time: number;
@@ -22,7 +23,17 @@ export interface PropertyAnimation {
 }
 
 const paths = [...(['position', 'rotation', 'scale', 'pivot'] as const).flatMap(group => axes.map(axis => `${group}.${axis}` as PropertyPath)), 'fov'] as PropertyPath[];
-const pathSet = new Set<string>(paths);
+const pathSet = new Set<string>([...paths,'followPath.progress']);
+/** Keep the complete evaluated ID: modifier copies contain both '~' and '.'. */
+export function isJointProperty(path: string): path is JointPropertyPath {
+  return path.startsWith('jointAngles.') && path.length <= 2060 && /^[A-Za-z0-9_-]+(?:~[A-Za-z0-9_-]+\.(?:[xyz]+|[1-9][0-9]*))*$/.test(path.slice(12))
+    && !['__proto__', 'constructor', 'prototype'].includes(path.slice(12));
+}
+export function jointProperty(partId: string): JointPropertyPath {
+  const path: JointPropertyPath = `jointAngles.${partId}`;
+  if (!isJointProperty(path)) throw new Error('Invalid evaluated joint ID.');
+  return path;
+}
 const orientationSchema = z.tuple([z.number().min(-360000).max(360000), z.number().min(-360000).max(360000), z.number().min(-360000).max(360000)]);
 const takeId = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
 const keySchema = z.strictObject({
@@ -41,7 +52,9 @@ export function frameAtTime(time: number, fps: number): number { return Math.rou
 export function timeAtFrame(frame: number, fps: number): number { return frame / fps; }
 
 function limits(path: PropertyPath): [number, number] {
+  if (path === 'followPath.progress') return [0,1];
   if (path === 'fov') return [10, 120];
+  if (isJointProperty(path)) return [-360, 360];
   if (path.startsWith('rotation.')) return [-360000, 360000];
   if (path.startsWith('scale.')) return [.01, 100];
   return [-1000, 1000];
@@ -56,7 +69,7 @@ export function validateAnimation(value: unknown, duration: number): PropertyAni
     ids.set(take.id, take);
   }
   for (const [name, keys] of Object.entries(parsed.curves)) {
-    if (!pathSet.has(name)) throw new Error(`Property ${name} is not animatable.`);
+    if (!pathSet.has(name) && !isJointProperty(name)) throw new Error(`Property ${name} is not animatable.`);
     const path = name as PropertyPath, [min, max] = limits(path);
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
@@ -92,7 +105,8 @@ export function evaluateProperty(animation: PropertyAnimation | null | undefined
     const rotation = new Euler().setFromQuaternion(quaternion(from.orientation).slerp(quaternion(to.orientation), alpha), 'XYZ');
     return MathUtils.radToDeg([rotation.x, rotation.y, rotation.z][axes.indexOf(path.at(-1) as AnimationAxis)]);
   }
-  return MathUtils.lerp(from.value, to.value, alpha);
+  // Linear/smooth interpolation is convex. Round-off at a joint limit must not exceed its valid keys.
+  return MathUtils.clamp(MathUtils.lerp(from.value, to.value, alpha),Math.min(from.value,to.value),Math.max(from.value,to.value));
 }
 
 export function evaluateAnimatedTransform(animation: PropertyAnimation | null | undefined, base: Transform, time: number): Transform {
@@ -122,7 +136,7 @@ export function migrateMotionTrack(track: MotionTrack): PropertyAnimation {
 }
 
 function assertCanPut(animation: PropertyAnimation, path: PropertyPath, time: number, value: number, orientation?: Vec3): void {
-  if (!pathSet.has(path) || !Number.isFinite(time) || time < 0 || time > 60 || !Number.isFinite(value)) throw new Error('Invalid keyframe.');
+  if ((!pathSet.has(path) && !isJointProperty(path)) || !Number.isFinite(time) || time < 0 || time > 60 || !Number.isFinite(value)) throw new Error('Invalid keyframe.');
   const [min, max] = limits(path); if (value < min || value > max) throw new Error('Keyframe value is outside the supported range.');
   if (path.startsWith('rotation.') && (!orientation || !orientationSchema.safeParse(orientation).success)) throw new Error('Rotation keys require an orientation.');
   if (!path.startsWith('rotation.') && orientation) throw new Error('Only rotation keys accept an orientation.');
@@ -139,6 +153,20 @@ export function putKey(animation: PropertyAnimation, path: PropertyPath, time: n
   const interpolation: Interpolation = previous?.interpolation === 'quaternion' && path.startsWith('rotation.') ? 'quaternion' : 'linear';
   keys.push({ time, value, interpolation, ...(orientation ? { orientation: [...orientation] as Vec3 } : {}) });
   keys.sort((a, b) => a.time - b.time);
+}
+
+/** Replace one complete channel atomically; unrelated channels and their samples stay intact. */
+export function replacePropertyKeys(animation: PropertyAnimation, path: PropertyPath, keys: (Pick<PropertyKey, 'time' | 'value' | 'orientation'> & { interpolation: Exclude<Interpolation, 'quaternion'> })[], duration: number): PropertyAnimation {
+  if (!keys.length || keys.length > 3602) throw new Error('A channel needs between 1 and 3602 keys.');
+  const next = structuredClone(animation);
+  delete next.curves[path];
+  for (const [index, key] of keys.entries()) {
+    if (index > 0 && key.time - keys[index - 1].time < 1e-8) throw new Error('Property keys must be in strictly increasing absolute scene time.');
+    putKey(next, path, key.time, key.value, key.orientation);
+    setKeyInterpolation(next, [path], key.time, key.interpolation);
+  }
+  updateTakeRanges(next);
+  return validateAnimation(next, duration);
 }
 
 /** Key a vector as one operation while retaining independent axis channels. */
@@ -206,7 +234,7 @@ export function setKeyInterpolation(animation: PropertyAnimation, paths: Propert
 }
 
 /** Keep a reviewed performance in the same position/rotation curves used by manual keys. */
-export function keepRecordedTake(animation: PropertyAnimation, id: string, frames: { time: number; transform: Transform }[], duration: number): PropertyAnimation {
+export function keepRecordedTake(animation: PropertyAnimation, id: string, frames: { time: number; transform: Transform; joints?:Record<string,number> }[], duration: number, options: { recordScale?: boolean } = {}): PropertyAnimation {
   if (!takeId.safeParse(id).success || animation.takes.some(take => take.id === id) || animation.takes.length >= 100) throw new Error('Invalid or duplicate take ID.');
   if (frames.length < 2 || frames.length > 3602 || !Number.isFinite(duration) || duration <= 0 || duration > 60) throw new Error('Invalid recording.');
   const start = frames[0].time, end = frames[frames.length - 1].time;
@@ -221,6 +249,15 @@ export function keepRecordedTake(animation: PropertyAnimation, id: string, frame
       return { time: frame.time, value, interpolation: group === 'rotation' ? 'quaternion' : 'linear', ...(orientation ? { orientation: [...orientation] as Vec3 } : {}), take: id };
     });
     next.curves[path] = [...current, ...recorded].sort((a, b) => a.time - b.time);
+  }
+  const jointIds=[...new Set(frames.flatMap(frame=>Object.keys(frame.joints??{})))];
+  for(const jointId of jointIds){
+    const path=jointProperty(jointId),current=(next.curves[path]??[]).filter(key=>key.time<start-1e-8||key.time>end+1e-8);
+    const recorded=frames.map(frame=>{const value=frame.joints?.[jointId];if(value===undefined)throw new Error('Every recorded frame must include the same joints.');assertCanPut(emptyAnimation(),path,frame.time,value);return {time:frame.time,value,interpolation:'linear' as const,take:id};});
+    if(current.length+recorded.length>3602)throw new Error('Too many joint keys.');next.curves[path]=[...current,...recorded].sort((a,b)=>a.time-b.time);
+  }
+  if(options.recordScale!==false&&frames.some(frame=>frame.transform.scale.some((v,i)=>v!==frames[0].transform.scale[i])))for(const [i,path] of propertyPaths('scale').entries()){
+    const current=(next.curves[path]??[]).filter(key=>key.time<start-1e-8||key.time>end+1e-8);if(current.length+frames.length>3602)throw new Error('Too many scale keys.');next.curves[path]=[...current,...frames.map(frame=>({time:frame.time,value:frame.transform.scale[i],interpolation:'linear' as const,take:id}))].sort((a,b)=>a.time-b.time);
   }
   // An overwritten take can have surviving samples on both sides. Keep each
   // surviving section separately draggable, including any legacy scale keys.
@@ -336,4 +373,30 @@ export function transformAnimatedSelection(animation: PropertyAnimation, base: T
   validateAnimation(next,60);
   if(newBase.position.some(value=>Math.abs(value)>1000)||newBase.scale.some(value=>value<.01||value>100))throw new Error('Placement exceeds the scene limits.');
   Object.assign(base,newBase);Object.assign(animation,next);
+}
+
+export function evaluateTransform(entity: SceneEntity, time: number): Transform {
+  if (!Number.isFinite(time)) throw new Error('Playback time must be finite.');
+  if (entity.animation) return evaluateAnimatedTransform(entity.animation, entity.transform, time);
+  const track = entity.track;
+  if (!track) return structuredClone(entity.transform);
+  let alpha = MathUtils.clamp((time - track.start) / track.duration, 0, 1);
+  if (alpha === 0) return structuredClone(track.from);
+  if (alpha === 1) return structuredClone(track.to);
+  let from = track.from, to = track.to;
+  if (track.samples?.length) {
+    let low = 0, high = track.samples.length;
+    while (low < high) { const mid = (low + high) >>> 1; if (track.samples[mid].at < alpha) low = mid + 1; else high = mid; }
+    const before = track.samples[low - 1], after = track.samples[low];
+    from = before?.transform ?? track.from; to = after?.transform ?? track.to;
+    alpha = (alpha - (before?.at ?? 0)) / ((after?.at ?? 1) - (before?.at ?? 0));
+  }
+  const linear = (a: Vec3, b: Vec3): Vec3 => a.map((v, i) => MathUtils.lerp(v, b[i], alpha)) as Vec3;
+  const quaternion = (rotation: Vec3) => new Quaternion().setFromEuler(new Euler(...rotation.map(MathUtils.degToRad) as Vec3, 'XYZ'));
+  const rotation = new Euler().setFromQuaternion(quaternion(from.rotation).slerp(quaternion(to.rotation), alpha), 'XYZ');
+  return {
+    position: linear(from.position, to.position),
+    rotation: [rotation.x, rotation.y, rotation.z].map(MathUtils.radToDeg) as Vec3,
+    scale: linear(from.scale, to.scale),
+  };
 }

@@ -15,9 +15,9 @@ export class AssetEditorStage {
   private orbit: OrbitControls;
   private gizmo: TransformControls;
   private group = new THREE.Group();
-  private box = new THREE.Box3Helper(new THREE.Box3(), 0x8f9c78);
-  private selection = new THREE.Box3Helper(new THREE.Box3(), 0xb88656);
-  private grid = new THREE.GridHelper(20, 40, 0xb2b9ab, 0xd7dbd0);
+  private box: THREE.Box3Helper;
+  private selection: THREE.Box3Helper;
+  private grid: THREE.GridHelper;
   private axes = new THREE.AxesHelper(.3);
   private draft?: AssetDraft;
   private selected: string | null = null;
@@ -36,7 +36,14 @@ export class AssetEditorStage {
   private startPointer = [0, 0];
   private dragChanged = false;
   constructor(private host: HTMLElement, private onSelect: (id: string | null) => void, private onEdit: (edits: AssetEdit[]) => void) {
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); this.renderer.setClearColor(0xf2f3ed);
+    const theme = getComputedStyle(host);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); this.renderer.setClearColor(theme.getPropertyValue('--viewport-background').trim());
+    this.grid = new THREE.GridHelper(20, 40, theme.getPropertyValue('--viewport-grid-major').trim(), theme.getPropertyValue('--viewport-grid-minor').trim());
+    for (const material of Array.isArray(this.grid.material) ? this.grid.material : [this.grid.material]) {
+      material.transparent = true; material.opacity = .3;
+    }
+    this.box = new THREE.Box3Helper(new THREE.Box3(), new THREE.Color(theme.getPropertyValue('--muted').trim()));
+    this.selection = new THREE.Box3Helper(new THREE.Box3(), new THREE.Color(theme.getPropertyValue('--accent').trim()));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace; this.renderer.domElement.tabIndex = 0;
     this.renderer.domElement.setAttribute('aria-label', 'Prefab viewport'); host.append(this.renderer.domElement);
     this.orbit = new OrbitControls(this.camera, this.renderer.domElement); this.orbit.enableDamping = true;
@@ -114,13 +121,13 @@ export class AssetEditorStage {
   }
   testJoint(id: string, degrees: number) {
     this.resetTests(); const pivot = this.joints.get(id), joint = this.draft ? evaluateAsset(this.draft).parts.find(p => p.id === id)?.joint : undefined;
-    if (pivot && joint) { this.gizmo.detach(); poseAssetJoints(this.group, this.draft!, { [id]: degrees }); this.updateBoxes(); }
+    if (pivot && joint) { this.gizmo.detach(); poseAssetJoints(this.group, this.draft!, {...this.draft?.template?.jointAngles,[id]:degrees}); this.updateBoxes(); }
   }
   testComponent(enabled: boolean) { this.resetTests(); this.testing = enabled; if (enabled) { this.gizmo.detach(); this.renderer.domElement.focus(); } }
   resetTests() {
     this.testing = false; this.keys.clear(); this.runtime = { velocity: 0, yaw: 0 };
     this.pose = { position: [0,0,0], rotation: [0,0,0], scale: [1,1,1] }; this.group.position.set(0,0,0); this.group.rotation.set(0,0,0);
-    for (const pivot of this.joints.values()) pivot.rotation.set(0,0,0); this.attach(); this.updateBoxes();
+    for (const pivot of this.joints.values()) pivot.rotation.set(0,0,0);if(this.draft)poseAssetJoints(this.group,this.draft,this.draft.template?.jointAngles??{});this.attach(); this.updateBoxes();
   }
   private tick = (now: number) => {
     const dt = Math.min((now - this.lastTime) / 1000, .05); this.lastTime = now;
