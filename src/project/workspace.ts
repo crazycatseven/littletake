@@ -579,7 +579,7 @@ export class Workspace {
         }
         const value = JSON.parse(await data.text());
         if (output.kind === 'look-frame') { const image = new Image(); image.src = value.image; image.alt = output.name; preview.append(image); const link = document.createElement('a'); link.href = value.image; link.download = output.name + '.png'; link.textContent = 'Download image'; preview.append(link); }
-        else { const text = document.createElement('p'); text.textContent = value.brief.prompt; preview.append(text); }
+        else { const text = document.createElement('p'); text.textContent = value.brief.promptText ?? value.brief.prompt; text.style.whiteSpace = 'pre-wrap'; preview.append(text); }
       } catch (error) { const message = dialog.querySelector<HTMLElement>('.projects-error')!; message.hidden = false; message.textContent = (error as Error).message; }
     });
     document.body.append(dialog); dialog.showModal();

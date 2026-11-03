@@ -15,6 +15,7 @@ import { descendants, sceneEntities, localTransform, worldTransform } from '../p
 import { jointProperty, putKey, replacePropertyKeys, setKeyInterpolation, type PropertyPath } from '../animation/model.ts';
 import { scriptOperationSchema, isScriptOperation, applyScriptOperation } from '../scripts/operations.ts';
 import { eulerDegrees } from '../rotation.ts';
+import { refineRecordedTake, refineTakeOperationSchema } from '../performance/refinement.ts';
 
 const vector = (min: number, max: number) => z.array(z.number().min(min).max(max)).length(3) as unknown as z.ZodType<Vec3>;
 const position = vector(-1000, 1000);
@@ -31,6 +32,8 @@ const propertyTarget = { sceneId: id, id, path: z.string().min(1).max(2060) };
 export const viewSchema = z.enum(['top_down', 'shot']);
 export type SceneView = z.infer<typeof viewSchema>;
 export interface SceneSnapshot {
+  variant?: 'before' | 'after';
+  shotId?: string | null;
   view: SceneView; time: number; width: number; height: number; dataUrl: string;
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number } | null;
   visibleBoxes?:Record<string,{box:[number,number,number,number];pixels:number}|null>;
@@ -41,6 +44,7 @@ const shotFields = { id, name, cameraId: id, start: z.number().min(0).max(60), d
 // Historical chat receipts keep their original proposed framing; this is never offered to the model.
 export const legacyShotOperationSchema = z.strictObject({ type: z.literal('add_shot'), sceneId: id, shot: z.strictObject({ ...cameraFields, ...shotFields }) });
 export const operationSchema = z.union([
+  refineTakeOperationSchema,
   ...scriptOperationSchema.options,
   ...spatialOperationSchema.options,
   z.strictObject({ type: z.literal('instantiate_asset'), sceneId: id, id, name, asset: assetSchema, transform, track: track.nullable() }),
@@ -128,6 +132,12 @@ export function applyProjectOperations(source: ProjectContent, operations: Scene
       continue;
     }
     switch (operation.type) {
+      case 'refine_take': {
+        const item = find(operation.id);
+        item.animation = refineRecordedTake(item, operation.takeId, operation.refinement, doc.duration);
+        item.track = null;
+        break;
+      }
       case 'remove_scene': project.scenes = project.scenes.filter(scene => scene.id !== doc.id); break;
       case 'rename_scene': doc.name = operation.name; break;
       case 'set_scene_look': doc.look = structuredClone(operation.look); break;

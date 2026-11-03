@@ -12,7 +12,6 @@ import { duplicateHierarchy, reparentScene, transformSelection, type PoseUpdate,
 import { PlacementPanel } from './placement/panel';
 import { openShotExport } from './shot-export/dialog';
 import { bindShotPreview } from './shot-preview/panel';
-import { openLookFrames } from './look/dialog';
 import { AssetPanel } from './assets/panel';
 import { AssetEditor } from './assets/editor';
 import { updateAssetInstances } from './assets/edit';
@@ -25,6 +24,7 @@ import { bindComponents, componentInspector } from './components/inspector';
 import { inputController } from './components/model';
 import { applyTransformModifiers } from './components/transform';
 import { PerformanceSession, type RecordingClock } from './performance/session';
+import { performancePanel, performancePlaybackLabel } from './performance/panel';
 import { prepareScripts } from './scripts/runtime';
 import { openScriptEditor } from './scripts/editor';
 import { scriptOnlyChange } from './scripts/operations';
@@ -68,14 +68,14 @@ app.innerHTML = `
     <div id="objectsPanel" class="library-page" role="tabpanel" aria-labelledby="objectsTab"><input id="hierarchySearch" class="hierarchy-search" type="search" aria-label="Search objects" placeholder="Search objects…"/><div class="hierarchy-tools"><span id="selectionCount">0 selected</span><button data-action="hide-selection" title="Hide selected objects · H" aria-label="Hide selected objects">${icon('hidden')}</button><button data-action="show-selection" title="Show selected objects" aria-label="Show selected objects">${icon('eye')}</button></div><div id="outliner" class="outliner" aria-label="Scene objects"></div><button class="hierarchy-footer" id="visibilitySummary" data-action="show-all">All objects visible</button></div>
   </aside>
   <section class="stage-panel" aria-label="3D stage">
-    <div class="viewport-heading"><div class="transform-tools" role="toolbar" aria-label="Transform tools"><button data-tool="translate" aria-label="Move tool" title="Move · G">${icon('move')}<span>Move</span></button><button data-tool="rotate" aria-label="Rotate tool" title="Rotate · R">${icon('rotate')}<span>Rotate</span></button><button data-tool="scale" aria-label="Scale tool" title="Scale · S">${icon('scale')}<span>Scale</span></button></div><div><button data-action="ground" title="Drop to the floor or surface below · double-click the green Y handle">${icon('arrow-down')} Drop to surface</button><button data-action="focus" title="Focus selection · F">${icon('focus')}Focus</button><button data-action="reset-view" aria-label="Reset scene view">Reset view</button></div></div>
+    <div class="viewport-heading"><div class="transform-tools" role="toolbar" aria-label="Transform tools"><button data-tool="translate" aria-label="Move tool" title="Move · G">${icon('move')}<span>Move</span></button><button data-tool="rotate" aria-label="Rotate tool" title="Rotate · R">${icon('rotate')}<span>Rotate</span></button><button data-tool="scale" aria-label="Scale tool" title="Scale · S">${icon('scale')}<span>Scale</span></button></div><div class="view-tools"><button data-action="ground" aria-label="Drop to surface" title="Drop to the floor or surface below · double-click the green Y handle">${icon('ground')}<span>Drop to surface</span></button><button data-action="focus" aria-label="Focus selection" title="Focus selection · F">${icon('focus')}<span>Focus</span></button><button data-action="reset-view" aria-label="Reset scene view" title="Reset view">${icon('retry')}<span>Reset view</span></button></div></div>
     <div id="viewport" class="viewport"></div><div id="performanceBar" hidden></div><aside id="gettingStarted" class="getting-started" aria-label="Next steps" hidden><header><strong>Next steps</strong><button type="button" data-tips-close aria-label="Hide next steps" title="Hide next steps">${icon('close')}</button></header><ol><li><button type="button" data-tips-play>${icon('play')}Play</button> runs every shot in order. Pick a shot in the preview to look through one camera.</li><li><b>Move something:</b> select it, then Inspector → <b>Draw path on floor</b>.</li><li><b>Change it in words:</b> tell Muse, for example “make shot 2 circle the hero”.</li><li><b>Render</b> at the top right saves a still or a video of the shot.</li></ol></aside><div id="emptyStage" class="empty-stage" hidden><h2>No scene</h2><p>Add a scene or describe one to Muse.</p><button data-action="build-with-muse" class="primary-button">Build with Muse</button></div>
     <section class="shot-panel" id="shotPanel" aria-label="Shot preview"><div class="shot-switcher shot-preview-header" data-preview-header><button class="shot-preview-grip" data-preview-drag aria-label="Move shot preview" title="Drag to move · Arrow keys to nudge · Double-click or Home to reset">${icon('grip')}</button><select id="shotSelect" aria-label="Active shot"></select><button data-action="add-shot" aria-label="New shot" title="New shot">${icon('plus')}</button><button class="shot-preview-collapse" data-preview-collapse aria-label="Collapse shot preview" aria-expanded="true" aria-controls="shotPreviewBody" title="Collapse shot preview"><span aria-hidden="true">${icon('chevron-down')}</span></button></div><div id="shotPreviewBody" class="shot-preview-body"><div class="shot-heading"><h2>${icon('camera')}<span>Shot preview</span></h2><button class="icon-button" data-action="expand-preview" aria-label="Expand shot preview" aria-expanded="false" title="Expand preview">${icon('expand')}</button></div><div id="previewDock"><div class="preview-frame" id="previewFrame"><div id="preview" class="preview"></div></div></div><div class="shot-footer"><span id="shotFrameStatus"><span class="live-dot"></span>Live · 16:9</span><div class="shot-footer-actions"><button data-action="pilot-camera" title="Fly this camera and record a take">${icon('camera')}Pilot</button><button data-action="edit-shot" id="lensLabel">Edit shot</button></div></div></div></section>
     <div class="viewport-caption"><span id="viewHint">Drag to orbit · Scroll to zoom</span></div>
     <div class="ai-preview-badge" id="aiPreviewBadge" role="status" hidden>Previewing Muse changes</div>
   </section>
   <aside class="properties-drawer" id="propertiesDrawer" aria-label="Scene assistant and inspector">
-    <div class="panel-tabs" role="tablist" aria-label="Scene tools"><button id="museTab" role="tab" data-panel="muse" aria-selected="true" aria-controls="sceneAI">Muse</button><button id="inspectorTab" role="tab" data-panel="inspector" aria-selected="false" aria-controls="inspector">Inspector</button><span class="model-pill" id="museModel">Muse</span></div>
+    <div class="panel-tabs" role="tablist" aria-label="Scene tools"><button id="museTab" role="tab" data-panel="muse" aria-selected="true" aria-controls="sceneAI">${icon('sparkles')}Muse</button><button id="inspectorTab" role="tab" data-panel="inspector" aria-selected="false" aria-controls="inspector">${icon('settings')}Inspector</button></div>
     <section class="ai-edit-panel" id="sceneAI" role="tabpanel" aria-labelledby="museTab"></section>
     <section class="inspector-panel" id="inspector" role="tabpanel" aria-labelledby="inspectorTab" hidden></section>
   </aside>
@@ -155,7 +155,7 @@ let performanceSession: PerformanceSession | null = null;
 let recordingClock:RecordingClock='realtime';
 let xrRecording: XRRecording | null = null;
 let storageAvailable = true;
-const bottomPanelCollapsedHeight = 34;
+const bottomPanelCollapsedHeight = 36;
 const defaultBottomPanelHeight = () => window.innerHeight <= 720 ? 220 : 280;
 let bottomPanelOpen = false;
 let bottomPanelHeight = defaultBottomPanelHeight();
@@ -477,6 +477,7 @@ function syncStage() { const visibleDoc=sceneWithDrafts(visibleScene()),session=
   const component=inputController(session?.components);stage?.setControlled(session?{id:session.before.id,pose:session.preview(time),joints:session.previewJoints(time),world:component?.type==='movement'&&component.space==='world'}:null);
   stage?.update(visibleDoc,Math.min(time,visibleDoc.duration),selection.ids,Boolean(editPreview) || !!session || playing, editPreview ? previewShotId : project.activeShotId,(editPreview??project).assets??[]); }
 function followTimelineShot(){
+  if(sceneEditor?.session.previewRange)return;
   if(performanceSession?.isCamera)return;
   const shot=shotAtTime(visibleScene(),time),id=shot?.id??null;
   if(id===(editPreview?previewShotId:project.activeShotId))return;
@@ -484,14 +485,17 @@ function followTimelineShot(){
   renderNavigation();renderSelection();
 }
 function seek(value: number) { time=clamp(value,0,visibleScene().duration);followTimelineShot(); renderTime(); syncStage(); if(!playing)renderInspector(); }
-function renderTransport() { document.querySelectorAll<HTMLButtonElement>('[data-action="play"]').forEach(button=>{button.innerHTML=icon(playing?'pause':'play');button.setAttribute('aria-label',playing?'Pause':'Play');button.classList.toggle('is-playing',playing);}); }
+function renderTransport() {
+  document.querySelectorAll<HTMLButtonElement>('[data-action="play"]').forEach(button=>{button.innerHTML=icon(playing?'pause':'play');button.setAttribute('aria-label',playing?'Pause':'Play');button.classList.toggle('is-playing',playing);});
+  const reviewButton=$<HTMLButtonElement>('[data-performance="preview"]');
+  if(reviewButton)reviewButton.innerHTML=performancePlaybackLabel(playing);
+}
 function renderTime() {
   const progress=$<HTMLInputElement>('#followPathProgress'),active=entity();if(progress&&active&&document.activeElement!==progress)progress.value=String(num(propertyValue(active,'followPath.progress')*100));
   const doc=visibleScene(), shot=activeShot();
   const camera=shotCamera(doc,shot?.id??null)??doc.cameras.find(item=>item.id===selection.active)??doc.cameras[0];
   $('#shotFrameStatus').textContent=shot?(time<shot.start||time>shot.start+shot.duration?'Outside shot range':camera?.name+' · 16:9'):camera?camera.name+' · Preview':'No camera';
   document.querySelectorAll<HTMLButtonElement>('[data-action="export-shot"]').forEach(button=>{button.disabled=!shot||!!editPreview||!!performanceSession||[...unkeyed.keys()].some(key=>key.startsWith(`${doc.id}|`));button.title=shot?'Render the current shot as a video or still image':'Add a shot to render';});
-  $<HTMLButtonElement>('[data-action="look-frames"]').disabled=!shot||!!editPreview||!!performanceSession;
   document.querySelectorAll<HTMLElement>('[data-current-time]').forEach(node=>node.textContent=timecode(time)); document.querySelectorAll<HTMLElement>('[data-end-time]').forEach(node=>node.textContent=timecode(doc.duration));
   const fraction=time/doc.duration*100;
   document.querySelectorAll<HTMLElement>('.lane-playhead').forEach(node=>node.style.left=`${fraction}%`);
@@ -781,13 +785,22 @@ function startPerformanceRecord(){
 }
 function stopPerformanceRecord(){if(!performanceSession)return;performanceSession.stop();playing=false;time=performanceSession.time;renderAll();stage?.focusCanvas();if(performanceSession.mode==='control')status('No take recorded yet. Record at least 0.1 seconds.');}
 function discardPerformance(retry=false){if(!performanceSession)return;playing=false;performanceSession.discard();time=performanceSession.time;renderAll();if(retry)startPerformanceRecord();else stage?.focusCanvas();}
-function keepPerformance(){
+function refinePerformance(takeId:string,item=entity()){
+  if(!item||!sceneEditor||performanceSession||xrRecording||!workspace?.canEdit||editPreview)return;
+  try{
+    const shot='fov' in item?doc.shots.find(shot=>shot.cameraId===item.id):activeShot();
+    if('fov' in item&&!shot)throw new Error('Add a shot for this camera before reviewing its recorded framing.');
+    sceneEditor.session.attachPerformance([{sceneId:doc.id,entityId:item.id,takeId,shotId:shot?.id??null}]);
+    setSidePanel('muse');$('#sceneInstruction').focus();status('Recording attached · Describe your intent and send to Muse');
+  }catch(error){status((error as Error).message);}
+}
+function keepPerformance(refine=false){
   const session=performanceSession,item=session?entity(session.before.id):null;if(!session?.draft||!item)return;
   try{
     const frames=session.recordedFrames;
     const current=animationFor(item)??emptyAnimation();let n=1;while(current.takes.some(take=>take.id===`take-${n}`))n++;
     item.animation=keepRecordedTake(current,`take-${n}`,frames,doc.duration,{recordScale:!session.isCamera});item.track=null;
-    session.dispose();performanceSession=null;playing=false;openProperties.clear();changed('Recording kept · Shared across shots · Undo available');persist();synchronizeAssets(libraryAssets);
+    session.dispose();performanceSession=null;playing=false;openProperties.clear();changed('Recording kept · Shared across shots · Undo available');persist();synchronizeAssets(libraryAssets);if(refine)refinePerformance(`take-${n}`,item);
   }catch(error){status((error as Error).message);}
 }
 function renderPerformance(){
@@ -806,19 +819,18 @@ function renderPerformance(){
   if(!session)return;
   bar.dataset.mode=session.mode;bar.dataset.scriptRevision=String(session.scriptRevision??'');
   const control=inputController(session.components),help=session.isCamera?'Right mouse + WASD · Mouse to look · Q/E down/up · Scroll speed · Shift boost':control?.type==='script'?project.scripts?.find(s=>s.id===control.scriptId)?.controls:control?.type==='hinge'?'W/S open/close · Camera stays fixed':'W/S move · A/D turn · Camera stays fixed';
-  const header=`<div><strong>${session.mode==='record'?`${icon('record')} Recording`:session.mode==='review'?'Review Take':session.isCamera?'Piloting Camera':'Positioning'} · ${esc(session.before.name)}</strong><small>${session.mode==='review'?session.draft!.duration.toFixed(1)+' s · Awaiting review':esc(help??'')}${session.scriptRevision?' · Running revision '+session.scriptRevision:''}</small></div>`;
-  const timing=`<label class="performance-timing">${icon('clock')}Timing<select data-recording-clock aria-label="Recording timing" title="While moving pauses scene time whenever the controlled object or camera is still"><option value="realtime" ${session.clock==='realtime'?'selected':''}>Real time</option><option value="motion" ${session.clock==='motion'?'selected':''}>While moving</option></select></label>`;
-  bar.innerHTML=header+(session.mode==='control'?timing+`<button data-performance="record" class="primary-button">${icon('record')} Record <kbd>R</kbd></button><button data-performance="exit">`+(session.isCamera?'Keep position & exit':'Stop Control')+' <kbd>Esc</kbd></button><button data-performance="discard-position">Discard Position</button>':session.mode==='record'?`<span id="performanceClock">${timecode(time)}</span>${session.recordingClock==='motion'?'<small id="performanceMotionState"></small>':''}<button data-performance="stop" class="record-button">${icon('stop')} Stop Recording <kbd>R</kbd></button>`:`<button data-performance="preview">${icon('play')} Play Take</button><button data-performance="retry">${icon('retry')} Record Again</button><button data-performance="discard">Discard</button><button data-performance="keep" class="primary-button">${icon('check')} Keep Take</button>`);
+  bar.innerHTML=performancePanel(session,help??'',playing);
   const clock=bar.querySelector<HTMLSelectElement>('[data-recording-clock]');if(clock)clock.onchange=()=>{recordingClock=clock.value==='motion'?'motion':'realtime';session.clock=recordingClock;};
   renderRecordingClock();
   bar.querySelectorAll<HTMLButtonElement>('[data-performance]').forEach(button=>button.onclick=()=>{
-    switch(button.dataset.performance){case 'record':startPerformanceRecord();break;case 'exit':exitPerformance();break;case 'discard-position':discardPosition();break;case 'stop':stopPerformanceRecord();break;case 'preview':togglePlay();button.innerHTML=icon(playing?'pause':'play')+(playing?' Pause':' Play Take');break;case 'retry':discardPerformance(true);break;case 'discard':discardPerformance();break;case 'keep':keepPerformance();break;}
+    switch(button.dataset.performance){case 'record':startPerformanceRecord();break;case 'exit':exitPerformance();break;case 'discard-position':discardPosition();break;case 'stop':stopPerformanceRecord();break;case 'preview':togglePlay();break;case 'retry':discardPerformance(true);break;case 'discard':discardPerformance();break;case 'keep':keepPerformance();break;case 'refine':keepPerformance(true);break;}
   });
 }
 function renderRecordingClock(){
   const session=performanceSession,state=$<HTMLElement>('#performanceMotionState'),waiting=!!session&&session.mode==='record'&&!session.advancing;
+  const clock=$<HTMLElement>('#performanceClock');if(clock)clock.textContent=timecode(time);
   $('#performanceBar').classList.toggle('waiting-for-motion',waiting);
-  if(state&&state.dataset.waiting!==String(waiting)){state.dataset.waiting=String(waiting);state.innerHTML=icon(waiting?'pause':'record')+(waiting?' Waiting for movement':' Recording motion');}
+  if(state&&state.dataset.waiting!==String(waiting)){state.dataset.waiting=String(waiting);state.innerHTML=icon(waiting?'pause':'clock')+(waiting?' Waiting for movement':session?.recordingClock==='motion'?' While moving':' Real time');}
 }
 function remove(){if(!selection.ids.length)return;try{const operations=hierarchyRoots(sceneEntities(doc),selection.ids).map(id=>({type:doc.objects.some(item=>item.id===id)?'remove_object' as const:'remove_camera' as const,sceneId:doc.id,id}));replaceContent(applyProjectOperations(projectContent(project),operations,time));changed('Selection removed');}catch(error){status((error as Error).message);}}
 
@@ -839,7 +851,7 @@ function drawMotionRoute(existing?:MotionPath){
 }
 function chooseTool(next:ToolMode){tool=next;stage?.setTool(tool);renderSelection();}
 function chooseAxis(next:Axis|null){axis=next;stage?.setAxis(axis);renderSelection();}
-function togglePlay(){if(playing)pause();else{const take=performanceSession?.draft,start=take?.start??0,end=take?take.start+take.duration:visibleScene().duration;if(time>=end-0.001||time<start)time=start;playing=true;followTimelineShot();lastFrame=performance.now();renderTransport();syncStage();}}
+function togglePlay(){if(playing)pause();else{const take=performanceSession?.draft,range=sceneEditor?.session.previewRange,start=take?.start??range?.start??0,end=take?take.start+take.duration:range?.end??visibleScene().duration;if(time>=end-0.001||time<start)time=start;playing=true;followTimelineShot();lastFrame=performance.now();renderTransport();syncStage();}}
 function restore(next:ProjectContent|null){if(!next)return;stage?.cancelPath();pause();try{replaceContent(next);}catch(error){history.receive(projectContent(project));status((error as Error).message);return;}project.revision++;workspace?.save(project,true);sceneEditor?.sceneChanged();renderAll();persist();}
 function exportScene(){if(!project.activeSceneId){status('Add a scene before exporting it');return;}const portable=doc.objects.some(o=>o.asset)?{...createProject(doc),assets:project.assets?.filter(a=>doc.objects.some(o=>o.asset?.id===a.id))}:null;const blob=new Blob([portable?serializeProject(portable):serializeDocument(doc)],{type:'application/json'}),url=URL.createObjectURL(blob),anchor=document.createElement('a');anchor.href=url;anchor.download=`${doc.name.replace(/[^a-z0-9-_ ]/gi,'').trim()||'LittleTake'}.json`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('Scene exported');}
 function downloadProject(_saved=false){if(workspace?.room){void workspace.download().catch(error=>status((error as Error).message));return;}const text=serializeProject(project);const url=URL.createObjectURL(new Blob([text],{type:'application/json'})),anchor=document.createElement('a');anchor.href=url;anchor.download=`${project.name.replace(/[^a-z0-9-_ ]/gi,'').trim()||'LittleTake'}.project.json`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
@@ -927,7 +939,7 @@ bindShotPreview($('#shotPanel'));
 try {
   $('.viewport-heading .transform-tools').insertAdjacentHTML('afterend','<div id="placementTools"></div>');
   $('.stage-panel').insertAdjacentHTML('beforeend','<div id="hiddenCount" class="hidden-count" hidden></div>');
-  $('.shot-heading h2').insertAdjacentHTML('afterend','<button class="shot-export-button" data-action="export-shot" title="Render the current shot as a video or still image">'+icon('camera')+'Render</button><button class="shot-export-button" data-action="look-frames" title="Render finished film stills of this shot with Muse Image">'+icon('camera')+'Look</button>');
+  $('.shot-heading h2').insertAdjacentHTML('afterend','<button class="shot-export-button" data-action="export-shot" title="Render video, still images or prepare references for Muse">'+icon('camera')+'Render</button>');
   stage=new Stage({viewport:$('#viewport'),preview:$('#preview'),onSelect:selectIds,onStatus:message=>$('#viewHint').textContent=message,onTransform:editSelection,onPathOpen:id=>openMotionPath(id),onPathSelect:(index,part)=>{selectedPathPoint=index;selectedPathPart=part;renderInspector();syncStage();},onPathChange:(_id,index,phase)=>changePathPoint(index,phase),
     onFrame:tick,
     canEnterXR:()=>!assetEditor&&!editPreview&&!performanceSession&&!storageError&&!unkeyed.size&&!document.querySelector('dialog[open]'),
@@ -962,14 +974,12 @@ try {
     onXRTimelineChange:active=>{if(active)pause();},
     xrMenuState:()=>({playing,canUndo:!!workspace?.canEdit&&history.canUndo&&!editPreview&&!performanceSession&&!assetEditor&&!xrRecording}),
   });
-  const xrButton=document.createElement('button');xrButton.id='enterVR';xrButton.textContent='Checking VR…';xrButton.disabled=true;
+  const xrButton=document.createElement('button');xrButton.id='enterVR';xrButton.textContent='Enter VR';xrButton.disabled=true;xrButton.hidden=true;
   xrButton.title='Trigger selects · Grip empty space to navigate · Two grips rotate and scale the free view';
   $('.header-actions').prepend(xrButton);
-  if(!window.isSecureContext||!navigator.xr){xrButton.textContent='VR unavailable';xrButton.title='Use a WebXR headset browser over HTTPS.';}
-  else void navigator.xr.isSessionSupported('immersive-vr').then(supported=>{
-    xrButton.disabled=!supported;xrButton.textContent=supported?'Enter VR':'VR unavailable';
-    if(!supported)xrButton.title='No immersive VR device is available in this browser.';
-  }).catch(()=>{xrButton.textContent='VR unavailable';xrButton.title='The browser could not check VR support.';});
+  if(window.isSecureContext&&navigator.xr)void navigator.xr.isSessionSupported('immersive-vr').then(supported=>{
+    xrButton.disabled=!supported;xrButton.hidden=!supported;
+  }).catch(()=>{ /* Unsupported browsers do not need an unavailable action in the header. */ });
   xrButton.onclick=async()=>{
     xrButton.disabled=true;
     try{await stage.enterXR();}catch(error){status(error instanceof Error?error.message:'Unable to enter VR');}
@@ -993,9 +1003,9 @@ try {
 
 sceneEditor=new SceneEditPanel({
   root:$('#sceneAI'), book:project.conversations, context:()=>({project:projectContent(project),sceneId:project.activeSceneId,shotId:project.activeShotId,revision:project.revision,time,selectedId:selection.active,selectedIds:[...selection.ids]}), prepare:()=>{pause();flushFieldEdit();},
-  changed:()=>persist(),clearSelection:()=>select(null),removeSelection:id=>selectIds(selection.ids.filter(selected=>selected!==id),'replace'),
+  play:()=>togglePlay(),changed:()=>persist(),clearSelection:()=>select(null),removeSelection:id=>selectIds(selection.ids.filter(selected=>selected!==id),'replace'),
   focus:context=>{if(performanceSession){if(context.sceneId===doc.id&&context.selectedId===performanceSession.before.id)return true;status('Stop Control before switching scene context.');return false;}const scene=project.scenes.find(scene=>scene.id===context.sceneId);if((context.sceneId!==null&&!scene)||(context.shotId!==null&&!scene?.shots.some(shot=>shot.id===context.shotId))){status('The original scene or shot no longer exists. Choose a context and send a new message.');return false;}pause();flushFieldEdit();project.activeSceneId=context.sceneId;project.activeShotId=context.shotId;selection.set(context.selectedIds??(context.selectedId?[context.selectedId]:[]));syncDocument();time=clamp(context.time??0,0,doc.duration);renderAll();return true;},
-  capture:(content,sceneId,shotId,frame,view)=>{const scene=content.scenes.find(item=>item.id===sceneId);if(!stage||!scene)throw new Error('Choose an existing scene before capturing a view.');return stage.captureSnapshot(scene,frame,view,shotId,content.assets??[]);},
+  capture:(content,sceneId,shotId,frame,view,compact)=>{const scene=content.scenes.find(item=>item.id===sceneId);if(!stage||!scene)throw new Error('Choose an existing scene before capturing a view.');return stage.captureSnapshot(scene,frame,view,shotId,content.assets??[],false,undefined,compact);},
   preview:(next,focus)=>{if(!next&&!editPreview)return;if(next&&performanceSession&&!scriptOnlyChange(projectContent(project),next,doc.id,performanceSession.before.id)){status('Stop Control to review changes to the scene. Script-only updates can be applied during control.');return;}editPreview=next;previewSceneId=performanceSession?doc.id:focus?.sceneId??next?.scenes[0]?.id??null;const scene=next?.scenes.find(item=>item.id===previewSceneId);previewShotId=scene?.shots.find(item=>item.id===focus?.shotId)?.id??scene?.shots[0]?.id??null;$('#aiPreviewBadge').hidden=!next;if(!next&&!entity())selection.active=null;time=clamp(time,0,visibleScene().duration);pause();renderAll();},
   apply:(next,base,focus)=>{if(serializeContent(projectContent(project))!==base)return false;if(performanceSession&&!scriptOnlyChange(projectContent(project),next,doc.id,performanceSession.before.id)){status('Stop Control before applying scene changes.');return false;}replaceContent(next,performanceSession?undefined:focus);changed('Muse changes applied · Undo to restore');return true;},
 });
@@ -1015,6 +1025,7 @@ app.addEventListener('click',event=>{
   if(stage?.presentingXR)return;
   if(assetEditor)return;
   const target=(event.target as HTMLElement).closest<HTMLElement>('button');if(!target || target.hasAttribute('disabled'))return;
+  if(target.dataset.refineTake){refinePerformance(target.dataset.refineTake);return;}
   if(target.dataset.bottomTab){setBottomPanelTab(target.dataset.bottomTab as 'timeline'|'assets');return;}
   if(target.dataset.discardDraft){unkeyed.delete(target.dataset.discardDraft);renderAll();status('Unkeyed change discarded');return;}
   if(target.dataset.keyGroup){const item=entity();if(item&&!editPreview&&!performanceSession){event.preventDefault();pause();try{keyProperty(item,target.dataset.keyGroup as PropertyGroup,true);}catch(error){status((error as Error).message);}}return;}
@@ -1055,7 +1066,6 @@ app.addEventListener('click',event=>{
     case 'show-selection':showHierarchy(selection.ids);break;
     case 'show-all':setHidden(doc.objects.map(item=>item.id),false);break;
     case 'export-shot':{const shot=activeShot();if(shot&&workspace){pause();flushFieldEdit();try{openShotExport(stage.createShotRenderer(shot.cameraId),shot,time,workspace);}catch(error){status((error as Error).message);}}break;}
-    case 'look-frames':{const shot=activeShot();if(shot&&workspace){pause();flushFieldEdit();try{openLookFrames(stage.createShotRenderer(shot.cameraId),shot,time,workspace);}catch(error){status((error as Error).message);}}break;}
     case 'edit-asset':{const item=entity();if(item&&'asset' in item&&item.asset){const asset=project.assets?.find(a=>a.id===item.asset!.id);if(asset)openAssetEditor(asset);}break;}
     case 'save-asset':saveSelectionAsset();break;
     case 'record-performance':void beginPerformance(true);break;
@@ -1227,6 +1237,7 @@ let scrubbing=false;
 function scrubAt(clientX:number){const rect=$('#timeRuler').getBoundingClientRect();pause();seek(snapFrame((clientX-rect.left)/rect.width*doc.duration));}
 $('#timelineTracks').addEventListener('pointerdown',event=>{
   if(event.button!==0||performanceSession)return;const target=event.target as HTMLElement;
+  if(target.closest('[data-refine-take]'))return;
   if(target.closest('#timeRuler')){scrubbing=true;$('#timeRuler').focus({preventScroll:true});$('#timeRuler').setPointerCapture(event.pointerId);scrubAt(event.clientX);event.preventDefault();return;}
   if(editPreview)return;
   const marker=target.closest<HTMLElement>('[data-animation-group]'),band=target.closest<HTMLElement>('[data-take]');
@@ -1315,7 +1326,7 @@ function tick(now:number){
     else if(session.mode==='record'){$('#performanceClock').textContent=timecode(time);renderRecordingClock();}
     if(session.scriptError)status(session.scriptError);
   }
-  if(playing){const take=performanceSession?.draft,end=take?take.start+take.duration:visibleScene().duration;time=Math.min(time+delta,end);followTimelineShot();if(time>=end){pause();renderInspector();if(performanceSession?.mode==='review')renderPerformance();}renderTime();syncStage();}
+  if(playing){const take=performanceSession?.draft,end=take?take.start+take.duration:sceneEditor?.session.previewRange?.end??visibleScene().duration;time=Math.min(time+delta,end);followTimelineShot();if(time>=end){pause();renderInspector();if(performanceSession?.mode==='review')renderPerformance();}renderTime();syncStage();}
 }
 window.addEventListener('pagehide',()=>{sceneEditor?.session.cancel('This response was interrupted. Retry when you are ready.');persist();});
 window.addEventListener('beforeunload',event=>{if(!storageAvailable||performanceSession||unkeyed.size){event.preventDefault();event.returnValue='';}});
@@ -1343,7 +1354,7 @@ workspace = new Workspace({
   previewReady:()=>!!stage?.canCaptureProjectCover&&!playing&&!performanceSession&&!assetEditor&&!editPreview&&!unkeyed.size&&!document.querySelector('dialog[open]'),
   open:openProject,
   receive:receiveProject,
-  stop:()=>{pause();flushFieldEdit();sceneEditor?.session.cancel('The project session stopped. Completed work is kept.');referenceDialog.contextChanged();document.querySelectorAll<HTMLDialogElement>('.look-dialog[open]').forEach(dialog=>dialog.close());},
+  stop:()=>{pause();flushFieldEdit();sceneEditor?.session.cancel('The project session stopped. Completed work is kept.');referenceDialog.contextChanged();document.querySelectorAll<HTMLDialogElement>('.shot-export-dialog[open]').forEach(dialog=>dialog.close());},
   beforeSwitch:()=>{flushFieldEdit();if(unkeyed.size||performanceSession||assetEditor){status('Finish the current edit or recording before switching projects');return false;}persist();return true;},
   result:(_output,data)=>{void data.text().then(text=>referenceDialog.restore(JSON.parse(text))).catch(error=>status((error as Error).message));},
   recoverBrowserSave:()=>downloadProject(true),
@@ -1368,7 +1379,7 @@ workspace = new Workspace({
     enforceProjectReady();
   },
 });
-const actionsWithoutProject=new Set(['projects','project-results','share-project','save-copy','retry-save','export','export-project','export-scene','export-shot','recover-storage','open','reload','play','rewind','focus','reset-view','top-view','expand-preview','close-preview','shortcuts','close-shortcuts','close-snapshot','refresh-snapshot','download-snapshot','edit-shot','open-scenes','bottom-panel','look-frames']);
+const actionsWithoutProject=new Set(['projects','project-results','share-project','save-copy','retry-save','export','export-project','export-scene','export-shot','recover-storage','open','reload','play','rewind','focus','reset-view','top-view','expand-preview','close-preview','shortcuts','close-shortcuts','close-snapshot','refresh-snapshot','download-snapshot','edit-shot','open-scenes','bottom-panel']);
 document.addEventListener('click',event=>{
   if(workspace?.canEdit)return;
   const action=(event.target as HTMLElement).closest<HTMLElement>('[data-action]')?.dataset.action;

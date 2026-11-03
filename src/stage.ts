@@ -544,14 +544,14 @@ export class Stage {
     return { transform: this.readPose(this.editorCamera), fov: this.perspectiveCamera.fov };
   }
 
-  captureSnapshot(doc: SceneDocument, time: number, view: SceneView, shotId: string | null = doc.shots[0]?.id ?? null, assets:AssetDefinition[] = this.currentAssets, measureVisible=false,frameBounds?:ImageBounds): SceneSnapshot {
+  captureSnapshot(doc: SceneDocument, time: number, view: SceneView, shotId: string | null = doc.shots[0]?.id ?? null, assets:AssetDefinition[] = this.currentAssets, measureVisible=false,frameBounds?:ImageBounds,compact=false): SceneSnapshot {
     if (view === 'shot' && !doc.shots.some(shot => shot.id === shotId)) throw new Error('Choose a shot before capturing its view.');
     if (this.disposed || !this.currentDoc) throw new Error('The stage is not ready to capture an image.');
     if (this.dragging || this.flyPointer !== null) throw new Error('Finish moving the object or camera before capturing a view.');
     const previous = { doc: this.currentDoc, time: this.currentTime, selected: [...this.selectedIds], playing: this.playing, shotId: this.currentShotId, assets:this.currentAssets };
     try {
       this.update(doc, time, [], true, shotId, assets);
-      return renderSceneSnapshot(this.previewRenderer, this.scene, this.shotCamera, doc.objects.filter(item=>!effectivelyHidden(doc,item.id)).map(item => ({ id: item.id, name: item.name, root: this.views.get(item.id)!.root })), view, time, this.previewCameraId,measureVisible,frameBounds??doc.cameras.find(camera=>camera.id===this.previewCameraId)?.frameBounds);
+      return renderSceneSnapshot(this.previewRenderer, this.scene, this.shotCamera, doc.objects.filter(item=>!effectivelyHidden(doc,item.id)).map(item => ({ id: item.id, name: item.name, root: this.views.get(item.id)!.root })), view, time, this.previewCameraId,measureVisible,frameBounds??doc.cameras.find(camera=>camera.id===this.previewCameraId)?.frameBounds,compact?{width:480,height:view==='top_down'?480:270,type:'image/jpeg',quality:.78}:undefined);
     } finally { this.update(previous.doc, previous.time, previous.selected, previous.playing, previous.shotId,previous.assets); }
   }
 
