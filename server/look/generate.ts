@@ -25,7 +25,7 @@ export interface LookResult { image: string; prompt: string; model: string }
 
 export function parseLookInput(value: unknown): LookInput {
   const parsed = inputSchema.safeParse(value);
-  if (!parsed.success) throw new AIError('invalid_input', 'Send one previs frame, a look description and at most two reference images.', 400);
+  if (!parsed.success) throw new AIError('invalid_input', 'Send one previs frame, a look description, subject boxes with some area and at most two reference images.', 400);
   for (const url of [parsed.data.frame, parsed.data.anchor, parsed.data.style]) if (url && decode(url).bytes.length > LOOK_LIMITS.maxImageBytes) throw new AIError('image_too_large', 'Each image must be under 1.4 MB.', 413);
   return parsed.data;
 }

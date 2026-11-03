@@ -6,7 +6,7 @@ import type { ShotRenderer } from '../shot-export/renderer';
 import type { Shot } from '../types';
 import { exportVideo, videoExportIssue } from '../shot-export/export';
 import { briefInput, videoPackage, type BriefFrame, type VideoBrief } from './brief';
-import { framedObjects } from './subjects';
+import { frameSubjects, framedObjects } from './subjects';
 import type { Workspace } from '../project/workspace';
 import { copyText } from '../clipboard';
 import { museInstruction } from './handoff';
@@ -209,7 +209,7 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number,
         frame.state = 'running'; draw(); message(`Rendering ${frame.label.toLowerCase()} · ${done + 1} of ${frames.length}`);
         // Within one render, each frame follows the previous finished frame, so neighbouring frames change only by the blocking between them.
         const reference = consistent ? previous ?? anchor : undefined;
-        const subjects = framedObjects(doc, shot.cameraId, frame.time).map(({ object, position, depth }) => ({ name: object.name.trim().slice(0, 80), position, depth, ...(frame.boxes.has(object.id) ? { box: frame.boxes.get(object.id) } : {}) }));
+        const subjects = frameSubjects(framedObjects(doc, shot.cameraId, frame.time), frame.boxes);
         const body = { frame: frame.previs, direction: look, subjects, ...(reference ? { anchor: reference } : {}), ...(style ? { style } : {}) };
         try {
           const response = await projectFetch('/api/look', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
