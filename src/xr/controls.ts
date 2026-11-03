@@ -289,7 +289,7 @@ export class XRControls {
     if(state)state={...state,selectedKeyTimes:[...this.keySelection.times],keyDragRange:this.keyDrag?.moved?[this.keyDrag.from,this.keyDrag.to]:undefined};
     this.menu.setTimeline(state ? { ...state, canAddKey: !!state.selection && this.options.editable() && !!this.options.addKeyframe,
       canDeleteKey: (!!state.selectedKeyTimes?.length || !!state.selection?.frames.some(key => Math.abs(key.time - state.time) < 1e-6)) && this.options.editable() && !!this.options.deleteKeyframe } : null);
-    this.keyframeGhosts.sync(state, state?.selection ? this.options.timelineObject?.(state.selection.id) : undefined);
+    this.keyframeGhosts.sync(state, state?.selection ? this.options.timelineObject?.(state.selection.id) : undefined, this.rig.scale.x);
     this.syncPanelVisibility();
   }
   private updateTimeline(frame: XRFrame | undefined, now: number): void {

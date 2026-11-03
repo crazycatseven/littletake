@@ -600,7 +600,7 @@ test('VR trigger selects ghost poses and timeline diamonds without starting docu
     controls.start(session as unknown as XRSession, new THREE.Vector3(0, 0, -3));
     controllers[0].dispatchEvent({ type: 'connected', data: { gripSpace: {} } } as never);
     aimMenu(controls, controllers[0], 5); fire('selectstart');
-    assert.equal(controls.keyframeGhosts.root.children.length, 1);
+    assert.equal(controls.keyframeGhosts.root.children.length, 2);
     controllers[0].quaternion.identity(); fire('squeezestart'); assert.equal(edits, 0);
     fire('selectstart'); assert.equal(time, 0); assert.equal(edits, 0);
     // Aim at the final key on the visible panel, using its actual mesh position.
@@ -628,7 +628,7 @@ test('VR trigger selects ghost poses and timeline diamonds without starting docu
     hasSelection = false; controls.updateView(undefined, 100);
     assert.equal(controls.keyframeGhosts.root.children.length, 0);
     hasSelection = true; controls.updateView(undefined, 200);
-    assert.equal(controls.keyframeGhosts.root.children.length, 1);
+    assert.equal(controls.keyframeGhosts.root.children.length, 2);
     aimMenu(controls, controllers[0], 5); fire('selectstart'); assert.equal(controls.keyframeGhosts.root.children.length, 0);
     aimMenu(controls, controllers[0], 5); fire('selectstart'); controls.stop(); assert.equal(controls.keyframeGhosts.root.children.length, 0);
   } finally {

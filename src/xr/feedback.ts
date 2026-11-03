@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 
+export const XR_ACTIVE_RAY_RADIUS = .0024;
+
 export const XR_FEEDBACK = { idle: '#def3ef', ready: '#c9f86b', held: '#ffbd66', selected: '#62dded', disabled: '#789084', dark: '#10231e' };
 
 /** Thick corner brackets use real geometry: WebGL line widths are usually one pixel. */
@@ -63,7 +65,7 @@ export class XRPointerFeedback {
   update(visible: boolean, distance: number, hit: boolean, color: string, active = false): void {
     this.root.visible = visible;
     this.beamMaterial.color.set(color);
-    this.beam.scale.set(active ? .0024 : .0015, active ? .0024 : .0015, Math.max(.001, distance));
+    this.beam.scale.set(active ? XR_ACTIVE_RAY_RADIUS : .0015, active ? XR_ACTIVE_RAY_RADIUS : .0015, Math.max(.001, distance));
     // A minimum physical diameter plus a small angular component keeps distant hits legible.
     const radius = Math.max(.008, distance * .006);
     this.cursor.position.set(0, 0, -distance); this.cursor.scale.setScalar(radius);
