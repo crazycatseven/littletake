@@ -1,3 +1,4 @@
+import { icon } from '../icons';
 import type { ProjectContent } from '../types';
 import { scriptDefinitionSchema, starterScript, type ScriptDefinition } from './model';
 import { checkProjectScript } from './check';
@@ -13,8 +14,8 @@ export function openScriptEditor(options:{project:()=>ProjectContent;sceneId:str
   const load=()=>{const current=read();baseRevision=current?.revision??0;draft=current?structuredClone(current):starterScript('script-'+crypto.randomUUID());dirty=false;};load();
   const q=<T extends HTMLElement>(s:string)=>dialog.querySelector<T>(s)!;
   const render=()=>{
-    dialog.innerHTML=`<header><div><strong>Project Scripts</strong><small>Reusable controllers · saved with this project</small></div><button data-script-close aria-label="Close script editor">✕</button></header>
-    <div class="script-editor-body"><aside>${(options.project().scripts??[]).map(s=>`<button data-script-select="${esc(s.id)}" aria-current="${s.id===selected}">${esc(s.name)}<small>Revision ${s.revision}</small></button>`).join('')}<button data-script-new>＋ New Script</button></aside>
+    dialog.innerHTML=`<header><div><strong>Project Scripts</strong><small>Reusable controllers · saved with this project</small></div><button data-script-close aria-label="Close script editor">${icon('close')}</button></header>
+    <div class="script-editor-body"><aside>${(options.project().scripts??[]).map(s=>`<button data-script-select="${esc(s.id)}" aria-current="${s.id===selected}">${esc(s.name)}<small>Revision ${s.revision}</small></button>`).join('')}<button data-script-new>${icon('plus')} New Script</button></aside>
     <section><div class="script-meta"><label>Name<input aria-label="Script name" data-script-name value="${esc(draft.name)}"/></label><label>State version<input aria-label="Script state version" data-script-version type="number" min="1" value="${draft.stateVersion}"/></label></div>
     <label>Controls<input aria-label="Script controls" data-script-controls value="${esc(draft.controls)}"/></label>
     <p class="muted">${baseRevision?'Revision '+baseRevision:'New project script'} · ${(options.project().scenes.flatMap(s=>s.objects).filter(o=>o.components?.some(c=>c.type==='script'&&c.scriptId===draft.id))).length} attached objects. Recording keeps its active version.</p>

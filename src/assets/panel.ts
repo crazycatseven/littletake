@@ -1,3 +1,4 @@
+import { icon } from '../icons';
 import * as THREE from 'three';
 import { createAssetGroup,disposeAssetGroup,poseAssetJoints,evaluateAsset,validateAsset,type AssetDefinition } from './model';
 import { availableAssets } from './library';
@@ -39,10 +40,10 @@ export class AssetPanel {
     this.grid=root.querySelector('.asset-grid')!;
     root.querySelector('[data-filter="saved"]')!.remove();
     root.querySelector('nav')!.insertAdjacentHTML('afterbegin','<div class="asset-folder-tree" role="tree" aria-label="My Assets folders"></div>');
-    if(scenes)root.querySelector('nav')!.insertAdjacentHTML('afterbegin','<button data-filter="scenes" aria-label="Scenes folder">▱ Scenes</button>');
+    if(scenes)root.querySelector('nav')!.insertAdjacentHTML('afterbegin',`<button data-filter="scenes" aria-label="Scenes folder">${icon('folder')} Scenes</button>`);
     const content=document.createElement('div');content.className='asset-content';this.grid.replaceWith(content);
-    content.innerHTML='<div class="asset-folder-toolbar"><span data-folder-path></span><button data-new-folder>＋ New Folder</button><button data-rename-folder hidden>Rename Folder</button></div>';content.append(this.grid);
-    if(scenes){content.querySelector('.asset-folder-toolbar')!.insertAdjacentHTML('beforeend','<button data-new-scene hidden>＋ New Scene</button>');content.querySelector<HTMLButtonElement>('[data-new-scene]')!.onclick=()=>{if(this.enabled())scenes.create();};}
+    content.innerHTML=`<div class="asset-folder-toolbar"><span data-folder-path></span><button data-new-folder>${icon('plus')} New Folder</button><button data-rename-folder hidden>Rename Folder</button></div>`;content.append(this.grid);
+    if(scenes){content.querySelector('.asset-folder-toolbar')!.insertAdjacentHTML('beforeend',`<button data-new-scene hidden>${icon('plus')} New Scene</button>`);content.querySelector<HTMLButtonElement>('[data-new-scene]')!.onclick=()=>{if(this.enabled())scenes.create();};}
     root.querySelector<HTMLButtonElement>('[data-new-folder]')!.onclick=()=>void this.editFolder();
     root.querySelector<HTMLButtonElement>('[data-rename-folder]')!.onclick=()=>void this.editFolder(true);
     root.querySelector<HTMLElement>('.asset-folder-tree')!.onclick=event=>{
@@ -121,7 +122,7 @@ export class AssetPanel {
     const paths=['',...this.catalog.folders];
     this.root.querySelector('.asset-folder-tree')!.innerHTML=paths.filter(path=>path===''||![...this.collapsed].some(parent=>parent===''||path.startsWith(parent+'/'))).map(path=>{
       const children=this.catalog.folders.some(other=>path===''||other.startsWith(path+'/'));
-      return `<button role="treeitem" data-folder="${esc(path)}" aria-label="Folder ${esc(folderLabel(path))}" aria-level="${path?path.split('/').length+1:1}" aria-selected="${this.filter==='saved'&&this.folder===path}" ${children?`aria-expanded="${!this.collapsed.has(path)}"`:''} style="padding-left:${8+(path?path.split('/').length:0)*14}px"><span data-folder-toggle>${children?(this.collapsed.has(path)?'▸':'▾'):'·'}</span><span>▱ ${esc(path.split('/').at(-1)||'My Assets')}</span></button>`;
+      return `<button role="treeitem" data-folder="${esc(path)}" aria-label="Folder ${esc(folderLabel(path))}" aria-level="${path?path.split('/').length+1:1}" aria-selected="${this.filter==='saved'&&this.folder===path}" ${children?`aria-expanded="${!this.collapsed.has(path)}"`:''} style="padding-left:${8+(path?path.split('/').length:0)*14}px"><span data-folder-toggle>${children?(this.collapsed.has(path)?`${icon('chevron-right')}`:`${icon('chevron-down')}`):'·'}</span><span>${icon('folder')} ${esc(path.split('/').at(-1)||'My Assets')}</span></button>`;
     }).join('');
     this.root.querySelector('[data-folder-path]')!.textContent=this.filter==='saved'?folderLabel(this.folder):this.filter==='all'?'All Assets':categories[this.filter]?.label??'Assets';
     this.root.querySelector<HTMLElement>('[data-rename-folder]')!.hidden=this.filter!=='saved'||!this.folder;
@@ -130,7 +131,7 @@ export class AssetPanel {
     const newScene=this.root.querySelector<HTMLButtonElement>('[data-new-scene]');if(newScene){newScene.hidden=!scenes;newScene.disabled=!this.enabled()||(this.scenes?.list().length??0)>=24;}
     if(scenes){
       this.root.querySelector('[data-folder-path]')!.textContent='Assets / Scenes · This project';
-      this.grid.innerHTML=this.scenes!.list().filter(scene=>scene.name.toLowerCase().includes(this.query)).map(scene=>`<div class="asset-card-entry scene-card-entry"><button class="asset-card scene-card" data-scene-open="${esc(scene.id)}" aria-label="Open scene ${esc(scene.name)}" aria-pressed="${scene.id===this.scenes!.active()}"><span class="scene-card-icon">▧</span><strong>${esc(scene.name)}</strong><small>${scene.shots.length} shots · ${scene.objects.length} objects · ${scene.duration.toFixed(1)}s</small><small>${scene.id===this.scenes!.active()?'Open in editor':'Click to open'}</small></button><button class="asset-card-edit" data-scene-delete="${esc(scene.id)}" aria-label="Delete scene ${esc(scene.name)}">Delete Scene…</button></div>`).join('')||'<p class="asset-empty">No scenes here yet. Create a new scene or import a reference clip.</p>';
+      this.grid.innerHTML=this.scenes!.list().filter(scene=>scene.name.toLowerCase().includes(this.query)).map(scene=>`<div class="asset-card-entry scene-card-entry"><button class="asset-card scene-card" data-scene-open="${esc(scene.id)}" aria-label="Open scene ${esc(scene.name)}" aria-pressed="${scene.id===this.scenes!.active()}"><span class="scene-card-icon">${icon('image')}</span><strong>${esc(scene.name)}</strong><small>${scene.shots.length} shots · ${scene.objects.length} objects · ${scene.duration.toFixed(1)}s</small><small>${scene.id===this.scenes!.active()?'Open in editor':'Click to open'}</small></button><button class="asset-card-edit" data-scene-delete="${esc(scene.id)}" aria-label="Delete scene ${esc(scene.name)}">Delete Scene…</button></div>`).join('')||'<p class="asset-empty">No scenes here yet. Create a new scene or import a reference clip.</p>';
       return;
     }
     const list=this.assets.filter(a=>(this.filter==='all'||(this.filter==='saved'?a.source!=='builtin'&&(this.query?(!this.folder||(this.catalog.locations[a.id]??'')===this.folder||(this.catalog.locations[a.id]??'').startsWith(this.folder+'/')):(this.catalog.locations[a.id]??'')===this.folder):categories[this.filter]?.tags.some(tag=>a.tags.includes(tag))))&&[a.name,a.description,...a.tags,...a.tags.map(categoryLabel)].join(' ').toLowerCase().includes(this.query));

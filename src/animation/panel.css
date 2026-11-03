@@ -5,9 +5,19 @@
 .property-label-key { display:flex; align-items:center; justify-content:space-between; }
 .transform-key-actions { display:flex; align-items:center; gap:4px; }
 .transform-key-actions button { padding:4px 6px; background:var(--surface-raised); color:var(--text-secondary); font-size:9px; }
-.animation-toolbar { display:flex; align-items:center; gap:7px; margin-left:auto; color:var(--text-secondary); font-size:10px; }
+.animation-toolbar { display:flex; align-items:center; gap:7px; color:var(--text-secondary); font-size:10px; }
+.animation-toolbar label { display:flex; align-items:center; gap:6px; white-space:nowrap; }
 .animation-toolbar input { width:48px; padding:3px; font-size:10px; }
 .animation-toolbar select { font-size:10px; }
+.selected-key-tools { display:flex; align-items:center; gap:4px; padding-left:8px; border-left:1px solid var(--line); }
+.timeline-settings { position:fixed; inset:auto; margin:0; width:min(280px, calc(100vw - 16px)); max-height:calc(100dvh - 16px); overflow:auto; padding:12px; border:1px solid var(--line); border-radius:var(--radius-panel); background:var(--paper); color:var(--ink); box-shadow:var(--shadow-floating); font-size:11px; }
+.timeline-settings::backdrop { background:transparent; }
+.timeline-settings header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:12px; }
+.timeline-settings header button { padding:2px 6px; }
+.timeline-settings label { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.timeline-settings select { min-width:76px; border:1px solid var(--line); border-radius:var(--radius-control); padding:4px; background:var(--field); color:var(--ink); font:inherit; }
+.timeline-settings p { margin:6px 0 14px; color:var(--muted); font-size:10px; line-height:1.5; }
+.timeline-settings p:last-child { margin-bottom:0; }
 .animation-ruler-window { min-width:0; overflow:hidden; }
 .animation-ruler-window .time-ruler { width:var(--animation-lane-width,100%); }
 .timeline-content .timeline-rows { overflow:auto; }

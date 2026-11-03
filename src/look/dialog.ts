@@ -1,3 +1,4 @@
+import { icon } from '../icons';
 import { newId } from "../id.ts";
 import { projectFetch } from '../project/client';
 import './dialog.css';
@@ -29,7 +30,7 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number,
   shot = structuredClone(shot);
   const doc = renderer.document, camera = doc.cameras.find(item => item.id === shot.cameraId)!;
   const dialog = document.createElement('dialog'); dialog.className = 'look-dialog'; dialog.setAttribute('aria-label', 'Look frames');
-  dialog.innerHTML = `<div class="look-heading"><div><small>MUSE IMAGE</small><h2>Look frames</h2></div><button data-close aria-label="Close look frames">✕</button></div>
+  dialog.innerHTML = `<div class="look-heading"><div><small>MUSE IMAGE</small><h2>Look frames</h2></div><button data-close aria-label="Close look frames">${icon('close')}</button></div>
     <p class="look-subtitle"></p><div class="look-layout"><div class="look-frames" aria-live="polite"></div>
     <fieldset class="look-settings"><div class="look-tabs" role="tablist" aria-label="Frames"><button role="tab" data-mode="keys" aria-selected="true">Start · middle · end</button><button role="tab" data-mode="current" aria-selected="false">Current frame</button></div>
     <label>Look and mood<textarea rows="5" maxlength="600" placeholder="e.g. 1930s European grand hotel, pastel pink and lavender, symmetrical, soft daylight, 35 mm film grain"></textarea></label>
@@ -39,7 +40,7 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number,
     <p class="look-note">Composition, camera and blocking come from the previs. Each frame costs one Muse Image call.</p></fieldset></div>
     <section class="look-brief" hidden><div class="look-brief-head"><small>VIDEO BRIEF · MUSE SPARK</small><button data-copy>Copy prompt</button></div><p data-prompt></p>
     <dl><dt>Camera</dt><dd data-camera></dd><dt>Beats</dt><dd><ol data-beats></ol></dd><dt>Avoid</dt><dd data-negative></dd></dl></section>
-    <section class="look-handoffs"><div><h3>Generate with Muse</h3><p>Publish the frames shown here, references and prompt as a fixed, read-only page. Anyone with its link can view them. Your project and conversations stay private.</p></div><div data-handoffs></div><textarea data-instruction readonly hidden aria-label="Muse instruction"></textarea><div class="look-handoff-actions"><button data-publish>Create Muse link</button><button data-instruction-copy hidden>Copy instruction and link</button><a data-open-muse href="https://muse.ai/" target="_blank" rel="noopener noreferrer">Open Muse ↗</a><button data-import-video>Import finished video</button><input data-video type="file" accept="video/mp4,video/webm" hidden></div></section>
+    <section class="look-handoffs"><div><h3>Generate with Muse</h3><p>Publish the frames shown here, references and prompt as a fixed, read-only page. Anyone with its link can view them. Your project and conversations stay private.</p></div><div data-handoffs></div><textarea data-instruction readonly hidden aria-label="Muse instruction"></textarea><div class="look-handoff-actions"><button data-publish>Create Muse link</button><button data-instruction-copy hidden>Copy instruction and link</button><a data-open-muse href="https://muse.ai/" target="_blank" rel="noopener noreferrer">Open Muse ${icon('external')}</a><button data-import-video>Import finished video</button><input data-video type="file" accept="video/mp4,video/webm" hidden></div></section>
     <p class="look-message" role="status"></p><div class="look-actions"><button data-cancel hidden>Cancel</button><button data-brief title="Muse Spark writes a prompt for any image-to-video model from these frames and the shot's timing">Write video brief</button><button data-package hidden>Download package</button><button data-render class="primary-button">Render look frames</button></div>`;
   const find = <T extends HTMLElement = HTMLElement>(selector: string) => dialog.querySelector<T>(selector)!;
   find('.look-subtitle').textContent = `${shot.name} · ${camera.name} · composition locked to the shot camera`;

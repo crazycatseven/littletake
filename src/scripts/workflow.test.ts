@@ -58,4 +58,14 @@ test('untrusted source is bounded and failed hot reload leaves a working control
   try {session.start(5);for(let i=0;i<30;i++)session.update(1/30,5);session.stop();const recorded=keepRecordedTake(emptyAnimation(),'joints',session.recordedFrames,5);assert.ok(recorded.curves[`jointAngles.${joint.id}`]!.at(-1)!.value>9);assert.ok(Math.abs(session.pose.position[2]-2)<1e-6,'world displacement is converted back to parent local space');assert.ok(recorded.curves['position.z']!.length>20);assert.ok(recorded.curves['scale.x']!.at(-1)!.value>1.09,'script scale changes are retained in the take');}finally{session.dispose();}
   const jointOnly={...controller,source:`function update(ctx){ctx.joints[${JSON.stringify(joint.id)}]=10;}`},positioning=new PerformanceSession(project.scenes[0].objects[1],0,project.scenes[0],[jointOnly],project.assets);
   try{positioning.update(1/60,5);assert.equal(positioning.placement().jointAngles![joint.id],10,'joint-only positioning survives Stop Control');}finally{positioning.dispose();}
+  const jointClock={...controller,source:`function update(ctx){if(ctx.input.keys.w)ctx.joints[${JSON.stringify(joint.id)}]=Math.min(10,(ctx.joints[${JSON.stringify(joint.id)}]||0)+ctx.dt*20);}`};
+  const gestures=new PerformanceSession(project.scenes[0].objects[1],0,project.scenes[0],[jointClock],project.assets);
+  try{
+    gestures.clock='motion';gestures.start(5);for(let i=0;i<60;i++)gestures.update(1/60,5);assert.equal(gestures.time,0);
+    gestures.keys.add('w');for(let i=0;i<10;i++)gestures.update(1/60,5);gestures.keys.clear();
+    const moved=gestures.time;assert.ok(moved>.1,'joint-only performance advances motion-based recording');
+    for(let i=0;i<60;i++)gestures.update(1/60,5);assert.equal(gestures.time,moved);
+    gestures.stop();const recorded=keepRecordedTake(emptyAnimation(),'joint-clock',gestures.recordedFrames,5);
+    assert.ok(recorded.curves[`jointAngles.${joint.id}`]!.at(-1)!.value>3);
+  }finally{gestures.dispose();}
 });

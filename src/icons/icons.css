@@ -1,0 +1,8 @@
+.ui-icon { display: inline-block; flex: 0 0 auto; width: 16px; height: 16px; vertical-align: -.15em; pointer-events: none; }
+.property-key .ui-icon { width: 12px; height: 12px; }
+.property-key.on-key .ui-icon { fill: currentColor; }
+.hierarchy-toggle .ui-icon, [data-folder-toggle] .ui-icon { width: 12px; height: 12px; }
+.scene-card-icon .ui-icon, .projects-empty > .ui-icon { width: 32px; height: 32px; }
+.project-cover-placeholder > .ui-icon { width: 54px; height: 54px; }
+.selected-marker .ui-icon { width: 12px; height: 12px; }
+.reference-placeholder .ui-icon { width: 36px; height: 36px; }

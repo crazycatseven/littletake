@@ -19,3 +19,5 @@
 .component-added { margin-left: auto; color: var(--accent); font-size: 10px; }
 .component-empty, .component-picker-note { margin: 8px 4px 4px; padding: 6px 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .component-picker [hidden] { display: none; }
+.control-component .component-chevron { width: 12px; height: 12px; }
+.control-component[open] > summary > .component-chevron { transform: rotate(90deg); }

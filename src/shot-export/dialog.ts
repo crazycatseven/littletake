@@ -1,3 +1,4 @@
+import { icon } from '../icons';
 import './dialog.css';
 import type { Shot } from '../types';
 import { exportPNG, exportVideo, videoExportIssue } from './export';
@@ -13,7 +14,7 @@ export function openShotExport(renderer: ShotRenderer, shot: Shot, time: number,
   const hidden = renderer.document.objects.filter(item => item.hidden).length;
   const dialog = document.createElement('dialog'); dialog.className = 'shot-export-dialog';
   dialog.setAttribute('aria-label', 'Render');
-  dialog.innerHTML = `<div class="export-heading"><div><small>VIDEO & STILLS</small><h2>Render</h2></div><button data-close aria-label="Close render">✕</button></div>
+  dialog.innerHTML = `<div class="export-heading"><div><small>VIDEO & STILLS</small><h2>Render</h2></div><button data-close aria-label="Close render">${icon('close')}</button></div>
     <p data-shot class="export-subtitle"></p><div class="export-layout"><div><div class="export-preview"></div><p class="export-frame-caption"></p></div>
     <div><fieldset class="export-settings"><div class="export-tabs" role="tablist" aria-label="Output format"><button role="tab" data-format="image" aria-selected="true">Still image</button><button role="tab" data-format="video" aria-selected="false">Video</button></div>
     <label>Resolution<select aria-label="Export resolution"><option value="1920">1920 × 1080</option><option value="1280">1280 × 720</option></select></label>

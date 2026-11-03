@@ -1,3 +1,4 @@
+import { icon } from '../icons';
 import './panel.css';
 
 type Position = { x: number; y: number };
@@ -39,7 +40,7 @@ export function bindShotPreview(panel: HTMLElement): void {
     toggle.setAttribute('aria-expanded', String(!collapsed));
     toggle.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Collapse'} shot preview`);
     toggle.title = `${collapsed ? 'Expand' : 'Collapse'} shot preview`;
-    toggle.firstElementChild!.textContent = collapsed ? '⌃' : '⌄';
+    toggle.firstElementChild!.innerHTML = icon(collapsed ? 'chevron-up' : 'chevron-down');
     layout();
   }
 

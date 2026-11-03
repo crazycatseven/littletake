@@ -1,3 +1,4 @@
+import { icon } from './icons';
 import { bindParentingTree } from './placement/tree';
 import { Box3, Vector3 } from 'three';
 import { descendants, hierarchyRoots, localTransform, worldTransform, sceneEntities, effectivelyHidden } from './placement/hierarchy';
@@ -23,7 +24,7 @@ import { evaluateAsset, type AssetDefinition } from './assets/model';
 import { bindComponents, componentInspector } from './components/inspector';
 import { inputController } from './components/model';
 import { applyTransformModifiers } from './components/transform';
-import { PerformanceSession } from './performance/session';
+import { PerformanceSession, type RecordingClock } from './performance/session';
 import { prepareScripts } from './scripts/runtime';
 import { openScriptEditor } from './scripts/editor';
 import { scriptOnlyChange } from './scripts/operations';
@@ -48,38 +49,6 @@ import { type ProjectDocument, createProject, parseProject, serializeProject, MA
 import { Workspace } from './project/workspace';
 import { MAX_ARCHIVE_BYTES } from './project/room';
 
-const icons: Record<string, string> = {
-  move: '<path d="M12 3v18M3 12h18M8 7l4-4 4 4M8 17l4 4 4-4M7 8l-4 4 4 4M17 8l4 4-4 4"/>',
-  rotate: '<path d="M20 10a8 8 0 1 0-2 8M20 3v7h-7"/>',
-  scale: '<rect x="4" y="12" width="8" height="8" rx="1"/><path d="M14 4h6v6M20 4l-9 9"/>',
-  cube: '<path d="m12 3 9 5-9 5-9-5 9-5Zm-9 5v9l9 5 9-5V8M12 13v9"/>',
-  sphere: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>',
-  cylinder: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0"/>',
-  cone: '<path d="m4 19 8-16 8 16c0 4-16 4-16 0Z"/><path d="M4 19c2-3 14-3 16 0"/>',
-  plane: '<path d="m12 5 10 7-10 7-10-7 10-7Z"/>',
-  human: '<circle cx="12" cy="5" r="3"/><path d="M12 8v8M5 12l7-3 7 3M8 22l4-6 4 6"/>',
-  camera: '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3"/>',
-  play: '<path d="m8 4 12 8-12 8Z"/>', pause: '<path d="M8 4v16M16 4v16"/>',
-  rewind: '<path d="M5 4v16M19 4 7 12l12 8Z"/>',
-  duplicate: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M15 8V4H4v11h4"/>',
-  trash: '<path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/>',
-  undo: '<path d="m8 4-5 5 5 5M3 9h11a7 7 0 0 1 7 7v4"/>',
-  redo: '<path d="m16 4 5 5-5 5M21 9H10a7 7 0 0 0-7 7v4"/>',
-  folder: '<path d="M3 6h7l2 3h9v12H3Z"/>',
-  save: '<path d="M4 3h13l4 4v14H4ZM8 3v7h8V3M8 21v-7h9v7"/>',
-  download: '<path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/>',
-  upload: '<path d="M12 16V4m-5 5 5-5 5 5M4 17v4h16v-4"/>',
-  focus: '<path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/><circle cx="12" cy="12" r="3"/>',
-  plus: '<path d="M12 4v16M4 12h16"/>',
-  key: '<path d="m12 3 9 9-9 9-9-9 9-9Z"/>',
-  eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
-  hidden: '<path d="m3 3 18 18M10 5a11 11 0 0 1 12 7 17 17 0 0 1-4 5M6 6a16 16 0 0 0-4 6s4 7 10 7a12 12 0 0 0 5-1"/>',
-  help: '<circle cx="12" cy="12" r="9"/><path d="M9 8a3 3 0 0 1 6 1c0 2-3 2-3 4M12 17h.01"/>',
-  more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
-  expand: '<path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/>',
-  timeline: '<path d="M4 5v14M4 8h16M4 16h16"/><rect x="8" y="6" width="7" height="4" rx="1"/><rect x="12" y="14" width="7" height="4" rx="1"/>',
-};
-const icon = (name: string) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.cube}</svg>`;
 const esc = (value: string) => value.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const app = $('#app');
@@ -94,14 +63,14 @@ app.innerHTML = `
 <div class="storage-warning" id="storageWarning" role="alert" hidden><span></span><button data-action="export-project">Download your changes</button><button data-action="recover-storage" hidden>Download saved data</button><button data-action="open">Open project</button><button data-action="reload">Reload</button></div>
 <main class="workspace">
   <aside class="library-panel">
-    <div class="scene-switcher"><button data-action="open-scenes" title="Open Assets / Scenes">▱ Assets / Scenes</button><div><select id="sceneSelect" aria-label="Active scene"></select><button data-action="add-scene" aria-label="New scene" title="New empty scene">＋</button></div><input id="sceneName" aria-label="Scene name" maxlength="120" placeholder="No scene yet"/></div>
+    <div class="scene-switcher"><button data-action="open-scenes" title="Open Assets / Scenes">${icon('folder')} Assets / Scenes</button><div><select id="sceneSelect" aria-label="Active scene"></select><button data-action="add-scene" aria-label="New scene" title="New empty scene">${icon('plus')}</button></div><input id="sceneName" aria-label="Scene name" maxlength="120" placeholder="No scene yet"/></div>
     <div class="library-tabs" role="tablist" aria-label="Library"><button id="objectsTab" role="tab" aria-controls="objectsPanel" aria-selected="true" data-library="objects">Objects<span id="objectCount"></span></button><button id="assetsTab" role="tab" aria-controls="assetPanel" aria-selected="false" data-library="assets">${icon('plus')}Add</button></div>
     <div id="objectsPanel" class="library-page" role="tabpanel" aria-labelledby="objectsTab"><input id="hierarchySearch" class="hierarchy-search" type="search" aria-label="Search objects" placeholder="Search objects…"/><div class="hierarchy-tools"><span id="selectionCount">0 selected</span><button data-action="hide-selection" title="Hide selected objects · H" aria-label="Hide selected objects">${icon('hidden')}</button><button data-action="show-selection" title="Show selected objects" aria-label="Show selected objects">${icon('eye')}</button></div><div id="outliner" class="outliner" aria-label="Scene objects"></div><button class="hierarchy-footer" id="visibilitySummary" data-action="show-all">All objects visible</button></div>
   </aside>
   <section class="stage-panel" aria-label="3D stage">
-    <div class="viewport-heading"><div class="transform-tools" role="toolbar" aria-label="Transform tools"><button data-tool="translate" aria-label="Move tool" title="Move · G">${icon('move')}<span>Move</span></button><button data-tool="rotate" aria-label="Rotate tool" title="Rotate · R">${icon('rotate')}<span>Rotate</span></button><button data-tool="scale" aria-label="Scale tool" title="Scale · S">${icon('scale')}<span>Scale</span></button></div><div><button data-action="ground" title="Drop to the floor or surface below · double-click the green Y handle">↓ Drop to surface</button><button data-action="focus" title="Focus selection · F">${icon('focus')}Focus</button><button data-action="reset-view" aria-label="Reset scene view">Reset view</button></div></div>
+    <div class="viewport-heading"><div class="transform-tools" role="toolbar" aria-label="Transform tools"><button data-tool="translate" aria-label="Move tool" title="Move · G">${icon('move')}<span>Move</span></button><button data-tool="rotate" aria-label="Rotate tool" title="Rotate · R">${icon('rotate')}<span>Rotate</span></button><button data-tool="scale" aria-label="Scale tool" title="Scale · S">${icon('scale')}<span>Scale</span></button></div><div><button data-action="ground" title="Drop to the floor or surface below · double-click the green Y handle">${icon('arrow-down')} Drop to surface</button><button data-action="focus" title="Focus selection · F">${icon('focus')}Focus</button><button data-action="reset-view" aria-label="Reset scene view">Reset view</button></div></div>
     <div id="viewport" class="viewport"></div><div id="performanceBar" hidden></div><div id="emptyStage" class="empty-stage" hidden><h2>No scene</h2><p>Add a scene or describe one to Muse.</p><button data-action="build-with-muse" class="primary-button">Build with Muse</button></div>
-    <section class="shot-panel" id="shotPanel" aria-label="Shot preview"><div class="shot-switcher shot-preview-header" data-preview-header><button class="shot-preview-grip" data-preview-drag aria-label="Move shot preview" title="Drag to move · Arrow keys to nudge · Double-click or Home to reset"><svg viewBox="0 0 16 20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="5" r="1.3"/><circle cx="11" cy="5" r="1.3"/><circle cx="5" cy="10" r="1.3"/><circle cx="11" cy="10" r="1.3"/><circle cx="5" cy="15" r="1.3"/><circle cx="11" cy="15" r="1.3"/></svg></button><select id="shotSelect" aria-label="Active shot"></select><button data-action="add-shot" aria-label="New shot" title="New shot">＋</button><button class="shot-preview-collapse" data-preview-collapse aria-label="Collapse shot preview" aria-expanded="true" aria-controls="shotPreviewBody" title="Collapse shot preview"><span aria-hidden="true">⌄</span></button></div><div id="shotPreviewBody" class="shot-preview-body"><div class="shot-heading"><h2>${icon('camera')}<span>Shot preview</span></h2><button class="icon-button" data-action="expand-preview" aria-label="Expand shot preview" aria-expanded="false" title="Expand preview">${icon('expand')}</button></div><div id="previewDock"><div class="preview-frame" id="previewFrame"><div id="preview" class="preview"></div></div></div><div class="shot-footer"><span id="shotFrameStatus"><span class="live-dot"></span>Live · 16:9</span><button data-action="edit-shot" id="lensLabel">Edit shot</button></div></div></section>
+    <section class="shot-panel" id="shotPanel" aria-label="Shot preview"><div class="shot-switcher shot-preview-header" data-preview-header><button class="shot-preview-grip" data-preview-drag aria-label="Move shot preview" title="Drag to move · Arrow keys to nudge · Double-click or Home to reset">${icon('grip')}</button><select id="shotSelect" aria-label="Active shot"></select><button data-action="add-shot" aria-label="New shot" title="New shot">${icon('plus')}</button><button class="shot-preview-collapse" data-preview-collapse aria-label="Collapse shot preview" aria-expanded="true" aria-controls="shotPreviewBody" title="Collapse shot preview"><span aria-hidden="true">${icon('chevron-down')}</span></button></div><div id="shotPreviewBody" class="shot-preview-body"><div class="shot-heading"><h2>${icon('camera')}<span>Shot preview</span></h2><button class="icon-button" data-action="expand-preview" aria-label="Expand shot preview" aria-expanded="false" title="Expand preview">${icon('expand')}</button></div><div id="previewDock"><div class="preview-frame" id="previewFrame"><div id="preview" class="preview"></div></div></div><div class="shot-footer"><span id="shotFrameStatus"><span class="live-dot"></span>Live · 16:9</span><div class="shot-footer-actions"><button data-action="pilot-camera" title="Fly this camera and record a take">${icon('camera')}Pilot</button><button data-action="edit-shot" id="lensLabel">Edit shot</button></div></div></div></section>
     <div class="viewport-caption"><span id="viewHint">Drag to orbit · Scroll to zoom</span></div>
     <div class="ai-preview-badge" id="aiPreviewBadge" role="status" hidden>Previewing Muse changes</div>
   </section>
@@ -116,15 +85,48 @@ app.innerHTML = `
   <div class="bottom-panel-toolbar">
     <div class="bottom-panel-tabs" role="tablist" aria-label="Bottom panel"><button id="timelineTab" role="tab" data-bottom-tab="timeline" aria-selected="true" aria-controls="timelineContent">${icon('timeline')}Timeline</button><button id="assetLibraryTab" role="tab" data-bottom-tab="assets" aria-selected="false" aria-controls="assetPanel" tabindex="-1">${icon('folder')}Assets</button></div>
 
-    <button id="bottomPanelToggle" class="icon-button" data-action="bottom-panel" aria-label="Collapse bottom panel" aria-expanded="true" aria-controls="bottomPanelBody" title="Collapse bottom panel"><span aria-hidden="true">⌄</span></button>
+    <button id="bottomPanelToggle" class="icon-button" data-action="bottom-panel" aria-label="Collapse bottom panel" aria-expanded="true" aria-controls="bottomPanelBody" title="Collapse bottom panel"><span aria-hidden="true">${icon('chevron-down')}</span></button>
   </div>
-  <div class="bottom-panel-body" id="bottomPanelBody"><div class="timeline-content" id="timelineContent" role="tabpanel" aria-labelledby="timelineTab"><div class="timeline-toolbar" role="toolbar" aria-label="Timeline controls"><div class="transport"><button data-action="rewind" class="icon-button" aria-label="Go to start">${icon('rewind')}</button><button data-action="play" id="playButton" class="play-button" aria-label="Play">${icon('play')}</button><span class="timecode" id="timecode" data-current-time>00:00.00</span><span class="timecode-separator">/</span><span class="timecode" id="endTimecode" data-end-time>00:05.00</span></div><div class="timeline-tools"><div class="animation-toolbar"><button data-action="auto-key" id="autoKey" aria-pressed="false">● Auto Key Off</button><label>Frame <input type="number" id="animationFrame" aria-label="Current frame" min="0" step="1"/></label><select id="animationFps" aria-label="Timeline frame rate"><option value="24">24 fps</option><option value="30">30 fps</option></select><select id="animationInterpolation" aria-label="Keyframe interpolation" disabled><option value="linear">Linear</option><option value="constant">Hold</option><option value="smooth">Smooth</option><option value="quaternion">Quaternion</option></select><button data-action="duplicate-key" id="duplicateKey" disabled>Duplicate</button><button data-action="delete-key" id="deleteKey" disabled>Delete</button><button data-action="samples" id="samplesToggle" hidden>Show all samples</button></div><label class="duration-control">Duration <input type="number" id="duration" aria-label="Scene duration" min="1" max="60" step="1"/> s</label></div></div><div id="timelineTracks" class="timeline-tracks"><div class="timeline-ruler-row"><div class="track-heading">SHOT / PROPERTY</div><div class="animation-ruler-window"><div id="timeRuler" class="time-ruler" role="slider" tabindex="0" aria-label="Timeline playhead" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"></div></div></div><div id="timelineRows" class="timeline-rows"></div></div></div><section id="assetPanel" role="tabpanel" aria-labelledby="assetLibraryTab" hidden></section></div>
+  <div class="bottom-panel-body" id="bottomPanelBody">
+    <div class="timeline-content" id="timelineContent" role="tabpanel" aria-labelledby="timelineTab">
+      <div class="timeline-toolbar" role="toolbar" aria-label="Timeline controls">
+        <div class="timeline-tools animation-toolbar">
+          <button data-action="auto-key" id="autoKey" aria-pressed="false">${icon('key')} Auto Key Off</button>
+          <label>Frame <input type="number" id="animationFrame" aria-label="Current frame" min="0" step="1"/></label>
+          <div id="selectedKeyTools" class="selected-key-tools" role="group" aria-label="Selected keyframe" hidden>
+            <label>Interpolation <select id="animationInterpolation" aria-label="Keyframe interpolation" disabled><option value="linear">Linear · constant speed</option><option value="constant">Hold · step</option><option value="smooth">Smooth · ease in/out</option><option value="quaternion" disabled>Rotation blend</option></select></label>
+            <button data-action="duplicate-key" id="duplicateKey" class="icon-button" aria-label="Duplicate selected keyframe" title="Duplicate selected keyframe · Ctrl/Cmd D" disabled>${icon('duplicate')}</button>
+            <button data-action="delete-key" id="deleteKey" class="icon-button" aria-label="Delete selected keyframe" title="Delete selected keyframe" disabled>${icon('trash')}</button>
+          </div>
+          <button data-action="samples" id="samplesToggle" hidden>Show all samples</button>
+        </div>
+        <div class="transport">
+          <button data-action="rewind" class="icon-button" aria-label="Go to start">${icon('rewind')}</button>
+          <button data-action="play" id="playButton" class="play-button" aria-label="Play" title="Play / pause · Space">${icon('play')}</button>
+          <div class="transport-timecode"><span class="timecode" id="timecode" data-current-time>00:00.00</span><span class="timecode-separator">/</span><span class="timecode" id="endTimecode" data-end-time>00:05.00</span></div>
+        </div>
+        <div class="timeline-options">
+          <label class="duration-control">Duration <input type="number" id="duration" aria-label="Scene duration" min="1" max="60" step="1"/> s</label>
+          <button id="timelineSettingsButton" class="icon-button" aria-label="Timeline settings" aria-expanded="false" aria-controls="timelineSettings" title="Timeline settings">${icon('settings')}</button>
+          <div id="timelineSettings" class="timeline-settings" popover="auto" role="dialog" aria-label="Timeline settings">
+            <header><strong>Timeline settings</strong><button id="closeTimelineSettings" aria-label="Close timeline settings">${icon('close')}</button></header>
+            <label>Scene frame rate<select id="animationFps" aria-label="Scene frame rate" aria-describedby="timelineFpsHint"><option value="24">24 fps</option><option value="30">30 fps</option></select></label>
+            <p id="timelineFpsHint">Shared by all cameras in this scene. Changing it keeps keyframes at the same time in seconds.</p>
+            <label>Timeline zoom<select id="animationZoom" aria-label="Timeline zoom" aria-describedby="timelineZoomHint"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select></label>
+            <p id="timelineZoomHint">Changes the width of the timeline. Playback speed stays the same.</p>
+          </div>
+        </div>
+      </div>
+      <div id="timelineTracks" class="timeline-tracks"><div class="timeline-ruler-row"><div class="track-heading">SHOT / PROPERTY</div><div class="animation-ruler-window"><div id="timeRuler" class="time-ruler" role="slider" tabindex="0" aria-label="Timeline playhead" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"></div></div></div><div id="timelineRows" class="timeline-rows"></div></div>
+    </div>
+    <section id="assetPanel" role="tabpanel" aria-labelledby="assetLibraryTab" hidden></section>
+  </div>
 </section>
 <footer class="status-bar"><span id="statusText" role="status">Ready</span><button data-action="shortcuts">${icon('help')}Shortcuts</button></footer>
 <input id="openFile" type="file" accept=".json,.zip,application/json,application/zip" hidden/>
-<dialog id="sceneSnapshotDialog" aria-labelledby="sceneSnapshotTitle"><div class="dialog-heading"><h2 id="sceneSnapshotTitle">Top view</h2><button data-action="close-snapshot" aria-label="Close top view">✕</button></div><img id="sceneSnapshotImage" class="scene-snapshot-image" alt="Top-down scene layout with object IDs"/><div class="snapshot-footer"><span id="sceneSnapshotInfo"></span><div><button data-action="refresh-snapshot">Refresh</button><button data-action="download-snapshot" class="primary-button">Download PNG</button></div></div></dialog>
-<dialog id="previewDialog" aria-labelledby="previewTitle"><div class="dialog-heading"><h2 id="previewTitle">Shot preview</h2><button data-action="close-preview" aria-label="Close shot preview">✕</button></div><div id="expandedPreview"></div><div class="preview-transport"><button class="play-button" data-action="play" aria-label="Play">${icon('play')}</button><span class="timecode" data-current-time></span><span class="timecode-separator">/</span><span class="timecode" data-end-time></span></div></dialog>
-<dialog id="shortcutsDialog"><div class="dialog-heading"><h2>Keyboard shortcuts</h2><button data-action="close-shortcuts" aria-label="Close shortcuts">✕</button></div><p class="muted">Editor controls.</p><dl class="shortcut-list"><dt>Orbit / pan / zoom</dt><dd>Left drag / Middle drag / Scroll</dd><dt>Fly around the scene</dt><dd>Hold right mouse + W A S D · Q / E down / up · Scroll to adjust speed · Shift to boost</dd><dt>Switch to Assets / Timeline</dt><dd><select id="assetShortcut" aria-label="Assets shortcut"><option value="KeyB">B (default)</option><option value="KeyG">G (replaces Move shortcut)</option><option value="none">Disabled</option></select></dd><dt>Object controls</dt><dd>W/S forward/back · A/D turn · R record · Esc exit</dd><dt>Move / rotate / scale</dt><dd>G / R / S</dd><dt>Constrain an axis</dt><dd>X / Y / Z</dd><dt>Box select / add to selection</dt><dd>Shift drag empty space / Ctrl Shift drag</dd><dt>Multi-select in Hierarchy</dt><dd>Ctrl click / Shift click a range</dd><dt>Drop to surface</dt><dd>Double-click the green Y move handle</dd><dt>View orientation</dt><dd>Click an axis / drag the upper-right gizmo</dd><dt>Focus selection</dt><dd>F</dd><dt>Insert property key</dt><dd>Hover or focus a property · I</dd><dt>Play / pause</dt><dd>Space</dd><dt>Duplicate / delete</dt><dd>Ctrl D / Delete</dd><dt>Undo / redo</dt><dd>Ctrl Z / Ctrl Shift Z</dd><dt>Save locally</dt><dd>Ctrl S</dd></dl><p class="dialog-note">Use Key Transform for a whole pose, or key an individual property and expand its axes in the timeline.</p></dialog>
+<dialog id="sceneSnapshotDialog" aria-labelledby="sceneSnapshotTitle"><div class="dialog-heading"><h2 id="sceneSnapshotTitle">Top view</h2><button data-action="close-snapshot" aria-label="Close top view">${icon('close')}</button></div><img id="sceneSnapshotImage" class="scene-snapshot-image" alt="Top-down scene layout with object IDs"/><div class="snapshot-footer"><span id="sceneSnapshotInfo"></span><div><button data-action="refresh-snapshot">Refresh</button><button data-action="download-snapshot" class="primary-button">Download PNG</button></div></div></dialog>
+<dialog id="previewDialog" aria-labelledby="previewTitle"><div class="dialog-heading"><h2 id="previewTitle">Shot preview</h2><button data-action="close-preview" aria-label="Close shot preview">${icon('close')}</button></div><div id="expandedPreview"></div><div class="preview-transport"><button class="play-button" data-action="play" aria-label="Play">${icon('play')}</button><span class="timecode" data-current-time></span><span class="timecode-separator">/</span><span class="timecode" data-end-time></span></div></dialog>
+<dialog id="shortcutsDialog"><div class="dialog-heading"><h2>Keyboard shortcuts</h2><button data-action="close-shortcuts" aria-label="Close shortcuts">${icon('close')}</button></div><p class="muted">Editor controls.</p><dl class="shortcut-list"><dt>Orbit / pan / zoom</dt><dd>Left drag / Middle drag / Scroll</dd><dt>Fly around the scene</dt><dd>Hold right mouse + W A S D · Q / E down / up · Scroll to adjust speed · Shift to boost</dd><dt>Switch to Assets / Timeline</dt><dd><select id="assetShortcut" aria-label="Assets shortcut"><option value="KeyB">B (default)</option><option value="KeyG">G (replaces Move shortcut)</option><option value="none">Disabled</option></select></dd><dt>Object controls</dt><dd>W/S forward/back · A/D turn · R record · Esc exit</dd><dt>Move / rotate / scale</dt><dd>G / R / S</dd><dt>Constrain an axis</dt><dd>X / Y / Z</dd><dt>Box select / add to selection</dt><dd>Shift drag empty space / Ctrl Shift drag</dd><dt>Multi-select in Hierarchy</dt><dd>Ctrl click / Shift click a range</dd><dt>Drop to surface</dt><dd>Double-click the green Y move handle</dd><dt>View orientation</dt><dd>Click an axis / drag the upper-right gizmo</dd><dt>Focus selection</dt><dd>F</dd><dt>Insert property key</dt><dd>Hover or focus a property · I</dd><dt>Play / pause</dt><dd>Space</dd><dt>Duplicate / delete</dt><dd>Ctrl D / Delete</dd><dt>Undo / redo</dt><dd>Ctrl Z / Ctrl Shift Z</dd><dt>Save locally</dt><dd>Ctrl S</dd></dl><p class="dialog-note">Use Key Transform for a whole pose, or key an individual property and expand its axes in the timeline.</p></dialog>
 `;
 
 let project = createProject(null), storageError = '';
@@ -148,6 +150,7 @@ let assetSaveBusy = false;
 let assetProjectToken = newId();
 let assetEditor: AssetEditor | null = null;
 let performanceSession: PerformanceSession | null = null;
+let recordingClock:RecordingClock='realtime';
 let xrRecording: XRRecording | null = null;
 let storageAvailable = true;
 const bottomPanelCollapsedHeight = 34;
@@ -164,7 +167,22 @@ function openMotionPath(id:string,edit=false){const path=doc.paths?.find(p=>p.id
 function changePathPoint(index:number,phase:import('./motion-paths/editor').PathGesture){if(phase==='start'){pause();flushFieldEdit();return;}if(phase==='end'){changed(index<0?'Path transformed':'Path reshaped');return;}if(phase==='cancel'){syncStage();renderInspector();return;}syncStage();const path=selectedMotionPath();if(!path)return;const point=index<0?undefined:selectedPathPart==='point'?path.points[index]:pathHandles(path)[index][selectedPathPart];if(point)$('#inspector').querySelectorAll<HTMLInputElement>('[data-path-coordinate]').forEach(input=>{if(document.activeElement!==input)input.value=String(num(point[Number(input.dataset.pathCoordinate)]));});$('#inspector').querySelectorAll<HTMLInputElement>('[data-path-transform]').forEach(input=>{if(document.activeElement!==input)input.value=String(num(pathTransform(path)[input.dataset.pathTransform as keyof Transform][Number(input.dataset.pathAxis)]));});const mode=$<HTMLSelectElement>('#motionPathHandleMode');if(mode&&index>=0)mode.value=pathHandles(path)[index].mode;}
 let hoveredProperty: PropertyGroup | null = null;
 const unkeyed = new Map<string, {time:number;value:number}>();
-$('#animationFps').insertAdjacentHTML('afterend','<select id="animationZoom" aria-label="Timeline zoom"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select>');
+const timelineSettings = $('#timelineSettings'), timelineSettingsButton = $<HTMLButtonElement>('#timelineSettingsButton');
+timelineSettingsButton.addEventListener('click', () => {
+  if (timelineSettings.matches(':popover-open')) { timelineSettings.hidePopover(); return; }
+  timelineSettings.showPopover();
+  const anchor = timelineSettingsButton.getBoundingClientRect(), bounds = timelineSettings.getBoundingClientRect();
+  timelineSettings.style.left = `${Math.max(8, Math.min(anchor.right - bounds.width, window.innerWidth - bounds.width - 8))}px`;
+  timelineSettings.style.top = `${Math.max(8, Math.min(anchor.top - bounds.height - 6, window.innerHeight - bounds.height - 8))}px`;
+  $('#animationFps').focus({ preventScroll: true });
+});
+timelineSettings.addEventListener('toggle', () => timelineSettingsButton.setAttribute('aria-expanded', String(timelineSettings.matches(':popover-open'))));
+$('#closeTimelineSettings').addEventListener('click', () => { timelineSettings.hidePopover(); timelineSettingsButton.focus(); });
+timelineSettings.addEventListener('keydown', event => {
+  event.stopPropagation();
+  if (event.key === 'Escape') { event.preventDefault(); timelineSettings.hidePopover(); timelineSettingsButton.focus(); }
+});
+window.addEventListener('resize', () => timelineSettings.hidePopover());
 function applyTimelineZoom(){const width=$('.animation-ruler-window').clientWidth;if(width)$('#bottomPanel').style.setProperty('--animation-lane-width',`${Math.round(width*animationZoom)}px`);$('#timeRuler').style.transform=`translateX(-${$('#timelineRows').scrollLeft}px)`;}
 new ResizeObserver(applyTimelineZoom).observe($('.animation-ruler-window'));
 $('#timelineRows').addEventListener('scroll',()=>{$('#timeRuler').style.transform=`translateX(-${$('#timelineRows').scrollLeft}px)`;});
@@ -452,9 +470,11 @@ const xrKeyframes = new XRKeyframeReader();
 function syncStage() { const visibleDoc=sceneWithDrafts(visibleScene()),session=performanceSession;
   stage?.setMotionPath(selectedMotionPath()??null,selectedPathPoint,!!workspace?.canEdit&&!editPreview&&!performanceSession&&!playing,selectedPathPart);
   if(xrRecording && xrRecording.mode!=='armed')visibleDoc.objects=visibleDoc.objects.map(object=>object.id===xrRecording!.before.id?{...object,track:null,animation:undefined,transform:xrRecording!.preview(time)}:object);
-  const component=inputController(session?.before.components);stage?.setControlled(session?{id:session.before.id,pose:session.preview(time),joints:session.previewJoints(time),world:component?.type==='movement'&&component.space==='world'}:null);
+  stage?.setCameraPilot(session?.isCamera?session.before.id:null,session?.mode==='review');
+  const component=inputController(session?.components);stage?.setControlled(session?{id:session.before.id,pose:session.preview(time),joints:session.previewJoints(time),world:component?.type==='movement'&&component.space==='world'}:null);
   stage?.update(visibleDoc,Math.min(time,visibleDoc.duration),selection.ids,Boolean(editPreview) || !!session || playing, editPreview ? previewShotId : project.activeShotId,(editPreview??project).assets??[]); }
 function followTimelineShot(){
+  if(performanceSession?.isCamera)return;
   const shot=shotAtTime(visibleScene(),time),id=shot?.id??null;
   if(id===(editPreview?previewShotId:project.activeShotId))return;
   if(editPreview)previewShotId=id;else project.activeShotId=id;
@@ -476,7 +496,8 @@ function renderTime() {
   $('#timeRuler').setAttribute('aria-valuenow',String(num(time))); $('#timeRuler').setAttribute('aria-valuemax',String(doc.duration));
   $('#timeRuler').setAttribute('aria-valuetext',`${time.toFixed(2)} seconds`);
   const frame=$<HTMLInputElement>('#animationFrame');if(document.activeElement!==frame)frame.value=String(frameAtTime(time,fps()));frame.max=String(frameAtTime(doc.duration,fps()));
-  $<HTMLSelectElement>('#animationFps').value=String(fps());$('#autoKey').textContent=`● Auto Key ${autoKey?'On':'Off'}`;$('#autoKey').setAttribute('aria-pressed',String(autoKey));
+  $<HTMLSelectElement>('#animationFps').value=String(fps());
+  const autoKeyButton=$('#autoKey');if(autoKeyButton.getAttribute('aria-pressed')!==String(autoKey)){autoKeyButton.innerHTML=`${icon('key')} Auto Key ${autoKey?'On':'Off'}`;autoKeyButton.setAttribute('aria-pressed',String(autoKey));}
 }
 function renderSelection() {
   document.querySelectorAll<HTMLElement>('[data-select]').forEach(node=>{ const selected=selection.ids.includes(node.dataset.select!);node.classList.toggle('selected',selected);node.classList.toggle('active-selection',node.dataset.select===selection.active);node.setAttribute('aria-pressed',String(selected)); });
@@ -503,6 +524,7 @@ function setBottomPanelTab(tab: 'timeline'|'assets') {
   const previous=$('#'+(bottomPanelTab==='timeline'?'timelineContent':'assetPanel'));
   if(tab!==bottomPanelTab&&previous.contains(document.activeElement))$<HTMLButtonElement>(`[data-bottom-tab="${tab}"]`).focus({preventScroll:true});
   bottomPanelTab=tab;
+  if(tab!=='timeline')timelineSettings.hidePopover();
   $('#timelineContent').hidden=tab!=='timeline';$('#assetPanel').hidden=tab!=='assets';
   document.querySelectorAll<HTMLButtonElement>('[data-bottom-tab]').forEach(button=>{const active=button.dataset.bottomTab===tab;button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;});
   setBottomPanelOpen(true);
@@ -513,9 +535,10 @@ function setBottomPanelOpen(open: boolean) {
   if(open&&bottomPanelHeight<=bottomPanelCollapsedHeight)setBottomPanelHeight(defaultBottomPanelHeight());
   const wasOpen=bottomPanelOpen,body=$('#bottomPanelBody'),toggle=$('#bottomPanelToggle');
   if(!open&&body.contains(document.activeElement))$<HTMLButtonElement>(`[data-bottom-tab="${bottomPanelTab}"]`).focus({preventScroll:true});
+  if(!open)timelineSettings.hidePopover();
   bottomPanelOpen=open;$('#bottomPanel').classList.toggle('expanded',open);body.hidden=!open;
   toggle.setAttribute('aria-expanded',String(open));toggle.setAttribute('aria-label',`${open?'Collapse':'Expand'} bottom panel`);toggle.title=`${open?'Collapse':'Expand'} bottom panel`;
-  toggle.firstElementChild!.textContent=open?'⌄':'⌃';
+  toggle.firstElementChild!.innerHTML=icon(open?'chevron-down':'chevron-up');
   $('#bottomPanelResizeHandle').setAttribute('aria-valuenow',String(open?bottomPanelHeight:bottomPanelCollapsedHeight));
   libraryTab=open&&bottomPanelTab==='assets'?'assets':'objects';
   document.querySelectorAll<HTMLButtonElement>('[data-library]').forEach(button=>{const active=button.dataset.library===libraryTab;button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;});
@@ -535,9 +558,9 @@ function renderOutliner() {
     if(!shown.has(item.id))return '';
     const object='kind' in item,hidden=effectivelyHidden(scene,item.id),children=nodes.filter(p=>p.parentId===item.id),closed=!query&&collapsedHierarchy.has(scene.id+'|'+item.id);
     const select='<button class="object-row" data-tree-id="'+esc(item.id)+'" data-select="'+esc(item.id)+'" draggable="true" '+(object?'data-prefab-object="'+esc(item.id)+'" ':'')+'aria-label="Select '+esc(item.name)+'">'+icon(object?item.kind:'camera')+'<span>'+esc(item.name)+'</span>'+((item.track||item.animation)?'<span class="motion-dot" title="Animated"></span>':'')+'</button>';
-    return '<div class="hierarchy-object '+(hidden?'is-hidden':'')+'" data-tree-id="'+esc(item.id)+'" style="padding-left:'+depth*14+'px"><button class="hierarchy-toggle" data-tree-toggle="'+esc(item.id)+'" aria-label="'+(closed?'Expand ':'Collapse ')+esc(item.name)+' children" '+(children.length?'aria-expanded="'+!closed+'"':'disabled')+'>'+(closed?'▸':'▾')+'</button>'+select+(object?'<button class="visibility-toggle" draggable="false" data-visibility-id="'+esc(item.id)+'" aria-label="'+(hidden?'Show ':'Hide ')+esc(item.name)+'" title="'+(hidden?'Show':'Hide')+' object; applies to selected objects when selected">'+icon(hidden?'hidden':'eye')+'</button>':'')+'</div>'+(!closed?children.map(child=>row(child,depth+1)).join(''):'');
+    return '<div class="hierarchy-object '+(hidden?'is-hidden':'')+'" data-tree-id="'+esc(item.id)+'" style="padding-left:'+depth*14+'px"><button class="hierarchy-toggle" data-tree-toggle="'+esc(item.id)+'" aria-label="'+(closed?'Expand ':'Collapse ')+esc(item.name)+' children" '+(children.length?'aria-expanded="'+!closed+'"':'disabled')+'>'+(closed?`${icon('chevron-right')}`:`${icon('chevron-down')}`)+'</button>'+select+(object?'<button class="visibility-toggle" draggable="false" data-visibility-id="'+esc(item.id)+'" aria-label="'+(hidden?'Show ':'Hide ')+esc(item.name)+'" title="'+(hidden?'Show':'Hide')+' object; applies to selected objects when selected">'+icon(hidden?'hidden':'eye')+'</button>':'')+'</div>'+(!closed?children.map(child=>row(child,depth+1)).join(''):'');
   };
-  $('#outliner').innerHTML=scene.objects.filter(item=>!item.parentId).map(item=>row(item,0)).join('')+'<div class="outliner-heading">CAMERAS <button data-action="add-camera" aria-label="New camera">＋</button></div>'+scene.cameras.filter(item=>!item.parentId).map(item=>row(item,0)).join('')+'<div class="outliner-heading">PATHS <button data-action="create-motion-path" aria-label="Draw a new path">＋</button></div>'+(scene.paths??[]).filter(path=>!query||path.name.toLowerCase().includes(query)).map(path=>`<button class="motion-path-row ${path.id===selectedPathId?'selected':''}" data-path-open="${esc(path.id)}">⌁ ${esc(path.name)}</button>`).join('')+'<div data-tree-root class="hierarchy-root-drop">Drop here to move to scene root</div>';
+  $('#outliner').innerHTML=scene.objects.filter(item=>!item.parentId).map(item=>row(item,0)).join('')+`<div class="outliner-heading">CAMERAS <button data-action="add-camera" aria-label="New camera">${icon('plus')}</button></div>`+scene.cameras.filter(item=>!item.parentId).map(item=>row(item,0)).join('')+`<div class="outliner-heading">PATHS <button data-action="create-motion-path" aria-label="Draw a new path">${icon('plus')}</button></div>`+(scene.paths??[]).filter(path=>!query||path.name.toLowerCase().includes(query)).map(path=>`<button class="motion-path-row ${path.id===selectedPathId?'selected':''}" data-path-open="${esc(path.id)}">${icon('path')} ${esc(path.name)}</button>`).join('')+'<div data-tree-root class="hierarchy-root-drop">Drop here to move to scene root</div>';
   const hidden=scene.objects.filter(item=>effectivelyHidden(scene,item.id)).length;
   $('#visibilitySummary').textContent=hidden?'Show all · '+hidden+' hidden':'All objects visible';
   $<HTMLButtonElement>('#visibilitySummary').disabled=!hidden||!!editPreview||!!performanceSession;
@@ -571,11 +594,11 @@ function visibilityCard(items: SceneObject[]): string {
 }
 function poseFields(label: string,group: keyof Transform,values: number[],disabled: boolean,item:SceneEntity) {
   const animation=animationFor(item);
-  return `<div class="property-group"><div class="property-label property-label-key"><span>${label}</span>${keyButton(animation,group,time,disabled)}</div><div class="vector-inputs">${['X','Y','Z'].map((a,i)=>{const path=`${group}.${a.toLowerCase()}` as PropertyPath,key=animation?.curves[path]?.some(k=>Math.abs(k.time-time)<1e-6);return `<label class="vector-field axis-${a.toLowerCase()}"><span>${a}</span><input type="number" aria-label="${label} ${a}" data-pose="${group}" data-component="${i}" step="${group==='rotation'?5:0.1}" value="${num(values[i])}" ${group==='scale'?'min="0.01" max="100"':''} ${disabled?'disabled':''}/>${showAxisKeys?`<button type="button" class="property-key ${key?'on-key':''}" data-key-path="${path}" aria-label="${key?'Remove':'Insert'} ${label} ${a} keyframe" ${disabled?'disabled':''}>${key?'◆':'◇'}</button>`:''}</label>`;}).join('')}</div></div>`;
+  return `<div class="property-group"><div class="property-label property-label-key"><span>${label}</span>${keyButton(animation,group,time,disabled)}</div><div class="vector-inputs">${['X','Y','Z'].map((a,i)=>{const path=`${group}.${a.toLowerCase()}` as PropertyPath,key=animation?.curves[path]?.some(k=>Math.abs(k.time-time)<1e-6);return `<label class="vector-field axis-${a.toLowerCase()}"><span>${a}</span><input type="number" aria-label="${label} ${a}" data-pose="${group}" data-component="${i}" step="${group==='rotation'?5:0.1}" value="${num(values[i])}" ${group==='scale'?'min="0.01" max="100"':''} ${disabled?'disabled':''}/>${showAxisKeys?`<button type="button" class="property-key ${key?'on-key':''}" data-key-path="${path}" aria-label="${key?'Remove':'Insert'} ${label} ${a} keyframe" ${disabled?'disabled':''}>${icon('key')}</button>`:''}</label>`;}).join('')}</div></div>`;
 }
 function componentAxisKey(item:SceneEntity,group:'pivot',index:number,disabled:boolean):string {
   if(!showAxisKeys)return '';const axis='xyz'[index],path=`${group}.${axis}` as PropertyPath,key=animationFor(item)?.curves[path]?.some(value=>Math.abs(value.time-time)<1e-6);
-  return `<button type="button" class="property-key ${key?'on-key':''}" data-key-path="${path}" aria-label="${key?'Remove':'Insert'} Pivot Offset ${axis.toUpperCase()} keyframe" ${disabled?'disabled':''}>${key?'◆':'◇'}</button>`;
+  return `<button type="button" class="property-key ${key?'on-key':''}" data-key-path="${path}" aria-label="${key?'Remove':'Insert'} Pivot Offset ${axis.toUpperCase()} keyframe" ${disabled?'disabled':''}>${icon('key')}</button>`;
 }
 function instanceJoints(item:SceneEntity) {
   const asset='asset' in item&&item.asset?(editPreview??project).assets?.find(asset=>asset.id===item.asset!.id):undefined;
@@ -604,7 +627,7 @@ function renderInspector(force=false) {
   if(selection.ids.length>1) {
     const items=inspectedDoc.objects.filter(item=>selection.ids.includes(item.id)),center=stage?.selectionCenter()??[0,0,0];
     const fields=(label:string,group:string,values:number[])=>'<div class="property-group"><label class="property-label">'+label+'</label><div class="vector-inputs">'+values.map((value,i)=>'<label class="vector-field"><span>'+['X','Y','Z'][i]+'</span><input type="number" aria-label="'+label+' '+['X','Y','Z'][i]+'" data-placement="'+group+'" data-index="'+i+'" step="'+(group==='rotation'?5:.1)+'" value="'+num(value)+'" '+(playing?'disabled':'')+'/></label>').join('')+'</div></div>';
-    $('#inspector').innerHTML='<div class="inspector-title"><span class="entity-type">'+icon('move')+items.length+' OBJECTS SELECTED</span><div><button data-action="duplicate" class="icon-button" aria-label="Duplicate selection">'+icon('duplicate')+'</button><button data-action="delete" class="icon-button" aria-label="Delete selection">'+icon('trash')+'</button></div></div><div class="selection-members">'+items.map(item=>'<span>'+esc(item.name)+'</span>').join('')+'</div><div class="inspector-section"><div class="section-label">Shared transform</div>'+fields('Selection center','position',center)+fields('Rotate by','rotation',[0,0,0])+'<label class="property-label">Uniform scale ×<input type="number" aria-label="Selection scale factor" data-placement="scale" data-index="0" min="0.01" max="100" step="0.1" value="1" '+(playing?'disabled':'')+'/></label><p class="property-note">Move and rotate around the shared center. Existing motion paths move with the selection.</p><button class="add-motion" data-action="ground">↓ Drop each object to surface</button></div><p class="property-note">Ctrl click toggles an object. Shift click selects a range in the Hierarchy.</p>';
+    $('#inspector').innerHTML='<div class="inspector-title"><span class="entity-type">'+icon('move')+items.length+' OBJECTS SELECTED</span><div><button data-action="duplicate" class="icon-button" aria-label="Duplicate selection">'+icon('duplicate')+'</button><button data-action="delete" class="icon-button" aria-label="Delete selection">'+icon('trash')+'</button></div></div><div class="selection-members">'+items.map(item=>'<span>'+esc(item.name)+'</span>').join('')+'</div><div class="inspector-section"><div class="section-label">Shared transform</div>'+fields('Selection center','position',center)+fields('Rotate by','rotation',[0,0,0])+'<label class="property-label">Uniform scale ×<input type="number" aria-label="Selection scale factor" data-placement="scale" data-index="0" min="0.01" max="100" step="0.1" value="1" '+(playing?'disabled':'')+`/></label><p class="property-note">Move and rotate around the shared center. Existing motion paths move with the selection.</p><button class="add-motion" data-action="ground">${icon('arrow-down')} Drop each object to surface</button></div><p class="property-note">Ctrl click toggles an object. Shift click selects a range in the Hierarchy.</p>`;
     $('#inspector').querySelector('.selection-members')!.insertAdjacentHTML('afterend',visibilityCard(items));
     const visible=items.filter(item=>!item.hidden).length;
     if(visible<items.length)$('#inspector').querySelector('.property-note')!.textContent='Transforms affect '+visible+' visible objects. Hidden objects keep their positions and motion.';
@@ -617,12 +640,12 @@ function renderInspector(force=false) {
   const shot=isCamera&&activeShot()?.cameraId===item.id?activeShot():undefined,linked=inspectedDoc.shots.filter(shot=>shot.cameraId===item.id);
   const colors=['#b8ccce','#e8a28e','#f0d48d','#aebfa1','#9faed0','#e5d9c3','#b2a4bc','#555f66'];
   const title='<div class="inspector-title"><span class="entity-type">'+icon(isCamera?'camera':item.kind)+(isCamera?'CAMERA':item.kind.toUpperCase())+'</span><div><button data-action="duplicate" class="icon-button" aria-label="Duplicate selection">'+icon('duplicate')+'</button><button data-action="delete" class="icon-button" aria-label="Delete selection">'+icon('trash')+'</button></div></div><input class="entity-name" aria-label="Object name" id="entityName" maxlength="120" value="'+esc(item.name)+'"/>';
-  const transform='<div class="inspector-section"><div class="section-label">Transform <div class="transform-key-actions"><button data-action="axis-keys" aria-pressed="'+showAxisKeys+'">'+(showAxisKeys?'Hide axis keys':'Axis keys')+'</button><button data-action="key-transform" '+(locked?'disabled':'')+'>◇ Key Transform</button></div></div>'+poseFields('Position','position',pose.position,locked,item)+poseFields('Rotation','rotation',pose.rotation,locked,item)+(isCamera?'<div class="property-label-key"><label class="property-label" for="cameraFov">Field of view <span class="input-unit">degrees</span></label>'+keyButton(animationFor(item),'fov',time,locked)+'</div><input type="number" id="cameraFov" aria-label="Camera field of view" min="10" max="120" step="1" value="'+num(propertyValue(item,'fov'))+'" '+(locked?'disabled':'')+'/>' :poseFields('Scale','scale',pose.scale,locked,item))+'<div class="axis-constraint-row"><span>Constrain axis</span><div class="axis-tools" aria-label="Axis constraint"><button data-axis="X" class="axis-x" aria-label="Constrain X axis">X</button><button data-axis="Y" class="axis-y" aria-label="Constrain Y axis">Y</button><button data-axis="Z" class="axis-z" aria-label="Constrain Z axis">Z</button></div></div></div>';
+  const transform='<div class="inspector-section"><div class="section-label">Transform <div class="transform-key-actions"><button data-action="axis-keys" aria-pressed="'+showAxisKeys+'">'+(showAxisKeys?'Hide axis keys':'Axis keys')+'</button><button data-action="key-transform" '+(locked?'disabled':'')+`>${icon('key')} Key Transform</button></div></div>`+poseFields('Position','position',pose.position,locked,item)+poseFields('Rotation','rotation',pose.rotation,locked,item)+(isCamera?'<div class="property-label-key"><label class="property-label" for="cameraFov">Field of view <span class="input-unit">degrees</span></label>'+keyButton(animationFor(item),'fov',time,locked)+'</div><input type="number" id="cameraFov" aria-label="Camera field of view" min="10" max="120" step="1" value="'+num(propertyValue(item,'fov'))+'" '+(locked?'disabled':'')+'/>' :poseFields('Scale','scale',pose.scale,locked,item))+'<div class="axis-constraint-row"><span>Constrain axis</span><div class="axis-tools" aria-label="Axis constraint"><button data-axis="X" class="axis-x" aria-label="Constrain X axis">X</button><button data-axis="Y" class="axis-y" aria-label="Constrain Y axis">Y</button><button data-axis="Z" class="axis-z" aria-label="Constrain Z axis">Z</button></div></div></div>';
   const links=isCamera?'<div class="camera-shot-links">'+(linked.length?linked.map(shot=>'<button data-shot="'+esc(shot.id)+'">'+icon('camera')+esc(shot.name)+'</button>').join(''):'<button data-action="camera-shot">'+icon('plus')+'Create shot with this camera</button>')+'</div>'+(linked.length>1?'<p class="property-note">These '+linked.length+' shots share this camera’s framing and motion. Duplicate a shot for independent framing.</p>':''):'';
   const material='kind' in item?'<div class="inspector-section"><div class="section-label">MATERIAL</div><div class="color-palette">'+colors.map(color=>'<button class="color-swatch '+(item.color===color?'active':'')+'" style="--swatch:'+color+'" data-color="'+color+'" aria-label="Set color '+color+'"></button>').join('')+'<label class="custom-color" title="Custom color"><input type="color" aria-label="Custom object color" id="objectColor" value="'+item.color+'"/></label></div></div>':'';
   $('#inspector').innerHTML=title+links+('kind' in item?visibilityCard([item]):'')+transform+
     ('kind' in item?componentInspector({...item,components:evaluateComponents(item,time)?.map(component=>component.type==='pivot'?{...component,offset:['x','y','z'].map(axis=>propertyValue(item,`pivot.${axis}` as PropertyPath)) as Transform['position']}:component)},Boolean(editPreview)||playing||!!performanceSession||!!item.hidden,performanceSession?.mode==='control'&&!editPreview,false,group=>keyButton(animationFor(item),group,time,locked),(group,index)=>componentAxisKey(item,group,index,locked),(editPreview??project).scripts??[]):'')+
-    (isCamera?'<button class="add-motion camera-align" data-action="use-view">'+icon('eye')+'Use current scene view</button><button class="add-motion" data-action="draw-path" title="Drag across the floor; the camera travels it over its shot and keeps the framed subject in view" '+(locked||playing||!!performanceSession||!!editPreview?'disabled':'')+'>'+icon('camera')+'Draw camera move on floor</button>':'')+
+    (isCamera?'<button class="add-motion" data-action="pilot-camera" data-camera-id="'+esc(item.id)+'" '+(locked||!!performanceSession?'disabled':'')+'>'+icon('camera')+'Pilot camera</button><button class="add-motion camera-align" data-action="use-view">'+icon('eye')+'Use current scene view</button><button class="add-motion" data-action="draw-path" title="Drag across the floor; the camera travels it over its shot and keeps the framed subject in view" '+(locked||playing||!!performanceSession||!!editPreview?'disabled':'')+'>'+icon('camera')+'Draw camera move on floor</button>':'')+
     jointFields(item,locked)+material+(shot?shotFields(shot,inspectedDoc):'');
   const excludedParents=descendants(sceneEntities(inspectedDoc),item.id);
   $('#entityName').insertAdjacentHTML('afterend','<label class="parent-field">Parent<select id="entityParent" aria-label="Parent object" '+(locked?'disabled':'')+'><option value="">Scene root</option>'+sceneEntities(inspectedDoc).filter(parent=>!excludedParents.has(parent.id)).map(parent=>'<option value="'+esc(parent.id)+'" '+(item.parentId===parent.id?'selected':'')+'>'+esc(parent.name)+'</option>').join('')+'</select></label>');
@@ -634,7 +657,7 @@ function renderInspector(force=false) {
     $('#inspector').querySelector('.transform-key-actions')?.insertAdjacentHTML('afterend','<p class="property-note">Follow Path controls world position'+(follow.facing?' and facing':'')+'. Disable it to edit the base pose.</p>');
   }
   if('kind' in item){$('#inspector').insertAdjacentHTML('beforeend','<button class="asset-save-button" data-action="save-asset">Create Independent Prefab…</button>');bindComponents($('#inspector'),item,()=>{(document.activeElement as HTMLElement)?.blur();if(item.animation&&!item.components?.some(component=>component.type==='pivot'))for(const path of propertyPaths('pivot'))delete item.animation.curves[path];if(item.animation&&!item.components?.some(c=>c.type==='followPath'))delete item.animation.curves['followPath.progress'];changed('Component settings saved');},()=>performanceSession?exitPerformance():void beginPerformance(),true,project.scripts??[]);}
-  if('asset' in item&&item.asset)$('#entityName').insertAdjacentHTML('afterend',`<button class="asset-instance-edit" data-action="edit-asset">◇ Edit Prefab</button>`);
+  if('asset' in item&&item.asset)$('#entityName').insertAdjacentHTML('afterend',`<button class="asset-instance-edit" data-action="edit-asset">${icon('key')} Edit Prefab</button>`);
   if(performanceSession){const button=$('#inspector').querySelector<HTMLElement>('[data-component-action]');if(button&&performanceSession.mode!=='control')button.textContent=performanceSession.mode==='record'?'Recording…':'Review Recording';}
   if(performanceSession)$('#inspector').querySelectorAll<HTMLInputElement|HTMLButtonElement>('.entity-name,[data-action],[data-color],#objectColor').forEach(node=>node.disabled=true);
 }
@@ -654,8 +677,11 @@ function renderTimeline() {
   const summary=item?esc(item.name):'Select an object or camera';
   $('#timelineRows').innerHTML=shots+'<div class="timeline-group">PROPERTIES <span>'+summary+'</span>'+(pending.length?'<button data-action="review-draft">'+pending.length+' unkeyed change · Review</button>':'')+'</div>'+renderPropertyRows(animation,groups,openProperties,selectedPropertyKey,doc.duration,fps(),showAllSamples,jointNames);
   const selected=selectedPropertyKey,paths=selected?(selected.path?[selected.path]:groupPaths(selected.group)):[],key=selected?paths.flatMap(path=>animation?.curves[path]??[]).find(key=>Math.abs(key.time-selected.time)<1e-6):undefined;
-  $<HTMLButtonElement>('#duplicateKey').disabled=!key;$<HTMLButtonElement>('#deleteKey').disabled=!key;
-  const interpolation=$<HTMLSelectElement>('#animationInterpolation');interpolation.disabled=!key;if(key)interpolation.value=key.interpolation;
+  $('#selectedKeyTools').hidden=!key;
+  const keyDisabled=!key||!!editPreview||!!performanceSession;
+  $<HTMLButtonElement>('#duplicateKey').disabled=keyDisabled;$<HTMLButtonElement>('#deleteKey').disabled=keyDisabled;
+  const interpolation=$<HTMLSelectElement>('#animationInterpolation');interpolation.disabled=keyDisabled;
+  if(key){interpolation.value=key.interpolation;interpolation.title={linear:'Linear: the value changes at a constant speed until the next keyframe.',constant:'Hold: the value stays fixed until the next keyframe.',smooth:'Smooth: the change eases in and out between keyframes.',quaternion:'Rotation blend: recorded orientations blend along the shortest rotation.'}[key.interpolation];}
   const samples=$<HTMLButtonElement>('#samplesToggle');samples.hidden=!animation?.takes.length;samples.textContent=showAllSamples?'Show fewer samples':'Show all samples';
   applyTimelineZoom();renderTime();
 }
@@ -719,36 +745,56 @@ async function beginPerformance(record=false){
   if(item.components?.some(c=>c.type==='followPath'&&c.enabled&&c.pathId)){status('Disable Follow Path before using keyboard controls.');return;}
   const token=assetProjectToken;
   try{if(inputController(item.components)?.type==='script')await prepareScripts();if(performanceSession||token!==assetProjectToken||entity()!==item||!workspace?.canEdit)return;
-    pause();flushFieldEdit();sceneEditor?.sceneChanged();performanceSession=new PerformanceSession(item,time,doc,project.scripts??[],project.assets??[]);setBottomPanelTab('timeline');setSidePanel('inspector');renderAll();stage?.focusCanvas();status('Control active · R records · Esc keeps position and exits');if(record)startPerformanceRecord();
+    pause();flushFieldEdit();sceneEditor?.sceneChanged();performanceSession=new PerformanceSession(item,time,doc,project.scripts??[],project.assets??[]);performanceSession.clock=recordingClock;setBottomPanelTab('timeline');setSidePanel('inspector');renderAll();stage?.focusCanvas();status('Control active · R records · Esc keeps position and exits');if(record)startPerformanceRecord();
   }catch(error){status('Controller could not start: '+(error as Error).message);}
 }
+function beginCameraPilot(cameraId?:string){
+  if(!stage||!workspace?.canEdit||performanceSession||editPreview||assetEditor||xrRecording||storageError)return;
+  const camera=cameraId?doc.cameras.find(camera=>camera.id===cameraId):shotCamera(doc,project.activeShotId)??doc.cameras.find(camera=>camera.id===selection.active)??doc.cameras[0];
+  if(!camera)return;
+  pause();flushFieldEdit();
+  if(unkeyed.size){status('Keep or discard unkeyed changes before piloting a camera.');return;}
+  const shot=activeShot()?.cameraId===camera.id?activeShot():doc.shots.find(shot=>shot.cameraId===camera.id);
+  project.activeShotId=shot?.id??null;selection.set([camera.id]);selectedPathId=null;selectedPropertyKey=null;
+  if(shot&&(time<shot.start||time>shot.start+shot.duration-.1))time=shot.start;
+  if(!shot&&time>doc.duration-.1)time=0;
+  sceneEditor?.sceneChanged();performanceSession=new PerformanceSession(camera,time,doc);performanceSession.clock=recordingClock;
+  setBottomPanelTab('timeline');setSidePanel('inspector');renderAll();stage.focusCanvas();
+  status('Pilot camera · Hold right mouse + WASD · Mouse to look · Scroll speed · R record / stop · Esc keeps position and exits');
+}
+function performanceRange(){const shot=activeShot();return performanceSession?.isCamera&&shot?.cameraId===performanceSession.before.id?{start:shot.start,end:shot.start+shot.duration}:{start:0,end:doc.duration};}
 function applyPlacement():boolean{
   if(!performanceSession)return false;
-  const item=entity(performanceSession.before.id);if(!item||!('kind' in item))return false;
-  try{const next=performanceSession.placement();if(JSON.stringify(next)!==JSON.stringify(item)){Object.assign(item,next);changed('Placement saved · Entire motion path moved');}return true;}
+  const item=entity(performanceSession.before.id);if(!item)return false;
+  try{const next=performanceSession.placement();if(JSON.stringify(next)!==JSON.stringify(item)){Object.assign(item,next);changed(performanceSession.isCamera?'Camera position kept · Undo available':'Placement saved · Entire motion path moved');}return true;}
   catch(error){status(`${error instanceof Error?error.message:'Placement could not be saved'} Use Discard Position to exit.`);return false;}
 }
 function exitPerformance(){if(!performanceSession)return;if(performanceSession.mode==='record'){stopPerformanceRecord();return;}if(performanceSession.mode==='review')return;if(!applyPlacement())return;performanceSession.dispose();performanceSession=null;pause();renderAll();persist();synchronizeAssets(libraryAssets);}
 function discardPosition(){if(!performanceSession||performanceSession.mode!=='control')return;performanceSession.dispose();performanceSession=null;pause();renderAll();persist();synchronizeAssets(libraryAssets);status('Positioning discarded');}
 function startPerformanceRecord(){
   if(!performanceSession||performanceSession.mode!=='control')return;
-  if(!applyPlacement())return;performanceSession.start(doc.duration);time=performanceSession.time;playing=false;setBottomPanelTab('timeline');renderAll();stage?.focusCanvas();
+  if(!performanceSession.isCamera&&!applyPlacement())return;
+  const range=performanceRange();performanceSession.start(range.end,range.start);time=performanceSession.time;playing=false;setBottomPanelTab('timeline');renderAll();stage?.focusCanvas();
 }
-function stopPerformanceRecord(){if(!performanceSession)return;performanceSession.stop();playing=false;time=performanceSession.time;renderAll();stage?.focusCanvas();}
+function stopPerformanceRecord(){if(!performanceSession)return;performanceSession.stop();playing=false;time=performanceSession.time;renderAll();stage?.focusCanvas();if(performanceSession.mode==='control')status('No take recorded yet. Record at least 0.1 seconds.');}
 function discardPerformance(retry=false){if(!performanceSession)return;playing=false;performanceSession.discard();time=performanceSession.time;renderAll();if(retry)startPerformanceRecord();else stage?.focusCanvas();}
 function keepPerformance(){
   const session=performanceSession,item=session?entity(session.before.id):null;if(!session?.draft||!item)return;
   try{
     const frames=session.recordedFrames;
     const current=animationFor(item)??emptyAnimation();let n=1;while(current.takes.some(take=>take.id===`take-${n}`))n++;
-    item.animation=keepRecordedTake(current,`take-${n}`,frames,doc.duration);item.track=null;
+    item.animation=keepRecordedTake(current,`take-${n}`,frames,doc.duration,{recordScale:!session.isCamera});item.track=null;
     session.dispose();performanceSession=null;playing=false;openProperties.clear();changed('Recording kept · Shared across shots · Undo available');persist();synchronizeAssets(libraryAssets);
   }catch(error){status((error as Error).message);}
 }
 function renderPerformance(){
   const session=performanceSession,active=!!session,bar=$('#performanceBar');bar.hidden=!active;
   $<HTMLButtonElement>('#assetLibraryTab').disabled=active;
+  timelineSettingsButton.disabled=active;
+  if(active)timelineSettings.hidePopover();
   $('.stage-panel').classList.toggle('performance-active',active);
+  $('.stage-panel').classList.toggle('camera-piloting',!!session?.isCamera);
+  document.querySelectorAll<HTMLButtonElement>('[data-action="pilot-camera"]').forEach(button=>{button.disabled=active||!!editPreview||!doc.cameras.length||!workspace?.canEdit||!!storageError||unkeyed.size>0;button.title=unkeyed.size?'Keep or discard unkeyed changes before piloting a camera':'Fly this camera and record a take';});
   $('#sceneAI').inert=(active&&!session?.scriptRevision)||!workspace?.canEdit;$('#timelineTracks').inert=active;$('.library-panel').inert=active;$('.app-header').inert=active;
   $<HTMLInputElement>('#duration').disabled=active||!!editPreview||doc===emptyView;$<HTMLSelectElement>('#shotSelect').disabled=active;
   $<HTMLInputElement>('#animationFrame').disabled=active||!!editPreview;$<HTMLSelectElement>('#animationFps').disabled=active||!!editPreview;$<HTMLButtonElement>('#autoKey').disabled=active||!!editPreview;
@@ -756,12 +802,20 @@ function renderPerformance(){
   document.querySelectorAll<HTMLButtonElement>('[data-action="play"]').forEach(b=>b.disabled=visibleScene()===emptyView||(!!session&&session.mode!=='review'));
   if(!session)return;
   bar.dataset.mode=session.mode;bar.dataset.scriptRevision=String(session.scriptRevision??'');
-  const control=inputController(session.before.components),help=control?.type==='script'?project.scripts?.find(s=>s.id===control.scriptId)?.controls:control?.type==='hinge'?'W/S open/close · Camera stays fixed':'W/S move · A/D turn · Camera stays fixed';
-  const header=`<div><strong>${session.mode==='record'?'● Recording':session.mode==='review'?'Review Take':'Positioning'} · ${esc(session.before.name)}</strong><small>${session.mode==='review'?session.draft!.duration.toFixed(1)+' s · Awaiting review':esc(help??'')}${session.scriptRevision?' · Running revision '+session.scriptRevision:''}</small></div>`;
-  bar.innerHTML=header+(session.mode==='control'?'<button data-performance="record" class="primary-button">● Record <kbd>R</kbd></button><button data-performance="exit">Stop Control <kbd>Esc</kbd></button><button data-performance="discard-position">Discard Position</button>':session.mode==='record'?`<span id="performanceClock">${timecode(time)}</span><button data-performance="stop" class="record-button">■ Stop Recording</button>`:'<button data-performance="preview">▷ Play Take</button><button data-performance="retry">↻ Record Again</button><button data-performance="discard">Discard</button><button data-performance="keep" class="primary-button">✓ Keep Take</button>');
+  const control=inputController(session.components),help=session.isCamera?'Right mouse + WASD · Mouse to look · Q/E down/up · Scroll speed · Shift boost':control?.type==='script'?project.scripts?.find(s=>s.id===control.scriptId)?.controls:control?.type==='hinge'?'W/S open/close · Camera stays fixed':'W/S move · A/D turn · Camera stays fixed';
+  const header=`<div><strong>${session.mode==='record'?`${icon('record')} Recording`:session.mode==='review'?'Review Take':session.isCamera?'Piloting Camera':'Positioning'} · ${esc(session.before.name)}</strong><small>${session.mode==='review'?session.draft!.duration.toFixed(1)+' s · Awaiting review':esc(help??'')}${session.scriptRevision?' · Running revision '+session.scriptRevision:''}</small></div>`;
+  const timing=`<label class="performance-timing">${icon('clock')}Timing<select data-recording-clock aria-label="Recording timing" title="While moving pauses scene time whenever the controlled object or camera is still"><option value="realtime" ${session.clock==='realtime'?'selected':''}>Real time</option><option value="motion" ${session.clock==='motion'?'selected':''}>While moving</option></select></label>`;
+  bar.innerHTML=header+(session.mode==='control'?timing+`<button data-performance="record" class="primary-button">${icon('record')} Record <kbd>R</kbd></button><button data-performance="exit">`+(session.isCamera?'Keep position & exit':'Stop Control')+' <kbd>Esc</kbd></button><button data-performance="discard-position">Discard Position</button>':session.mode==='record'?`<span id="performanceClock">${timecode(time)}</span>${session.recordingClock==='motion'?'<small id="performanceMotionState"></small>':''}<button data-performance="stop" class="record-button">${icon('stop')} Stop Recording <kbd>R</kbd></button>`:`<button data-performance="preview">${icon('play')} Play Take</button><button data-performance="retry">${icon('retry')} Record Again</button><button data-performance="discard">Discard</button><button data-performance="keep" class="primary-button">${icon('check')} Keep Take</button>`);
+  const clock=bar.querySelector<HTMLSelectElement>('[data-recording-clock]');if(clock)clock.onchange=()=>{recordingClock=clock.value==='motion'?'motion':'realtime';session.clock=recordingClock;};
+  renderRecordingClock();
   bar.querySelectorAll<HTMLButtonElement>('[data-performance]').forEach(button=>button.onclick=()=>{
-    switch(button.dataset.performance){case 'record':startPerformanceRecord();break;case 'exit':exitPerformance();break;case 'discard-position':discardPosition();break;case 'stop':stopPerformanceRecord();break;case 'preview':togglePlay();button.textContent=playing?'Ⅱ Pause':'▷ Play Take';break;case 'retry':discardPerformance(true);break;case 'discard':discardPerformance();break;case 'keep':keepPerformance();break;}
+    switch(button.dataset.performance){case 'record':startPerformanceRecord();break;case 'exit':exitPerformance();break;case 'discard-position':discardPosition();break;case 'stop':stopPerformanceRecord();break;case 'preview':togglePlay();button.innerHTML=icon(playing?'pause':'play')+(playing?' Pause':' Play Take');break;case 'retry':discardPerformance(true);break;case 'discard':discardPerformance();break;case 'keep':keepPerformance();break;}
   });
+}
+function renderRecordingClock(){
+  const session=performanceSession,state=$<HTMLElement>('#performanceMotionState'),waiting=!!session&&session.mode==='record'&&!session.advancing;
+  $('#performanceBar').classList.toggle('waiting-for-motion',waiting);
+  if(state&&state.dataset.waiting!==String(waiting)){state.dataset.waiting=String(waiting);state.innerHTML=icon(waiting?'pause':'record')+(waiting?' Waiting for movement':' Recording motion');}
 }
 function remove(){if(!selection.ids.length)return;try{const operations=hierarchyRoots(sceneEntities(doc),selection.ids).map(id=>({type:doc.objects.some(item=>item.id===id)?'remove_object' as const:'remove_camera' as const,sceneId:doc.id,id}));replaceContent(applyProjectOperations(projectContent(project),operations,time));changed('Selection removed');}catch(error){status((error as Error).message);}}
 
@@ -1010,6 +1064,7 @@ app.addEventListener('click',event=>{
       },()=>status('Path drawing cancelled'));break;}
     case 'reset-view':stage?.resetView();break;
     case 'use-view':{const view=stage?.captureView(),item=entity();if(!view||!item||!('fov' in item))break;try{view.transform=localTransform(doc,item.id,view.transform,time);}catch(error){status((error as Error).message);break;}pause();let saved=false;for(const group of ['position','rotation'] as const)for(const [i,axis] of ['x','y','z'].entries())saved=editProperty(item,`${group}.${axis}` as PropertyPath,view.transform[group][i])||saved;saved=editProperty(item,'fov',clamp(view.fov,10,120))||saved;if(saved)changed('Framing aligned to scene view');else{renderAll();status('Framing previewed · Insert keys to keep it');}break;}
+    case 'pilot-camera':beginCameraPilot(target.dataset.cameraId);break;
     case 'undo':flushFieldEdit();restore(history.undo());status('Undo');break;
     case 'redo':flushFieldEdit();restore(history.redo());status('Redo');break;
     case 'duplicate':duplicate();break;
@@ -1238,8 +1293,23 @@ window.addEventListener('pointerup',()=>{if(performanceSession)performanceSessio
 document.addEventListener('focusin',event=>{if((event.target as HTMLElement).matches('input,textarea,select,[contenteditable=true]'))performanceSession?.keys.clear();});
 window.addEventListener('blur',()=>{performanceSession?.keys.clear();if(performanceSession?.mode==='record')stopPerformanceRecord();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){performanceSession?.keys.clear();if(performanceSession?.mode==='record')stopPerformanceRecord();}});
-function tick(now:number){const delta=Math.min((now-lastFrame)/1000,0.05);lastFrame=now;if(xrRecording?.previewing){xrRecording.advance(delta);time=xrRecording.time;renderTime();syncStage();}if(performanceSession&&performanceSession.mode!=='review'){let stopped:boolean;try{stopped=performanceSession.update(delta,doc.duration);}catch(error){const failed=performanceSession;if(failed.mode==='record')failed.stop();if(failed.mode!=='review'){failed.dispose();performanceSession=null;}pause();renderAll();status('Controller stopped: '+(error as Error).message);return;}time=performanceSession.time;renderTime();syncStage();$('#inspector').querySelectorAll<HTMLInputElement>('[data-pose]').forEach(input=>input.value=String(num(performanceSession!.pose[input.dataset.pose as keyof Transform][Number(input.dataset.component)])));if(stopped)renderAll();else if($('#performanceBar').dataset.scriptRevision!==String(performanceSession.scriptRevision??''))renderPerformance();else if(performanceSession.mode==='record')$('#performanceClock').textContent=timecode(time);if(performanceSession.scriptError)status(performanceSession.scriptError);}
-if(playing){const take=performanceSession?.draft,end=take?take.start+take.duration:visibleScene().duration;time=Math.min(time+delta,end);followTimelineShot();if(time>=end){pause();renderInspector();if(performanceSession?.mode==='review')renderPerformance();}renderTime();syncStage();}}
+function tick(now:number){
+  const delta=Math.min((now-lastFrame)/1000,0.05);lastFrame=now;
+  if(xrRecording?.previewing){xrRecording.advance(delta);time=xrRecording.time;renderTime();syncStage();}
+  const session=performanceSession;
+  if(session&&session.mode!=='review'){
+    let stopped:boolean;
+    try{stopped=session.update(delta,performanceRange().end,session.isCamera?stage?.captureView().transform:undefined);}
+    catch(error){if(session.mode==='record')session.stop();if(!session.draft){session.dispose();performanceSession=null;}pause();renderAll();status('Controller stopped: '+(error as Error).message);return;}
+    time=session.time;renderTime();syncStage();
+    $('#inspector').querySelectorAll<HTMLInputElement>('[data-pose]').forEach(input=>input.value=String(num(session.pose[input.dataset.pose as keyof Transform][Number(input.dataset.component)])));
+    if(stopped)renderAll();
+    else if($('#performanceBar').dataset.scriptRevision!==String(session.scriptRevision??''))renderPerformance();
+    else if(session.mode==='record'){$('#performanceClock').textContent=timecode(time);renderRecordingClock();}
+    if(session.scriptError)status(session.scriptError);
+  }
+  if(playing){const take=performanceSession?.draft,end=take?take.start+take.duration:visibleScene().duration;time=Math.min(time+delta,end);followTimelineShot();if(time>=end){pause();renderInspector();if(performanceSession?.mode==='review')renderPerformance();}renderTime();syncStage();}
+}
 window.addEventListener('pagehide',()=>{sceneEditor?.session.cancel('This response was interrupted. Retry when you are ready.');persist();});
 window.addEventListener('beforeunload',event=>{if(!storageAvailable||performanceSession||unkeyed.size){event.preventDefault();event.returnValue='';}});
 async function openAssetEditor(asset:AssetDefinition) {

@@ -1,16 +1,14 @@
 import * as THREE from 'three';
+import { icon } from '../icons';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 import { MenuTexture } from './texture';
 import { menuButtonBinding, type XRButtonComponent, type XRMenuBinding } from './buttons';
 
 export function xrControllerIconSvg(action: 'undo' | 'play' | 'menu', playing = false, feedback: 'ready' | 'disabled' | 'pressed' = 'ready'): string {
-  const icon = action === 'menu' ? '<path d="M86 100h148M86 160h148M86 220h148" fill="none" stroke="#f6f3e9" stroke-width="24" stroke-linecap="round"/>' : action === 'undo'
-    ? '<path d="M114 98 64 148l50 50M70 148h112c82 0 82 100 0 100" fill="none" stroke="#f6f3e9" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>'
-    : playing ? '<path d="M112 86h34v148h-34zM178 86h34v148h-34z" fill="#f6f3e9"/>'
-      : '<path d="m116 78 124 82-124 82Z" fill="#f6f3e9"/>';
   const ink = feedback === 'pressed' ? '#10231e' : '#f6f3e9';
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320"><circle cx="160" cy="160" r="156" fill="${feedback === 'pressed' ? '#ffbd66' : '#182b26'}"/><circle cx="160" cy="160" r="143" fill="none" stroke="${feedback === 'pressed' ? ink : feedback === 'ready' ? '#c9f86b' : '#789084'}" stroke-width="12"/>${icon.replaceAll('#f6f3e9', ink)}</svg>`;
+  const symbol=action==='play'?(playing?'pause':'play'):action;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320"><circle cx="160" cy="160" r="156" fill="${feedback === 'pressed' ? '#ffbd66' : '#182b26'}"/><circle cx="160" cy="160" r="143" fill="none" stroke="${feedback === 'pressed' ? ink : feedback === 'ready' ? '#c9f86b' : '#789084'}" stroke-width="12"/>${icon(symbol,{x:72,y:72,width:176,height:176,color:ink,...(action==='play'?{fill:ink}:{})})}</svg>`;
 }
 
 export function xrLeftHintsSvg(fallback: boolean): string {
