@@ -1,3 +1,4 @@
+import { icon } from '../icons';
 import { newId } from "../id.ts";
 import { referenceConnection, parseReferenceDraft, requestReferenceDraft } from './client';
 import { z } from 'zod';
@@ -43,11 +44,11 @@ export class ReferenceDialog {
   constructor(private readonly applyScene: (draft: ReferenceDraft) => void, private readonly capture: ReferenceCapture, private readonly storage: () => Workspace | undefined, private readonly shareReference?: (file:File,video:ReferenceVideo,cuts:Promise<number[]>)=>Promise<void>) {
     this.root.id = 'referenceDialog'; this.root.setAttribute('aria-labelledby', 'referenceTitle');
     this.root.innerHTML = `
-      <div class="reference-heading"><div><span class="reference-eyebrow">REFERENCE</span><h2 id="referenceTitle">Video or sketch to scene</h2></div><button class="icon-button" data-reference="close" aria-label="Close reference video">✕</button></div>
+      <div class="reference-heading"><div><span class="reference-eyebrow">REFERENCE</span><h2 id="referenceTitle">Video or sketch to scene</h2></div><button class="icon-button" data-reference="close" aria-label="Close reference video">${icon('close')}</button></div>
       <p class="reference-intro">Turn a short shot, a storyboard panel or a sketch into an editable whitebox draft.</p>
       <div class="reference-layout">
         <section class="reference-source">
-          <div class="reference-video-frame"><video id="referencePlayer" controls playsinline muted hidden></video><img id="referenceStill" alt="Reference image" hidden/><div class="reference-placeholder"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><rect x="5" y="7" width="30" height="26" rx="3"/><path d="m17 14 10 6-10 6Z"/></svg><span>A continuous shot or one storyboard panel</span></div></div>
+          <div class="reference-video-frame"><video id="referencePlayer" controls playsinline muted hidden></video><img id="referenceStill" alt="Reference image" hidden/><div class="reference-placeholder">${icon('film')}<span>A continuous shot or one storyboard panel</span></div></div>
           <div class="reference-file-row"><button data-reference="choose">Choose video or image</button><button data-reference="demo">Load demo clip</button><span id="referenceFileName">MP4, WebM, PNG, JPEG or WebP</span></div>
           <input id="referenceFile" type="file" accept=".mp4,.webm,video/mp4,video/webm,.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" hidden/>
           <p id="referenceMetadata" class="reference-metadata">A 1–60 s clip, or a sketch with arrows for movement</p>

@@ -8,6 +8,14 @@ export const transformSchema = z.strictObject({ position: vector(-1000, 1000), r
 export const samplesSchema = z.array(z.strictObject({ at: z.number().gt(0).lt(1), transform: transformSchema })).max(3600).refine(samples => samples.every((s, i) => i === 0 || s.at > samples[i - 1].at), 'Recorded samples must be in time order.');
 export const motionSchema = z.strictObject({ start: z.number().min(0).max(60), duration: z.number().min(.1).max(60), from: transformSchema, to: transformSchema, samples: samplesSchema.optional() }).refine(t => t.start + t.duration <= 60 + 1e-9, 'Motion must finish within 60 seconds.');
 
+/** Compare actual motion, ignoring Euler wrapping and numerical camera jitter. */
+export function performanceChanged(from:Transform,to:Transform,before:Record<string,number>,after:Record<string,number>):boolean {
+  if(from.position.some((value,i)=>Math.abs(value-to.position[i])>1e-6)||from.scale.some((value,i)=>Math.abs(value-to.scale[i])>1e-6))return true;
+  const rotation=(pose:Transform)=>new Quaternion().setFromEuler(new Euler(...pose.rotation.map(MathUtils.degToRad) as Vec3,'XYZ'));
+  if(1-Math.abs(rotation(from).dot(rotation(to)))>1e-12)return true;
+  return [...new Set([...Object.keys(before),...Object.keys(after)])].some(id=>Math.abs((before[id]??0)-(after[id]??0))>1e-5);
+}
+
 export function trackPoses(track: MotionTrack): Transform[] { return [track.from, ...(track.samples ?? []).map(s => s.transform), track.to]; }
 
 /** Move the whole performance around the pose shown at the playhead. */

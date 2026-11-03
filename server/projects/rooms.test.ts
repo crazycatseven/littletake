@@ -255,13 +255,25 @@ test('project archives preserve animated scenes, chats and generated results thr
   const corrupt = new Uint8Array(await archive.arrayBuffer()); corrupt[55] ^= 1;
   assert.equal((await handle(new Request(`https://littletake.vercel.app/api/projects?import=1&id=${randomUUID()}`, { method: 'POST', headers: { 'x-littletake-edit-lease': viewer }, body: corrupt }))).status, 400);
   assert.deepEqual(store.get(imported.code).project, document.project, 'a corrupt import never replaces a saved project');
+  const render = { id: randomUUID(), kind: 'shot-render' as const, sceneId: output.sceneId, shotId: output.shotId, name: 'Shot 1 still', mime: 'image/png' as const };
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1cAAAAASUVORK5CYII=', 'base64');
+  const rendered = await handle(new Request(`http://localhost/api/projects?code=${imported.code}&output=1`, {
+    method: 'POST', headers: { 'x-littletake-edit-lease': viewer, 'x-littletake-output': encodeURIComponent(JSON.stringify(render)) }, body: png,
+  }));
+  assert.equal(rendered.status, 200, await rendered.text());
+  const withRender = await readProjectArchive(projectArchive(store.bundle(imported.id)));
+  const archivedRender = withRender.outputs.find(item => item.output.id === render.id)!;
+  assert.equal(archivedRender.output.kind, 'shot-render'); assert.deepEqual(archivedRender.data, new Uint8Array(png));
+  const renderCopy = store.create(randomUUID(), viewer, withRender.project, undefined, withRender.outputs);
+  assert.deepEqual(store.readOutput(renderCopy.code, render.id).data, new Uint8Array(png), 'render files travel with imported projects');
   const runId = randomUUID(); for (let i = 1; i <= 72; i++) assert.equal(store.consumeCall(created.code, editor, runId), i);
   assert.throws(() => store.consumeCall(created.code, editor, runId), /model-call limit/);
   const backupDirectory = await mkdtemp(path.join(tmpdir(), 'littletake-bundle-backup-')); await store.backupTo(path.join(backupDirectory, 'projects.sqlite'));
   store.close(); store = new ProjectRoomStore(directory); handle = createProjectRoomsHandler(store);
   assert.deepEqual(store.readOutput(imported.code, output.id).data, bytes); assert.throws(() => store.consumeCall(created.code, editor, runId), /model-call limit/, 'restarting cannot reset a paid-call budget');
+  assert.deepEqual(store.readOutput(imported.code, render.id).data, new Uint8Array(png), 'render files survive a server restart');
   const restored = new ProjectRoomStore(backupDirectory);
-  try { assert.deepEqual(restored.get(imported.code).project, document.project); assert.deepEqual(restored.readOutput(imported.code, output.id).data, bytes); }
+  try { assert.deepEqual(restored.get(imported.code).project, document.project); assert.deepEqual(restored.readOutput(imported.code, output.id).data, bytes); assert.deepEqual(restored.readOutput(imported.code, render.id).data, new Uint8Array(png)); }
   finally { restored.close(); }
   const oldPage = randomUUID(), newPage = randomUUID();
   store.claim(imported.code, viewer, oldPage); store.claim(imported.code, viewer, newPage);

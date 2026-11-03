@@ -1,3 +1,4 @@
+import { icon } from '../icons';
 import { isJointProperty, propertyPaths, type JointPropertyPath, type PropertyAnimation, type PropertyPath, type VectorProperty } from './model.ts';
 
 export type PropertyGroup = VectorProperty | 'fov' | 'followPath.progress' | JointPropertyPath;
@@ -17,7 +18,7 @@ export function keyState(animation: PropertyAnimation | undefined, group: Proper
 
 export function keyButton(animation: PropertyAnimation | undefined, group: PropertyGroup, time: number, disabled = false, label = labelFor(group)): string {
   const state=keyState(animation,group,time), action=state==='on-key'?'Remove':'Insert';
-  return `<button class="property-key ${state}" type="button" data-key-group="${esc(group)}" aria-label="${action} ${esc(label)} keyframe" title="${action} ${esc(label)} keyframe" ${disabled?'disabled':''}>${state==='on-key'?'◆':'◇'}</button>`;
+  return `<button class="property-key ${state}" type="button" data-key-group="${esc(group)}" aria-label="${action} ${esc(label)} keyframe" title="${action} ${esc(label)} keyframe" ${disabled?'disabled':''}>${icon('key')}</button>`;
 }
 
 export interface SelectedPropertyKey { group: PropertyGroup; path?: PropertyPath; time: number }
@@ -32,7 +33,7 @@ export function renderPropertyRows(animation: PropertyAnimation | undefined, gro
     const paths=groupPaths(group), keyed=paths.flatMap(path=>animation?.curves[path]??[]), unique=new Map<string,typeof keyed[number]>();
     for(const key of keyed)if(!unique.has(key.time.toFixed(7)))unique.set(key.time.toFixed(7),key);
     const keys=[...unique.values()].sort((a,b)=>a.time-b.time), expanded=open.has(group), takeBars=(group==='position'||group==='rotation')?(animation?.takes??[]).filter(take=>keyed.some(key=>key.take===take.id)).map(take=>`<div class="animation-take" data-take="${take.id}" style="left:${take.start/duration*100}%;width:${(take.end-take.start)/duration*100}%" title="Drag to move; drag edges to retime"><span data-take-edge="left"></span>${take.source==='legacy'?'Sampled motion':'Recorded'}<span data-take-edge="right"></span></div>`).join(''):'';
-    const summary=`<div class="timeline-row animation-row"><button class="track-label" data-animation-toggle="${group}" aria-expanded="${expanded}">${scalarGroup(group)?'·':expanded?'▾':'▸'} <span>${labelForGroup(group)}</span><small>${keys.length||'—'}</small></button><div class="track-lane">${takeBars}${keys.filter((key,index)=>allSamples||!key.take||index%4===0).map(key=>marker(group,undefined,key.time,!!key.take)).join('')}<span class="lane-playhead"></span></div></div>`;
+    const summary=`<div class="timeline-row animation-row"><button class="track-label" data-animation-toggle="${group}" aria-expanded="${expanded}">${scalarGroup(group)?'·':expanded?`${icon('chevron-down')}`:`${icon('chevron-right')}`} <span>${labelForGroup(group)}</span><small>${keys.length||'—'}</small></button><div class="track-lane">${takeBars}${keys.filter((key,index)=>allSamples||!key.take||index%4===0).map(key=>marker(group,undefined,key.time,!!key.take)).join('')}<span class="lane-playhead"></span></div></div>`;
     if(!expanded||scalarGroup(group))return summary;
     return summary+paths.map(path=>{
       const keys=animation?.curves[path]??[], axis=path.split('.')[1].toUpperCase();

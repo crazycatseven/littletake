@@ -4,6 +4,7 @@ import { ProjectRoomError, ProjectRoomStore } from './store.ts';
 import { MAX_OUTPUT_BYTES, MAX_ARCHIVE_BYTES, projectOutputSchema, type WorkspaceInfo } from '../../src/project/room.ts';
 import { projectArchive, readProjectArchive } from '../../src/project/archive.ts';
 import { MAX_COVER_BYTES } from '../../src/project/cover.ts';
+import { changeSchema } from '../../src/project/changes.ts';
 
 const inputSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('create'), id: z.uuid(), project: z.unknown(), sourceCode: z.string().max(32).optional() }),
@@ -11,6 +12,7 @@ const inputSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('heartbeat') }),
   z.strictObject({ action: z.literal('release') }),
   z.strictObject({ action: z.literal('save'), savedVersion: z.number().int().positive(), project: z.unknown() }),
+  z.strictObject({ action: z.literal('edit'), id: z.uuid(), revision: z.number().int().nonnegative(), changes: z.array(changeSchema).min(1).max(50000) }),
 ]);
 const json = (value: unknown, status = 200) => Response.json(value, { status,
   headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
@@ -45,6 +47,10 @@ export function createProjectRoomsHandler(store: ProjectRoomStore, workspace: Wo
         if (url.searchParams.has('bundle')) return new Response(projectArchive(store.bundle(z.uuid().parse(url.searchParams.get('bundle')))), { headers: { 'Content-Type': 'application/zip', 'Cache-Control': 'no-store' } });
         if (url.searchParams.has('id')) return json(store.getById(z.uuid().parse(url.searchParams.get('id')), lease, page));
         if (!code) throw new ProjectRoomError('code_required', 'Enter a project code to join.', 400);
+        if (url.searchParams.has('since')) {
+          const room = await store.changes(code, z.coerce.number().int().nonnegative().parse(url.searchParams.get('since')), request.signal, lease, page);
+          return room ? json(room) : new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
+        }
         if (url.searchParams.has('cover')) {
           const { cover, data } = store.readCover(code), etag = '"cover-' + cover.updatedAt + '"';
           const headers = { 'Content-Type': 'image/webp', 'Cache-Control': 'private, no-cache', 'X-Content-Type-Options': 'nosniff', ETag: etag };
@@ -98,12 +104,13 @@ export function createProjectRoomsHandler(store: ProjectRoomStore, workspace: Wo
         return json(store.saveOutput(code, lease, metadata, bytes, page, base));
       }
       if (!request.headers.get('content-type')?.startsWith('application/json')) throw new ProjectRoomError('invalid_content', 'Send a JSON project request.', 415);
-      const input = inputSchema.parse(JSON.parse((await readBytes(request, MAX_PROJECT_SIZE + 1024)).toString('utf8')));
+      const input = inputSchema.parse(JSON.parse((await readBytes(request, MAX_PROJECT_SIZE * 2 + 4096)).toString('utf8')));
       if (input.action === 'create') return json(store.create(input.id, lease, input.project, input.sourceCode, [], page), 201);
       if (!code) throw new ProjectRoomError('code_required', 'Enter a project code to join.', 400);
       if (input.action === 'claim') return json(store.claim(code, lease, page));
       if (input.action === 'heartbeat') return json(store.heartbeat(code, lease, page));
       if (input.action === 'release') return json(store.release(code, lease, page));
+      if (input.action === 'edit') return json(store.edit(code, lease, input.id, input.changes, input.revision, page));
       return json(store.save(code, lease, input.savedVersion, input.project, page));
     } catch (error) {
       if (error instanceof ProjectRoomError) return json({ error: { code: error.code, message: error.message } }, error.status);

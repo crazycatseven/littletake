@@ -1,0 +1,14 @@
+#performanceBar { position: absolute; z-index: 12; left: 50%; bottom: 35px; transform: translateX(-50%); display: flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 8px; width: min(780px, calc(100% - 24px)); padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface-raised); box-shadow: var(--shadow-floating); font-size: 11px; }
+#performanceBar > div { flex: 1 1 100%; min-width: 0; text-align: center; }
+#performanceBar strong { display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 550; }
+#performanceBar small { display: block; font-size: 10px; color: var(--muted); margin-top: 4px; }
+#performanceBar .record-button { background: var(--record); color: var(--record-ink); border-color: var(--error-line); }
+#performanceBar[data-mode="record"] { border-color: var(--error-line); }
+#performanceBar[data-mode="record"] strong { color: var(--error); }
+.performance-active .viewport-heading{pointer-events:none;opacity:.45}
+.performance-active .viewport-heading button{pointer-events:none}
+.performance-timing { display: flex; align-items: center; gap: 6px; font-size: 11px; white-space: nowrap; }
+.performance-timing select { padding: 5px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--paper); color: var(--ink); font: inherit; }
+#performanceBar #performanceMotionState { display: inline-flex; align-items: center; gap: 5px; }
+#performanceBar.waiting-for-motion { border-color: var(--warning-line); }
+#performanceBar.waiting-for-motion strong, #performanceBar.waiting-for-motion #performanceMotionState { color: var(--warning); }

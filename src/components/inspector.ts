@@ -1,3 +1,4 @@
+import { icon } from '../icons';
 import { componentAddReason, componentsSchema, componentScripts, movement, pivotOffset, followPath, type ObjectComponent } from './model';
 import type { SceneObject } from '../types';
 import './inspector.css';
@@ -7,9 +8,9 @@ type ComponentOwner = Pick<SceneObject, 'kind' | 'components'>;
 const esc=(s:string)=>s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
 
 function componentPicker(components: ObjectComponent[], locked: boolean, scripts:ScriptDefinition[]=[], preview=false): string {
-  return `<button class="add-motion component-add-button" data-component-picker-open aria-haspopup="dialog" aria-expanded="false" ${locked ? 'disabled' : ''}>＋ Add Component</button>
+  return `<button class="add-motion component-add-button" data-component-picker-open aria-haspopup="dialog" aria-expanded="false" ${locked ? 'disabled' : ''}>${icon('plus')} Add Component</button>
     <div class="component-picker" data-component-picker popover="auto" role="dialog" aria-label="Add Component">
-      <header><strong>Add Component</strong><button data-component-picker-close aria-label="Close component picker">×</button></header>
+      <header><strong>Add Component</strong><button data-component-picker-close aria-label="Close component picker">${icon('close')}</button></header>
       <input type="search" data-component-search aria-label="Search components" placeholder="Search components…" autocomplete="off"/>
       <div class="component-options">${Object.entries(componentScripts).filter(([,script]) => script.addable !== false).map(([type, script]) => { const reason = componentAddReason(components, type as ObjectComponent['type']); return `<button class="component-option" data-component-add="${type}" ${reason || locked ? 'disabled' : ''}><span><strong>${script.title}</strong>${reason === 'Added' ? '<small class="component-added">Added</small>' : ''}</span><small>${reason && reason !== 'Added' ? reason : script.description}</small></button>`; }).join('')}</div>
       ${preview?'':`<div class="component-options">${scripts.map(script=>{const reason=componentAddReason(components,'script');return `<button class="component-option" data-script-attach="${esc(script.id)}" ${locked||reason?'disabled':''}><span><strong>${esc(script.name)}</strong></span><small>${reason||'Project script · revision '+script.revision}</small></button>`;}).join('')}<button class="component-option" data-script-manage ${locked?'disabled':''}><strong>Project Scripts…</strong><small>Create or edit a reusable controller</small></button></div>`}
@@ -29,9 +30,9 @@ export function componentInspector(item: ComponentOwner, locked: boolean, contro
           :`<input type="number" data-script-param="${esc(field.key)}" min="${field.min}" max="${field.max}" step="${field.step}" value="${component.parameters[field.key]??field.default}" ${fieldsDisabled}/>`;
         return `<label>${esc(field.label)}${input}</label>`;
       }).join('')??'';
-      return `<details class="control-component" data-component-card="script" open><summary>
+      return `<details class="control-component" data-component-card="script" open><summary>${icon('chevron-right', {class:'ui-icon component-chevron'})}
         <input type="checkbox" aria-label="Enable script controller" data-component-enabled ${component.enabled?'checked':''} ${structureDisabled}/>
-        <span>${esc(script?.name??'Missing Script')}</span><button data-component-remove ${structureDisabled} aria-label="Remove script controller">×</button></summary>
+        <span>${esc(script?.name??'Missing Script')}</span><button data-component-remove ${structureDisabled} aria-label="Remove script controller">${icon('close')}</button></summary>
         <div class="component-fields script-parameters"><button class="primary-button" data-component-action="control" ${!script||!component.enabled||follows||fieldsDisabled?'disabled':''}>${controlling?'Stop Control · Keep Position':'Start Control'}</button>
         ${fields}<small>${esc(script?.controls??'Choose an existing project script.')}</small>
         <small>${follows?'Disable Follow Path before using controls.':'Revision '+(script?.revision??'?')+' · Control parameters are not keyframed.'}</small>
@@ -43,7 +44,7 @@ export function componentInspector(item: ComponentOwner, locked: boolean, contro
       if (field.options) return `<label>${field.label}<select aria-label="${field.label}" data-component-field="${field.key}" ${disabled}>${Object.entries(field.options).map(([value,label]) => `<option value="${value}" ${values[field.key] === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>`;
       return `<label class="component-number">${field.label}<span><input type="number" aria-label="${field.label}" data-component-field="${field.key}" min="${field.min}" max="${field.max}" step="${field.step}" value="${values[field.key]}" ${disabled}/><small>${field.unit}</small></span></label>`;
     }).join('');
-    return `<details class="control-component" data-component-card="${component.type}" open><summary><input type="checkbox" aria-label="Enable ${script.title}" data-component-enabled ${component.enabled ? 'checked' : ''} ${disabled}/><span>${script.title}</span><button data-component-remove aria-label="Remove ${script.title}" ${disabled}>×</button></summary><div class="component-fields">${script.actions.map(action => `<button class="primary-button" data-component-action="${action.id}" ${!component.enabled || (locked && !controlling) || follows ? 'disabled' : ''}>${controlling ? (preview ? 'Stop Preview' : 'Stop Control · Keep Position') : (preview ? 'Preview Controls' : action.label)}</button>`).join('')}${fields}<p>${follows && (component.type === 'movement' || component.type === 'hinge') ? 'Disable Follow Path to use keyboard control.' : script.help(component)}</p>${component.type === 'movement' && !preview ? '<small>Camera stays fixed · Blue arrow shows forward</small>' : ''}</div></details>`;
+    return `<details class="control-component" data-component-card="${component.type}" open><summary>${icon('chevron-right', {class:'ui-icon component-chevron'})}<input type="checkbox" aria-label="Enable ${script.title}" data-component-enabled ${component.enabled ? 'checked' : ''} ${disabled}/><span>${script.title}</span><button data-component-remove aria-label="Remove ${script.title}" ${disabled}>${icon('close')}</button></summary><div class="component-fields">${script.actions.map(action => `<button class="primary-button" data-component-action="${action.id}" ${!component.enabled || (locked && !controlling) || follows ? 'disabled' : ''}>${controlling ? (preview ? 'Stop Preview' : 'Stop Control · Keep Position') : (preview ? 'Preview Controls' : action.label)}</button>`).join('')}${fields}<p>${follows && (component.type === 'movement' || component.type === 'hinge') ? 'Disable Follow Path to use keyboard control.' : script.help(component)}</p>${component.type === 'movement' && !preview ? '<small>Camera stays fixed · Blue arrow shows forward</small>' : ''}</div></details>`;
   }).join('');
   return `<section class="inspector-section component-section"><div class="section-label">${preview ? 'DEFAULT COMPONENTS' : 'COMPONENTS'} <span>${components.length || ''}</span></div>${cards}${componentPicker(components, locked,scripts,preview)}</section>`;
 }

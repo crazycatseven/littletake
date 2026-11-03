@@ -105,6 +105,7 @@ export class Stage {
   private readonly removeListeners: Array<() => void> = [];
   private readonly resizeObserver: ResizeObserver;
   private resizePending = true;
+  private previewVisible = false;
   private viewportResize: { width: number; height: number; renderHeight: number } | null = null;
   private readonly sun: THREE.DirectionalLight;
   private readonly ambient = new THREE.HemisphereLight('#f6f5ee', '#c6c2b9', 2.1);
@@ -130,6 +131,9 @@ export class Stage {
   private pointerStart: PointerStart | null = null;
   private flyPointer: number | null = null;
   private flySpeed = 3.5;
+  private pilotCameraId: string | null = null;
+  private pilotReview = false;
+  private editorView: { orthographic: boolean; position: THREE.Vector3; rotation: THREE.Quaternion; target: THREE.Vector3; fov: number; zoom: number } | null = null;
   private sketch: { pointerId: number | null; points: THREE.Vector3[]; line: THREE.Line; done: (points: Vec3[]) => void; cancel: () => void; keydown: (event: KeyboardEvent) => void } | null = null;
   private lastPointer = new THREE.Vector2();
   private xrControls?: XRControls;
@@ -353,7 +357,7 @@ export class Stage {
     }
     const shot = doc.shots.find(item => item.id === shotId);
     const selectedCamera = doc.cameras.find(item => item.id === selectedId);
-    const preview = doc.cameras.find(item => item.id === shot?.cameraId) ?? selectedCamera ?? doc.cameras[0];
+    const preview = doc.cameras.find(item => item.id === this.pilotCameraId) ?? doc.cameras.find(item => item.id === shot?.cameraId) ?? selectedCamera ?? doc.cameras[0];
     const camera = selectedCamera ?? preview;
     this.iconCameraId = camera?.id ?? null; this.previewCameraId = preview?.id ?? null;
     this.cameraIcon.visible = !!camera; this.cameraIcon.userData.entityId = camera?.id ?? '';
@@ -363,6 +367,11 @@ export class Stage {
       else this.applyWorldMatrix(this.shotCamera, world.get(preview.id)!, false);
       const fov = evaluateFov(preview, time);
       if (this.shotCamera.fov !== fov) { this.shotCamera.fov = fov; this.shotCamera.updateProjectionMatrix(); }
+      if(this.pilotCameraId){
+        this.applyWorldMatrix(this.editorCamera,world.get(preview.id)!,false);
+        this.editorCamera.matrixAutoUpdate=true;
+        this.perspectiveCamera.fov=fov;this.perspectiveCamera.updateProjectionMatrix();this.keepFlyTarget();
+      }
     }
     this.previewRenderer.domElement.hidden = !preview;
     const validSelectedId = selectedId && (selectedId === this.iconCameraId || this.views.has(selectedId)) ? selectedId : null;
@@ -453,8 +462,24 @@ export class Stage {
 
   setControlled(value: {id:string;pose:Transform;world?:boolean;joints?:Record<string,number>}|null): void {
     if(!!value!==!!this.controlled)this.clearNavigation();
-    this.controlled=value;this.orbit.enabled=!value&&!this.presentingXR;this.forwardArrow.visible=!!value;
-    if(value){this.forwardArrow.position.fromArray(value.pose.position).add(new THREE.Vector3(0,.07,0));const direction=new THREE.Vector3(0,0,1);if(!value.world)direction.applyEuler(new THREE.Euler(...value.pose.rotation.map(THREE.MathUtils.degToRad) as [number,number,number],'XYZ'));direction.y=0;this.forwardArrow.setDirection(direction.normalize());}
+    this.controlled=value;this.orbit.enabled=!value&&!this.pilotCameraId&&!this.presentingXR;this.forwardArrow.visible=!!value&&!this.pilotCameraId;
+    if(value&&!this.pilotCameraId){this.forwardArrow.position.fromArray(value.pose.position).add(new THREE.Vector3(0,.07,0));const direction=new THREE.Vector3(0,0,1);if(!value.world)direction.applyEuler(new THREE.Euler(...value.pose.rotation.map(THREE.MathUtils.degToRad) as [number,number,number],'XYZ'));direction.y=0;this.forwardArrow.setDirection(direction.normalize());}
+  }
+  setCameraPilot(id:string|null,review=false):void {
+    if(id!==this.pilotCameraId){
+      this.clearNavigation();this.viewTween=null;
+      if(id){
+        this.editorView={orthographic:this.editorCamera===this.orthographicCamera,position:this.editorCamera.position.clone(),rotation:this.editorCamera.quaternion.clone(),target:this.orbit.target.clone(),fov:this.perspectiveCamera.fov,zoom:this.orthographicCamera.zoom};
+        this.setProjection(false);
+      }else if(this.editorView){
+        const view=this.editorView;this.setProjection(view.orthographic);
+        this.editorCamera.position.copy(view.position);this.editorCamera.quaternion.copy(view.rotation);this.orbit.target.copy(view.target);
+        this.perspectiveCamera.fov=view.fov;this.orthographicCamera.zoom=view.zoom;this.editorCamera.updateProjectionMatrix();this.orbit.update();this.editorView=null;
+      }
+      this.pilotCameraId=id;
+    }
+    if(review&&!this.pilotReview)this.clearNavigation();
+    this.pilotReview=review;this.orbit.enabled=!id&&!this.controlled&&!this.dragging;
   }
   focusCanvas():void {this.renderer.domElement.focus({preventScroll:true});}
   placement(asset:AssetDefinition,clientX?:number,clientY?:number): Transform|null {
@@ -826,7 +851,7 @@ export class Stage {
     } else if (this.gizmo.object !== selected) {
       this.gizmo.attach(selected);
     }
-    this.gizmo.enabled = !!selected && !this.playing && this.flyPointer === null && !this.pointerStart?.orbit && !this.pointerStart?.box;
+    this.gizmo.enabled = !!selected && !this.controlled && !this.pilotCameraId && !this.playing && this.flyPointer === null && !this.pointerStart?.orbit && !this.pointerStart?.box;
   }
 
   private syncAxis(): void {
@@ -997,8 +1022,8 @@ export class Stage {
   private onPointerDown = (event: PointerEvent): void => {
     if (this.presentingXR) return;
     if (this.sketchPointer(event, 'down')) return;
-    if(this.pathEditor.down(event))return;
-    if(this.controlled){event.preventDefault();event.stopImmediatePropagation();this.focusCanvas();return;}
+    if(!this.pilotCameraId&&this.pathEditor.down(event))return;
+    if(this.controlled&&(!this.pilotCameraId||this.pilotReview||event.button!==2)){event.preventDefault();event.stopImmediatePropagation();this.focusCanvas();return;}
     if (event.pointerType === 'touch' && !event.isPrimary) return;
     this.renderer.domElement.focus({ preventScroll: true });
     this.viewTween = null;
@@ -1118,7 +1143,7 @@ export class Stage {
   private onKeyDown = (event: KeyboardEvent): void => {
     if(event.key==='Escape'&&this.pathEditor.gesturing){event.preventDefault();event.stopImmediatePropagation();this.pathEditor.finish(true);return;}
     if (this.presentingXR) return;
-    if(this.controlled)return;
+    if(this.controlled&&(!this.pilotCameraId||this.pilotReview))return;
     if (document.activeElement !== this.renderer.domElement || this.isTextInput(event.target)) return;
     const key = event.code.startsWith('Key') ? event.code.slice(3).toLowerCase() : event.key.toLowerCase();
     if (this.flyPointer !== null && ['w', 'a', 's', 'd', 'q', 'e', 'shift'].includes(key)) {
@@ -1126,7 +1151,7 @@ export class Stage {
       if (key === 'shift' && !event.repeat) this.updateFlyStatus();
       event.preventDefault();
       event.stopPropagation();
-    } else if (key === 'f' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    } else if (key === 'f' && !this.pilotCameraId && !event.ctrlKey && !event.metaKey && !event.altKey) {
       event.preventDefault();
       event.stopPropagation();
       this.focusSelection();
@@ -1157,7 +1182,7 @@ export class Stage {
 
   private updateFlyStatus(): void {
     const speed = this.flySpeed * (this.keys.has('shift') ? 12 / 3.5 : 1);
-    this.options.onStatus(`Fly · ${speed.toFixed(1)} m/s · WASD move · Q / E down / up · Scroll speed · Shift boost · Release right mouse to finish`);
+    this.options.onStatus(`${this.pilotCameraId?'Pilot camera':'Fly'} · ${speed.toFixed(1)} m/s · WASD move · Q / E down / up · Scroll speed · Shift boost${this.pilotCameraId?' · R record / stop':' · Release right mouse to finish'}`);
   }
 
   private clearNavigation(): void {
@@ -1167,12 +1192,12 @@ export class Stage {
     if (pointer !== null && this.renderer.domElement.hasPointerCapture(pointer)) {
       this.renderer.domElement.releasePointerCapture(pointer);
     }
-    this.orbit.enabled = !this.dragging;
-    this.gizmo.enabled = !!this.selectedId && !this.playing && !this.pointerStart?.orbit;
+    this.orbit.enabled = !this.dragging && !this.controlled && !this.pilotCameraId;
+    this.gizmo.enabled = !!this.selectedId && !this.controlled && !this.pilotCameraId && !this.playing && !this.pointerStart?.orbit;
     if (pointer !== null) {
       this.gizmo.axis = null;
       this.orbit.update();
-      this.options.onStatus(NAV_HINT);
+      this.options.onStatus(this.pilotCameraId?'Pilot camera · Hold right mouse + WASD · R record / stop · Esc to finish':NAV_HINT);
     }
   }
 
@@ -1240,8 +1265,9 @@ export class Stage {
       this.perspectiveCamera.clearViewOffset();
       this.orthographicCamera.clearViewOffset();
     }
-    const hostWidth = Math.max(1, preview.clientWidth);
-    const hostHeight = preview.clientHeight || hostWidth * 9 / 16;
+    const hostWidth = preview.clientWidth, hostHeight = preview.clientHeight;
+    this.previewVisible = hostWidth > 0 && hostHeight > 0;
+    if (!this.previewVisible) return;
     const previewWidth = Math.max(1, Math.min(hostWidth, hostHeight * 16 / 9));
     const previewHeight = previewWidth * 9 / 16;
     this.previewRenderer.getSize(size);
@@ -1254,8 +1280,8 @@ export class Stage {
   private render = (time: number, frame?: XRFrame): void => {
     if (this.disposed) return;
     this.pathEditor.flush();
-    this.options.onFrame?.(time);
     if (this.presentingXR && this.xrControls) {
+      this.options.onFrame?.(time);
       this.xrControls.updateView(frame, time);
       this.xrControls.rig.updateMatrixWorld(true);
       this.renderer.xr.updateCamera(this.xrControls.camera);
@@ -1273,11 +1299,14 @@ export class Stage {
       this.editorCamera.position.lerpVectors(this.viewTween.from, this.viewTween.to, eased); this.orbit.update();
       if (t >= 1) this.viewTween = null;
     } else if (this.flyPointer === null && this.orbit.enabled) this.orbit.update();
+    // Sample a piloted camera after navigation, then update the scene at that same time.
+    this.options.onFrame?.(time);
     if (this.dragEntityId !== null && this.dragEntityId === this.iconCameraId) this.copyIconToShot();
     this.syncSelectionMarker();
     this.pathEditor.render();
     this.navigation.update(this.editorCamera, this.editorCamera === this.orthographicCamera, !this.controlled && !this.dragging);
-    if (this.presentingXR) this.renderer.render(this.scene, this.editorCamera);
+    if(this.pilotCameraId)this.renderPilotView();
+    else if (this.presentingXR) this.renderer.render(this.scene, this.editorCamera);
     else {
       // Editor chrome has its own ground/background. Restore the scene's
       // environment before preview, snapshots and exports can use it.
@@ -1293,8 +1322,19 @@ export class Stage {
         this.groundMaterial.color = ground;
       }
     }
-    renderCameraFrame(this.previewRenderer,this.scene,this.shotCamera,this.currentDoc?.cameras.find(camera=>camera.id===this.previewCameraId)?.frameBounds);
+    if (this.previewVisible) renderCameraFrame(this.previewRenderer,this.scene,this.shotCamera,this.currentDoc?.cameras.find(camera=>camera.id===this.previewCameraId)?.frameBounds);
   };
+
+  private renderPilotView():void {
+    const size=this.renderer.getSize(new THREE.Vector2()),visibleHeight=this.viewportResize?.height??size.y,width=Math.min(size.x,visibleHeight*16/9),height=width*9/16,x=(size.x-width)/2,top=(visibleHeight-height)/2,y=size.y-top-height;
+    const viewport=this.renderer.getViewport(new THREE.Vector4()),scissor=this.renderer.getScissor(new THREE.Vector4()),test=this.renderer.getScissorTest(),color=this.renderer.getClearColor(new THREE.Color()),alpha=this.renderer.getClearAlpha();
+    const bounds=this.currentDoc?.cameras.find(camera=>camera.id===this.pilotCameraId)?.frameBounds??[0,0,1,1];
+    try{
+      this.renderer.setScissorTest(false);this.renderer.setClearColor(0,1);this.renderer.clear();
+      this.renderer.setViewport(x,y,width,height);this.renderer.setScissor(x,y,width,height);this.renderer.setScissorTest(true);
+      renderCameraFrame(this.renderer,this.scene,this.shotCamera,[(x+bounds[0]*width)/size.x,(top+bounds[1]*height)/size.y,(x+bounds[2]*width)/size.x,(top+bounds[3]*height)/size.y]);
+    }finally{this.renderer.setViewport(viewport);this.renderer.setScissor(scissor);this.renderer.setScissorTest(test);this.renderer.setClearColor(color,alpha);}
+  }
 
   private listen(target: EventTarget, type: string, listener: EventListener, options?: boolean | AddEventListenerOptions): void {
     target.addEventListener(type, listener, options);

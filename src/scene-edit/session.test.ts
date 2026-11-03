@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { serializeContent } from '../project/model.ts';
 import { cloneDocument, createDocument, serializeDocument } from '../model.ts';
-import { createConversations, conversationHistory, conversationsSchema } from './conversations.ts';
+import { createConversations, conversationHistory, conversationsSchema, newConversation } from './conversations.ts';
 import { EditorSelection } from '../placement/selection.ts';
 import { ConversationSession } from './session.ts';
 import type { SceneDocument } from '../types.ts';
@@ -33,6 +33,7 @@ function harness() {
     request: (input, signal) => { const deferred = pending<SceneEditResponse>(); requests.push({ input: structuredClone(input), signal, deferred }); return deferred.promise; },
   });
   return { session, requests, get scene() { return scene; }, get preview() { return preview; }, get saves() { return saves; },
+    acknowledgeRevision(next:number){const previous=revision;revision=next;session.receiveRevision(previous,next);},
     manualEdit() { scene.objects[1].color = '#ff0000'; revision++; session.sceneChanged(); } };
 }
 
@@ -40,8 +41,13 @@ test('conversation workflow keeps drafts, role history and the shared current sc
   const h = harness(), s = h.session, first = s.active.id, original = serializeDocument(h.scene);
   s.setDraft('Remember: the sculpture is the focus.'); const one = s.send();
   assert.equal(s.active.messages[0].role === 'user' && s.active.messages[0].status, 'pending');
+  const liveBook=structuredClone(s.book),peer=newConversation();peer.title='Peer camera notes';liveBook.threads.push(peer);
+  s.receiveBook(liveBook);h.acknowledgeRevision(2);
+  assert.equal(s.busy,true);assert.equal(h.requests[0].signal.aborted,false,'remote chat and own save acknowledgement do not cancel Muse');
   assert.deepEqual(h.requests[0].input.history, []); h.requests[0].deferred.resolve(ready()); await one;
   assert.equal(serializeDocument(h.scene), original); assert.equal(s.active.messages.length, 2);
+  assert.equal(s.active.messages[0].role==='user'&&s.active.messages[0].status,'answered','the request retains the live message reference');
+  assert.ok(s.book.threads.some(thread=>thread.id===peer.id));
   s.setDraft('My unfinished first-conversation draft.'); s.create(); const second = s.active.id;
   assert.notEqual(first, second); assert.equal(s.active.messages.length, 0);
   s.setDraft('Move the plinth right by half a metre.'); const two = s.send();

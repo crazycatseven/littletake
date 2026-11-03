@@ -40,6 +40,25 @@ export class ConversationSession {
     this.cancel(); this.clearPreview(); this.evidence = []; this.evidenceMessageId = null;
     this.book.activeId = book.activeId; this.book.threads = book.threads; this.emit();
   }
+  receiveBook(book: ConversationBook) {
+    // Preserve references held by this page's in-flight Muse request.
+    this.book.threads = book.threads.map(incoming => {
+      const thread = this.book.threads.find(item => item.id === incoming.id);
+      if (!thread) return structuredClone(incoming);
+      const messages = incoming.messages.map(message => {
+        const existing = thread.messages.find(item => item.id === message.id);
+        if(existing)for(const key of Object.keys(existing))if(!Object.hasOwn(message,key))delete (existing as unknown as Record<string,unknown>)[key];
+        return existing ? Object.assign(existing, message) : structuredClone(message);
+      });
+      Object.assign(thread, incoming, { messages }); return thread;
+    });
+    this.book.activeId = book.activeId;
+  }
+  receiveRevision(before: number, after: number) {
+    if (this.run?.revision === before) this.run.revision = after;
+    for (const thread of this.book.threads) for (const message of thread.messages)
+      if (message.role === 'assistant' && message.edit?.status === 'pending' && message.edit.revision === before) message.edit.revision = after;
+  }
   private clearPreview() { this.preview = null; this.options.preview(null); }
   setDraft(text: string) { this.active.draft = text.slice(0, 2000); this.emit(); }
   create() {
@@ -175,7 +194,7 @@ export class ConversationSession {
       const reply: AssistantMessage = { id: newId(), role: 'assistant', text: response.plan.summary, model: response.model };
       if (response.plan.operations.length) {
         applyProjectOperations(project, response.plan.operations, context.time);
-        reply.edit = { operations: response.plan.operations, time: context.time, revision: context.revision, sceneId: context.sceneId, shotId: context.shotId, status: 'pending' };
+        reply.edit = { operations: response.plan.operations, time: context.time, revision: run.revision, sceneId: context.sceneId, shotId: context.shotId, status: 'pending' };
       }
       message.status = 'answered'; thread.messages.push(reply); this.evidenceMessageId = reply.id;
       this.run = null; this.activity = '';

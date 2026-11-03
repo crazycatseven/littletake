@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { builtinAssets, instantiateAsset, saveObjectAsset } from '../assets/library';
-import { createEmptyScene, createCamera, createShot, evaluateTransform, History } from '../model';
+import { createEmptyScene, createCamera, createShot, createObject, evaluateTransform, History } from '../model';
 import { ProjectStorage, createProject, parseProject, serializeProject } from '../project/storage';
 import { projectContent, validateProjectContent } from '../project/model';
 import { applyProjectOperations } from '../scene-edit/operations';
 import { PerformanceSession } from './session';
 import { trackPoses } from './motion';
+import { emptyAnimation, keepRecordedTake, propertyPaths, putKey } from '../animation/model';
+import { transformMatrix, worldTransform } from '../placement/hierarchy';
+import type { Transform } from '../types';
+import { movement } from '../components/model';
 
 test('asset instances, full recorded paths, discard, placement, undo and project reopen stay independent across scenes and shots',()=>{
   const scene=createEmptyScene(),asset=builtinAssets.find(a=>a.id==='builtin-car')!;
@@ -36,4 +40,94 @@ test('asset instances, full recorded paths, discard, placement, undo and project
   assert.deepEqual(history.undo()!.scenes.length,1);assert.deepEqual(history.redo(),projectContent(project));
   const damaged=structuredClone(project);damaged.scenes[0].objects[0].track!.samples![1].at=damaged.scenes[0].objects[0].track!.samples![0].at;assert.throws(()=>parseProject(JSON.stringify(damaged)),/time order/);
   damaged.assets=[];assert.throws(()=>parseProject(JSON.stringify(damaged)),/Missing|time order/);
+});
+
+test('recording clocks retain real pauses or compress idle time, including camera-only turns and scaled moving parents',()=>{
+  const scene=createEmptyScene('motion-clock');scene.duration=6;
+  const parent=createObject('cube',1),camera=createCamera('motion-camera');
+  parent.transform={position:[0,0,0],rotation:[0,0,0],scale:[2,2,2]};parent.animation=emptyAnimation();
+  putKey(parent.animation,'position.x',0,0);putKey(parent.animation,'position.x',6,6);
+  camera.parentId=parent.id;camera.transform={position:[0,2,5],rotation:[-10,0,0],scale:[1,1,1]};
+  scene.objects=[parent];scene.cameras=[camera];scene.shots=[createShot(camera,'motion-shot',2)];
+  const project=createProject(scene),base=structuredClone(projectContent(project)),cursor=worldTransform(scene,camera.id,0);cursor.scale=[1,1,1];
+  const live=new PerformanceSession(camera,0,scene);live.start(2);
+  for(let i=0;i<60;i++)live.update(1/60,2,cursor);
+  assert.ok(Math.abs(live.time-1)<1e-8,'real-time recording retains a second spent stationary');live.stop();assert.equal(live.mode,'review');
+  const motion=new PerformanceSession(camera,0,scene);motion.clock='motion';motion.start(2);
+  motion.clock='realtime';
+  for(let i=0;i<300;i++)motion.update(1/60,2,cursor);
+  assert.equal(motion.time,0,'the take pins its chosen timing mode and ignores parent scale or animation when idle');assert.equal(motion.advancing,false);
+  motion.keys.add('w');for(let i=0;i<10;i++)motion.update(1/60,2,cursor);motion.keys.clear();assert.equal(motion.time,0,'pressing a key alone is not camera motion');
+  for(let i=0;i<10;i++){cursor.rotation[1]+=1;motion.update(1/60,2,cursor);}
+  assert.ok(motion.time>.1,'turning without translation advances the scene clock');
+  const turned=motion.time;
+  for(let i=0;i<100;i++)motion.update(1/60,2,cursor);
+  assert.equal(motion.time,turned,'thinking pauses do not create extra samples');motion.stop();motion.discard();
+  assert.deepEqual(projectContent(project),base,'discarding a compressed take leaves the project untouched');
+  motion.clock='motion';motion.start(2);Object.assign(cursor,worldTransform(scene,camera.id,0));cursor.scale=[1,1,1];
+  for(let i=0;i<60;i++){cursor.position[2]=10-Math.min(2,motion.time+1/60);motion.update(1/60,2,cursor);}
+  const firstLeg=motion.time;
+  for(let i=0;i<300;i++)motion.update(1/60,2,cursor);
+  assert.equal(motion.time,firstLeg);
+  for(let i=0;i<65&&motion.mode==='record';i++){cursor.position[2]=10-Math.min(2,motion.time+1/60);motion.update(1/60,2,cursor);}
+  assert.equal(motion.mode,'review');assert.equal(motion.time,2);assert.equal(motion.draft!.duration,2,'two seconds of motion plus five seconds idle produces a two-second take');
+  const frames=motion.recordedFrames;assert.ok(frames.length<125,'idle updates do not add dense duplicate keys');
+  camera.animation=keepRecordedTake(emptyAnimation(),'motion-take',frames,scene.duration,{recordScale:false});
+  assert.deepEqual(projectContent(parseProject(serializeProject(project))),JSON.parse(JSON.stringify(projectContent(project))));
+  assert.deepEqual(scene.objects,base.scenes[0].objects);live.dispose();motion.dispose();
+  const walker=createObject('human',2);walker.components=[movement()];scene.objects.push(walker);
+  const acting=new PerformanceSession(walker,0,scene);acting.clock='motion';acting.start(2);
+  for(let i=0;i<60;i++)acting.update(1/60,2);assert.equal(acting.time,0);
+  acting.keys.add('d');for(let i=0;i<30;i++)acting.update(1/60,2);acting.keys.clear();
+  assert.ok(Math.abs(acting.time-.5)<1e-8,'turning a WASD actor counts as motion');
+  const actorTurn=acting.time;for(let i=0;i<60;i++)acting.update(1/60,2);assert.equal(acting.time,actorTurn);
+  acting.keys.add('w');for(let i=0;i<30;i++)acting.update(1/60,2);acting.stop();
+  assert.equal(acting.mode,'review');assert.ok(Math.abs(acting.draft!.duration-1)<1e-8);acting.dispose();
+});
+
+test('piloted camera takes preserve parents, other animation, lens keys, discarded work, undo and reopened projects',()=>{
+  const scene=createEmptyScene('camera-pilot');scene.duration=6;
+  const rig=createObject('cube',1),actor=createObject('human',2),camera=createCamera('piloted-camera'),other=createCamera('other-camera');
+  rig.transform={position:[3,0,1],rotation:[0,0,0],scale:[1,1,1]};rig.animation=emptyAnimation();
+  putKey(rig.animation,'position.x',0,3);putKey(rig.animation,'position.x',6,6);
+  putKey(rig.animation,'rotation.y',0,0,[0,0,0]);putKey(rig.animation,'rotation.y',6,90,[0,90,0]);
+  actor.animation=emptyAnimation();putKey(actor.animation,'position.z',0,0);putKey(actor.animation,'position.z',6,6);
+  camera.parentId=rig.id;camera.transform={position:[2,1,0],rotation:[0,0,0],scale:[1,1,1]};camera.frameBounds=[.05,.1,.95,.9];camera.animation=emptyAnimation();
+  for(const time of [0,1,5,6])for(const group of ['position','rotation'] as const)for(const [index,path] of propertyPaths(group).entries())putKey(camera.animation,path,time,group==='position'?camera.transform.position[index]+(index===0?time*.1:0):0,group==='rotation'?[0,0,0]:undefined);
+  putKey(camera.animation,'fov',0,35);putKey(camera.animation,'fov',3,60);putKey(camera.animation,'fov',6,45);
+  scene.objects=[rig,actor];scene.cameras=[camera,other];
+  scene.shots=[{...createShot(camera,'pilot-shot',2),start:2},createShot(camera,'same-camera-shot',1),createShot(other,'other-shot',1)];
+  const project=createProject(scene),base=structuredClone(projectContent(project)),history=new History(base);
+  const session=new PerformanceSession(camera,2,scene);assert.equal(session.isCamera,true);
+  const worldAt=(time:number,offset=0):Transform=>({position:[offset+time*.7,3+time*.2,8-time*.5],rotation:[-8,165+time*5,2],scale:[1,1,1]});
+  session.update(0,4,worldAt(2));
+  assert.deepEqual(projectContent(project),base,'piloting is a private draft');
+  session.start(4,2);
+  for(let i=0;i<65&&session.mode==='record';i++)session.update(1/30,4,worldAt(Math.min(4,session.time+1/30)));
+  assert.equal(session.mode,'review');assert.equal(session.time,4);assert.ok(session.recordedFrames.length>50);
+  const reviewed=session.preview(3);session.update(.5,4,worldAt(4,100));assert.deepEqual(session.preview(3),reviewed,'review cannot be steered');
+  session.discard();assert.equal(session.mode,'control');assert.equal(session.time,2);assert.deepEqual(projectContent(project),base,'discard never writes the camera');
+  session.start(4,2);
+  for(let i=0;i<30;i++)session.update(1/30,4,worldAt(session.time+1/30,2));
+  session.stop();const frames=session.recordedFrames;
+  assert.ok(frames.length>20);assert.equal(frames[0].time,2);assert.ok(Math.abs(frames.at(-1)!.time-3)<1e-8);
+  camera.animation=keepRecordedTake(camera.animation!,'camera-take',frames,scene.duration,{recordScale:false});camera.track=null;
+  history.commit(projectContent(project));
+  for(const frame of frames){
+    const actual=transformMatrix(worldTransform(scene,camera.id,frame.time)),expected=transformMatrix(frame.time===2?worldAt(2):worldAt(frame.time,2));
+    assert.ok(actual.elements.every((value,index)=>Math.abs(value-expected.elements[index])<1e-6),'parented camera preserves the flown world pose');
+  }
+  assert.deepEqual(camera.animation.curves.fov,base.scenes[0].cameras[0].animation!.curves.fov,'lens animation is retained');
+  for(const path of [...propertyPaths('position'),...propertyPaths('rotation')])assert.deepEqual(camera.animation.curves[path]!.filter(key=>key.time<2||key.time>3+1e-8),base.scenes[0].cameras[0].animation!.curves[path]);
+  assert.ok(!Object.keys(camera.animation.curves).some(path=>path.startsWith('scale.')));
+  assert.deepEqual(camera.frameBounds,base.scenes[0].cameras[0].frameBounds);
+  assert.deepEqual(scene.objects,base.scenes[0].objects);assert.deepEqual(other,base.scenes[0].cameras[1]);assert.deepEqual(scene.shots,base.scenes[0].shots);
+  const reopened=parseProject(serializeProject(project));assert.deepEqual(projectContent(reopened),JSON.parse(JSON.stringify(projectContent(project))));
+  assert.deepEqual(history.undo(),base);assert.deepEqual(history.redo(),projectContent(project));
+  const accepted=structuredClone(camera),positioning=new PerformanceSession(camera,1,scene);
+  positioning.update(0,4,worldAt(1,4));Object.assign(camera,positioning.placement());
+  assert.deepEqual(camera.animation!.curves.fov,accepted.animation!.curves.fov);
+  assert.deepEqual(camera.animation!.curves['position.x']!.filter(key=>key.time!==1),accepted.animation!.curves['position.x']!.filter(key=>key.time!==1),'keeping a camera pose only changes keys at the current time');
+  assert.deepEqual(projectContent(parseProject(serializeProject(project))),JSON.parse(JSON.stringify(projectContent(project))));
+  session.dispose();positioning.dispose();
 });

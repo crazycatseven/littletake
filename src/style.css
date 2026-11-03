@@ -1,4 +1,6 @@
 @import './studio.css';
+@import './icons/icons.css';
+@import './performance/panel.css';
 
 #referenceDialog { width: min(880px, calc(100vw - 72px)); max-height: calc(100dvh - 64px); overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-dialog); padding: 25px 28px 20px; background: var(--paper); color: var(--ink); box-shadow: none; }
 #referenceDialog::backdrop { background: var(--backdrop); backdrop-filter: none; }

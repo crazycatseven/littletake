@@ -3,6 +3,8 @@ import { mkdirSync, existsSync, readFileSync, writeFileSync, renameSync, unlinkS
 import path from 'node:path';
 import { backup, DatabaseSync } from 'node:sqlite';
 import { parseProject, serializeProject } from '../../src/project/storage.ts';
+import { applyChanges, changesBetween, projectView, sameValue, valueAt, type Change } from '../../src/project/changes.ts';
+import { projectContent } from '../../src/project/model.ts';
 import { EDIT_LEASE_MS, MAX_OUTPUT_BYTES, type ProjectRoom, type ProjectOutput, type ProjectSummary, type ProjectCover } from '../../src/project/room.ts';
 import { coverVisual, validateCover, type CoverAttachment } from '../../src/project/cover.ts';
 import type { HandoffReceipt, VideoManifest } from '../../src/look/handoff.ts';
@@ -24,6 +26,7 @@ function normalizeCode(code: string) { return code.replace(/[-\s]/g, '').toUpper
 /** Shared projects use independent page sessions and versioned, atomic saves. */
 export class ProjectRoomStore {
   readonly db: DatabaseSync;
+  private readonly listeners = new Set<() => void>();
   constructor(private readonly directory: string, private readonly now = Date.now) {
     mkdirSync(directory, { recursive: true });
     this.db = new DatabaseSync(path.join(directory, 'projects.sqlite'));
@@ -46,6 +49,14 @@ export class ProjectRoomStore {
         project_id TEXT NOT NULL REFERENCES projects(id), token TEXT NOT NULL, page TEXT NOT NULL,
         expires_at INTEGER NOT NULL, PRIMARY KEY(project_id,token,page)
       );
+      CREATE TABLE IF NOT EXISTS project_edits (
+        project_id TEXT NOT NULL REFERENCES projects(id), id TEXT NOT NULL,
+        token TEXT NOT NULL, page TEXT NOT NULL, PRIMARY KEY(project_id,id)
+      );
+      CREATE TABLE IF NOT EXISTS project_property_writers (
+        project_id TEXT NOT NULL REFERENCES projects(id), path TEXT NOT NULL, token TEXT NOT NULL,
+        page TEXT NOT NULL, version INTEGER NOT NULL, PRIMARY KEY(project_id,path)
+      );
       CREATE TABLE IF NOT EXISTS ai_calls (project_id TEXT NOT NULL,run_id TEXT NOT NULL,calls INTEGER NOT NULL,PRIMARY KEY(project_id,run_id));
       CREATE TABLE IF NOT EXISTS handoffs (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, token TEXT NOT NULL UNIQUE,
         scene_id TEXT NOT NULL, shot_id TEXT NOT NULL, name TEXT NOT NULL, created_at INTEGER NOT NULL, revoked_at INTEGER, archive BLOB NOT NULL);`);
@@ -63,8 +74,11 @@ export class ProjectRoomStore {
   }
   private transaction<T>(run: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
-    try { const value = run(); this.db.exec('COMMIT'); return value; }
+    let value: T;
+    try { value = run(); this.db.exec('COMMIT'); }
     catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    for (const listener of this.listeners) listener();
+    return value;
   }
   private row(code: string): Row {
     const row = this.db.prepare('SELECT * FROM projects WHERE code=?').get(normalizeCode(code)) as unknown as Row | undefined;
@@ -124,6 +138,23 @@ export class ProjectRoomStore {
     });
   }
   get(code: string, lease?: string, page?: string): ProjectRoom { return this.snapshot(this.row(code), lease, page); }
+  /** Hold the read until a committed change arrives. Reconnecting always reads the latest snapshot. */
+  async changes(code: string, since: number, signal: AbortSignal, lease?: string, page?: string): Promise<ProjectRoom | null> {
+    this.row(code);
+    return new Promise((resolve, reject) => {
+      const finish = (error?: unknown, room: ProjectRoom | null = null) => {
+        clearTimeout(timeout); clearInterval(checkpoint); this.listeners.delete(check); signal.removeEventListener('abort', abort);
+        if (error) reject(error); else resolve(room);
+      };
+      const check = () => { try { const row = this.row(code); if (row.content_version > since) finish(undefined, this.snapshot(row, lease, page)); } catch (error) { finish(error); } };
+      const abort = () => finish(new DOMException('Project connection closed.', 'AbortError'));
+      const timeout = setTimeout(() => finish(), 25000);
+      // Also observe writes from another SQLite connection (maintenance/imports).
+      const checkpoint = setInterval(check, 1000);
+      this.listeners.add(check); signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort(); else check();
+    });
+  }
   getById(id: string, lease?: string, page?: string): ProjectRoom {
     const row = this.db.prepare('SELECT * FROM projects WHERE id=?').get(id) as unknown as Row | undefined;
     if (!row) throw new ProjectRoomError('project_missing', 'This project is not in the workspace.', 404);
@@ -225,11 +256,72 @@ export class ProjectRoomStore {
       if (row.saved_version !== version) throw new ProjectRoomError('save_conflict', 'A newer project is already saved. Your changes have not replaced it.');
       this.db.prepare('UPDATE projects SET document=?,saved_version=saved_version+1,content_version=content_version+1,updated_at=? WHERE id=?')
         .run(document, this.now(), row.id);
+      this.replaceWriters(row.id, lease, page, row.saved_version + 1);
       this.renewSession(row.id, lease, page);
       if (this.coverInfo(row.id)?.savedVersion === row.saved_version && coverVisual(JSON.parse(row.document)) === coverVisual(JSON.parse(document)))
         this.db.prepare('UPDATE project_covers SET saved_version=? WHERE project_id=?').run(row.saved_version + 1, row.id);
       return this.get(code, lease, page);
     });
+  }
+  edit(code: string, lease: string, id: string, changes: Change[], revision: number, page?: string): ProjectRoom {
+    return this.transaction(() => {
+      const row = this.row(code); this.requireEditor(row, lease, page);
+      const receipt = this.db.prepare('SELECT token,page FROM project_edits WHERE project_id=? AND id=?').get(row.id, id);
+      if (receipt) {
+        if (receipt.token !== lease || receipt.page !== (page ?? '')) throw new ProjectRoomError('edit_identity', 'This edit belongs to another page.');
+        return this.snapshot(row, lease, page); // A retried request must not overwrite a later user's edit.
+      }
+      const before = JSON.parse(row.document);
+      const writers = (changes.some(change => change.own) ? this.db.prepare('SELECT path,token,page,version FROM project_property_writers WHERE project_id=?').all(row.id) : [])
+        .map(item => ({ token: String(item.token), page: String(item.page), parts: JSON.parse(String(item.path)) as Change['path'], version: Number(item.version) }));
+      const prefix = (a: Change['path'], b: Change['path']) => a.length <= b.length && a.every((part, i) => sameValue(part, b[i]));
+      const writerPath = (change: Change): Change['path'] => change.order ? [...change.path, '$order'] : change.path;
+      changes = changes.filter(change => {
+        if (!change.own) return true;
+        const target = writerPath(change);
+        const ancestor = writers.filter(writer => prefix(writer.parts, target)).sort((a, b) => b.version - a.version || b.parts.length - a.parts.length)[0];
+        return !!ancestor && ancestor.token === lease && ancestor.page === (page ?? '') && !writers.some(writer =>
+          prefix(target, writer.parts) && writer.version > ancestor.version && (writer.token !== lease || writer.page !== (page ?? '')));
+      });
+      for (const change of changes) {
+        if (!['name', 'scenes', 'assets', 'scripts', 'conversations', 'lookSettings'].includes(String(change.path[0])))
+          throw new ProjectRoomError('invalid_edit', 'This project property cannot be shared.', 400);
+        const last = change.path.at(-1), existing = valueAt(before, change.path);
+        if (typeof last === 'object' && last.key === 'id' && change.before === undefined && change.after !== undefined && existing !== undefined && !change.guard && !sameValue(existing, change.after))
+          throw new ProjectRoomError('edit_conflict', 'An item with this ID was created in another page. Your edit is kept here; save a copy to retain it.');
+      }
+      const build = () => {
+        const next = projectView(applyChanges(before, changes));
+        next.revision = Math.max(before.revision, revision, before.revision + Number(!sameValue(projectContent(before), projectContent(next))));
+        return { next, document: this.document(next) };
+      };
+      let result: ReturnType<typeof build>;
+      try { result = build(); }
+      catch {
+        // An undo whose dependencies were removed remotely is a no-op, not a broken scene.
+        if (changes.some(change => change.own)) changes = changes.filter(change => !change.own);
+        try { result = build(); }
+        catch { throw new ProjectRoomError('edit_conflict', 'This edit conflicts with a scene structure changed in another page. Your changes are kept here; save a copy to retain them.'); }
+      }
+      const { next, document } = result;
+      const written = changesBetween(before, JSON.parse(document));
+      // Equal values can still be the other user's later write (including an A → B → A sequence).
+      written.push(...changes.filter(change => !change.guard && !change.order && change.after !== undefined && sameValue(valueAt(next, change.path), change.after)));
+      if (document !== row.document || written.length) {
+        this.db.prepare('UPDATE projects SET document=?,saved_version=saved_version+1,content_version=content_version+1,updated_at=? WHERE id=?').run(document, this.now(), row.id);
+        if (this.coverInfo(row.id)?.savedVersion === row.saved_version && coverVisual(before) === coverVisual(next))
+          this.db.prepare('UPDATE project_covers SET saved_version=? WHERE project_id=?').run(row.saved_version + 1, row.id);
+        const write = this.db.prepare('INSERT INTO project_property_writers VALUES(?,?,?,?,?) ON CONFLICT(project_id,path) DO UPDATE SET token=excluded.token,page=excluded.page,version=excluded.version');
+        for (const change of written) write.run(row.id, JSON.stringify(writerPath(change)), lease, page ?? '', row.saved_version + 1);
+      }
+      this.db.prepare('INSERT INTO project_edits VALUES(?,?,?,?)').run(row.id, id, lease, page ?? '');
+      this.renewSession(row.id, lease, page);
+      return this.get(code, lease, page);
+    });
+  }
+  private replaceWriters(id: string, lease: string, page: string | undefined, version: number) {
+    this.db.prepare('DELETE FROM project_property_writers WHERE project_id=?').run(id);
+    this.db.prepare('INSERT INTO project_property_writers VALUES(?,?,?,?,?)').run(id, '[]', lease, page ?? '', version);
   }
   private outputs(projectId: string): ProjectOutput[] {
     return this.db.prepare('SELECT id,kind,scene_id AS sceneId,shot_id AS shotId,name,mime,updated_at AS updatedAt FROM outputs WHERE project_id=? ORDER BY updated_at DESC').all(projectId) as unknown as ProjectOutput[];
@@ -267,6 +359,7 @@ export class ProjectRoomStore {
     const document = this.document(bundle.project);
     for (const item of bundle.outputs) if (item.data.byteLength > MAX_OUTPUT_BYTES) throw new ProjectRoomError('output_too_large', 'This result is larger than 64 MB.', 413);
     this.db.prepare('UPDATE projects SET document=?,saved_version=saved_version+1,content_version=content_version+1,updated_at=? WHERE id=?').run(document, this.now(), row.id);
+    this.replaceWriters(row.id, '', undefined, row.saved_version + 1);
     this.db.prepare('DELETE FROM outputs WHERE project_id=?').run(row.id);
     for (const { output, data } of bundle.outputs) this.db.prepare('INSERT INTO outputs VALUES(?,?,?,?,?,?,?,?,?)').run(row.id, output.id, output.kind, output.sceneId, output.shotId, output.name, output.mime, output.updatedAt, data);
     if (bundle.cover) this.writeCover(row.id, bundle.cover.current ? row.saved_version + 1 : 0, bundle.cover.data);
