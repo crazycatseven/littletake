@@ -356,3 +356,14 @@ dialog::backdrop { background: var(--backdrop); backdrop-filter: none; }
   .transform-tools button > span { display: none; }
   .shot-heading h2 span { display: none; }
 }
+
+.getting-started { position: absolute; z-index: 6; left: 16px; bottom: 34px; width: min(310px, calc(100% - 32px)); padding: 11px 13px 12px; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--paper); box-shadow: var(--shadow-floating); font-size: 11px; line-height: 1.55; color: var(--text-secondary); }
+.getting-started[hidden] { display: none; }
+.getting-started header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; color: var(--ink); font-size: 12px; }
+.getting-started header button { width: 22px; height: 22px; padding: 4px; border: 0; color: var(--text-secondary); }
+.getting-started header svg { width: 13px; height: 13px; }
+.getting-started ol { margin: 0; padding-left: 16px; display: grid; gap: 5px; }
+.getting-started b { color: var(--ink); font-weight: 500; }
+.getting-started li > button { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; margin-right: 2px; border: 1px solid var(--line); border-radius: var(--radius-control); font-size: 11px; color: var(--ink); vertical-align: baseline; }
+.getting-started li > button svg { width: 11px; height: 11px; }
+.camera-piloting .getting-started { display: none; }

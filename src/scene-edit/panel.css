@@ -57,7 +57,7 @@
 .empty-chat { padding: 0; }
 .empty-chat p { color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
 .chat-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-.chat-suggestions button { flex: 1; padding: 7px 9px; border: 1px solid var(--line); font-size: 11px; color: var(--text-secondary); white-space: normal; text-align: left; }
+.chat-suggestions button { flex: 1 1 calc(50% - 3px); padding: 7px 9px; border: 1px solid var(--line); font-size: 11px; color: var(--text-secondary); white-space: normal; text-align: left; }
 .chat-waiting { font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 9px; padding: 5px 0 20px; }
 .chat-waiting i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: chat-pulse 1s infinite alternate; }
 .chat-error { font-size: 11px; color: var(--error); padding: 10px 12px; border-left: 2px solid var(--error-line); background: var(--error-surface); line-height: 1.7; margin-bottom: 25px; }
