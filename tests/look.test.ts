@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateLookFrame, lookPrompt, parseLookInput } from '../server/look/generate.ts';
 import { createLookHandler } from '../server/look-api.ts';
-import { lookSubjects } from '../src/look/subjects.ts';
+import { frameSubjects, framedObjects, lookSubjects } from '../src/look/subjects.ts';
 import type { SceneDocument } from '../src/types.ts';
 
 const png = Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010806000000', 'hex');
@@ -103,4 +103,24 @@ test('subjects describe screen side and depth from the shot camera', () => {
     { name: 'Concierge', position: 'left', depth: 'midground' },
     { name: 'Far wall', position: 'center', depth: 'background' },
   ]);
+});
+
+test('look frames leave out objects that are not really in the picture', () => {
+  const pose = (position: number[], scale = [1, 1, 1]) => ({ position, rotation: [0, 0, 0], scale });
+  const object = (id: string, name: string, position: number[], scale?: number[]) => ({ id, name, kind: 'box', color: '#888888', transform: pose(position, scale), track: null });
+  const doc = {
+    format: 'LittleTake.scene', version: 3, id: 's', name: 'Cliff', duration: 4,
+    objects: [object('knight', 'Silver Knight', [0, 0, -5]), object('fire', 'Fire Breath', [0.5, 0, -6], [0.01, 0.01, 0.01]), object('dragon', 'Red Dragon', [1, 1, -12])],
+    cameras: [{ id: 'cam', name: 'A', fov: 50, transform: pose([0, 0, 0]), track: null }], shots: [],
+  } as unknown as SceneDocument;
+  const framed = framedObjects(doc, 'cam', 0);
+  assert.deepEqual(framed.map(item => item.object.name), ['Silver Knight', 'Fire Breath', 'Red Dragon']);
+  // Boxes seen live: Muse switched the fire off by shrinking it to the minimum scale, so its box has no width,
+  // and the dragon sits just above the frame edge, so its box rounds to no height.
+  const boxes = new Map<string, [number, number, number, number]>([['knight', [0.317, 0.378, 0.374, 0.54]], ['fire', [0.486, 0.464, 0.486, 0.465]], ['dragon', [0.582, 0, 0.833, 0]]]);
+  const subjects = frameSubjects(framed, boxes);
+  assert.deepEqual(subjects, [{ name: 'Silver Knight', position: 'center', depth: 'midground', box: [0.317, 0.378, 0.374, 0.54] }]);
+  // What is sent now always passes the server's check.
+  assert.doesNotThrow(() => parseLookInput(input({ subjects })));
+  assert.throws(() => parseLookInput(input({ subjects: [{ name: 'Red Dragon', position: 'right', depth: 'background', box: [0.582, 0, 0.833, 0] }] })), { code: 'invalid_input' });
 });
