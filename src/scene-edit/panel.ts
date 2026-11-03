@@ -10,6 +10,13 @@ import { loadReference, saveReference, saveObservations, detachReference, reques
 import type { ReferenceContext } from '../reference/observations';
 import type { ReferenceInput } from '../reference/types';
 
+/** Prompts that build a complete demo scene in one turn. */
+const STARTER_PROMPTS: [label: string, prompt: string][] = [
+  ['Knight vs dragon', 'Build a fantasy battle: a knight in silver armor fights a huge red dragon on a rocky cliff at sunset. Over 10 seconds the dragon swoops in and breathes fire, the knight dodges, then charges and strikes. Give me three shots: a wide establishing shot, a low-angle hero push-in on the knight, and an over-the-shoulder shot from behind the dragon.'],
+  ['Dragon over the Golden Gate', 'Build a sweeping flight: a knight rides a red dragon that dives from above the north tower of the Golden Gate Bridge, swoops under the deck and climbs out past the south tower at golden hour, over 12 seconds. Three shots: a high wide shot, a chase shot under the deck, and a low shot from the water.'],
+  ['Two friends at a café', 'Build a small café: two friends talk at a table by the window, one leans in and laughs. 8 seconds, three shots: a wide two-shot, then an over-the-shoulder shot on each of them.'],
+];
+
 interface Options extends Omit<SessionOptions, 'changed'> {
   root: HTMLElement; book: ConversationBook; changed(): void; clearSelection(): void; removeSelection(id: string): void;
 }
@@ -162,7 +169,7 @@ export class SceneEditPanel {
     const thread = this.session.active, switched = this.renderedThread !== thread.id;
     this.query('.conversation-title').textContent = thread.title;
     if (this.prompt.value !== thread.draft) this.prompt.value = thread.draft;
-    const content = thread.messages.length ? thread.messages.map(message => this.renderMessage(message)).join('') : `<div class="empty-chat"><p>Build a scene or edit the current project.</p><div class="chat-suggestions"><button type="button" data-suggestion="Create a new small film set with a floor, two performers, a camera and a shot. Propose it for preview.">Create a scene</button><button type="button" data-suggestion="What could we improve about the framing?">Review framing</button></div></div>`;
+    const content = thread.messages.length ? thread.messages.map(message => this.renderMessage(message)).join('') : `<div class="empty-chat"><p><strong>Describe a shot in a sentence.</strong> Muse builds an editable 3D set with characters, cameras and shots, and shows it as a preview before anything changes. Pick a starting point, edit it if you like, then press Enter.</p><div class="chat-suggestions">${STARTER_PROMPTS.map(([label, prompt]) => `<button type="button" data-suggestion="${esc(prompt)}">${esc(label)}</button>`).join('')}<button type="button" data-suggestion="What could we improve about the framing?">Review framing</button></div></div>`;
     const html = content + (this.session.busy ? `<div class="chat-waiting"><i></i>${esc(this.session.activity)}</div>` : '');
     const last = thread.messages.at(-1);
     const newRequest = last?.role === 'user' && last.status === 'pending' && last.id !== this.renderedLastMessage;

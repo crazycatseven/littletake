@@ -12,6 +12,13 @@ import { loadProjectCovers, retryProjectCover } from './gallery';
 import { coverDue, projectCoverFrame, coverVisual, validateCover, type CoverAttachment } from './cover';
 import { ProjectCollaboration } from './collaboration';
 
+/** Finished projects a newcomer can open as their own copy. Files live in public/examples. */
+const EXAMPLES = [
+  { slug: 'knight-vs-dragon', name: 'Knight vs dragon', detail: 'One sentence to Muse: a set, two animated characters and three camera shots that cut in sequence.' },
+  { slug: 'golden-gate-flight', name: 'Dragon over the Golden Gate', detail: 'A 12 s flight under the bridge with a high wide, a chase and a low shot.' },
+  { slug: 'hotel-lobby-from-clip', name: 'Hotel lobby from a film clip', detail: 'Rebuilt from a 12 s reference video: three people, three shots, one shared set.' },
+] as const;
+
 interface WorkspaceOptions {
   project(): ProjectDocument;
   open(project: ProjectDocument): void;
@@ -310,7 +317,8 @@ export class Workspace {
   private showHome(load = true) {
     const generation = ++this.homeGeneration;
     this.home.innerHTML = `<header class="projects-heading"><a class="brand" href="/">LittleTake</a><span>GALLERY</span><nav>${this.canUpload ? `<button data-project-action="${this.remoteGallery ? 'downloads' : 'cloud'}">${this.remoteGallery ? 'Downloaded projects' : 'Cloud projects'}</button>` : ''}<button data-project-action="join">Join with a code</button><button data-project-action="import">Import project</button><button class="primary-button" data-project-action="new">${icon('plus')} New project</button></nav></header>
-      <div class="projects-welcome"><div><h1>${this.remoteGallery ? 'Cloud projects' : this.autosave ? 'Projects' : 'Downloaded projects'}</h1><p>${this.autosave ? 'A little preview of what you’re making.' : 'Open a local copy to edit. Upload manually to replace the cloud project.'}</p></div><span class="projects-count"></span></div>
+      <div class="projects-welcome"><div><h1>${this.remoteGallery ? 'Cloud projects' : this.autosave ? 'Projects' : 'Downloaded projects'}</h1><p>${this.autosave ? 'Turn a sentence, a sketch or a film clip into an editable 3D previs: set, characters, cameras and shots. Open an example below, or start a new project.' : 'Open a local copy to edit. Upload manually to replace the cloud project.'}</p></div><span class="projects-count"></span></div>
+      <section class="project-examples" aria-label="Examples"><div class="project-examples-heading"><h2>New here? Open an example</h2><p>Each one opens as your own copy. Press play to watch its shots, then change anything by hand or by asking Muse.</p></div><div class="project-example-cards">${EXAMPLES.map(example => `<button class="project-example" data-project-action="example" data-code="${example.slug}"><img src="/examples/${example.slug}.webp" alt="" width="640" height="360" loading="lazy" /><span><strong>${escape(example.name)}</strong><small>${escape(example.detail)}</small></span></button>`).join('')}</div></section>
       <div class="projects-toolbar"><label class="project-search"><span aria-hidden="true">${icon('search')}</span><input type="search" aria-label="Search projects" placeholder="Search projects…" value="${escape(this.projectSearch)}" /></label><label class="project-sort">Sort by<select aria-label="Sort projects"><option value="recent" ${this.projectSort === 'recent' ? 'selected' : ''}>Last edited</option><option value="name" ${this.projectSort === 'name' ? 'selected' : ''}>Name A–Z</option></select></label></div>
       <section class="project-cards" aria-label="Projects"></section>
       ${this.creation ? '<button data-project-action="recover">Retry creating project</button>' : ''}${this.browserRecoveryId ? '<a class="project-recovery-link" href="/api/projects?browserRecovery=' + this.browserRecoveryId + '">Download previous browser data backup</a>' : ''}<p class="projects-error" role="alert" hidden></p><footer>${this.autosave ? 'Projects, assets and conversations are stored on the cloud server.' : 'Local editing has no autosave. Upload to cloud or export a project file before leaving.'}</footer>`;
@@ -345,6 +353,11 @@ export class Workspace {
       if (action === 'cloud' || action === 'downloads') { this.gallerySource = action; this.listed = null; this.showHome(); }
       if (action === 'recover' && this.creation) await this.create(this.creation.project, this.creation.sourceCode);
       if (action === 'recover-browser') this.options.recoverBrowserSave?.();
+      if (action === 'example' && code) {
+        const example = EXAMPLES.find(item => item.slug === code); if (!example) return;
+        const response = await fetch(`/examples/${example.slug}.json`); if (!response.ok) throw new Error('This example could not be loaded. Please try again.');
+        const project = parseProject(await response.text()); project.name = `${example.name} · your copy`; await this.create(project);
+      }
       if (action === 'copy' && code) { const source = await this.api(undefined, code); const project = parseProject(serializeProject(source.project)); project.name = `${project.name.slice(0, 110)} copy`; await this.create(project, code); }
       if (action === 'new' || action === 'join') {
         this.homeGeneration++;

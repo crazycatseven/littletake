@@ -69,7 +69,7 @@ app.innerHTML = `
   </aside>
   <section class="stage-panel" aria-label="3D stage">
     <div class="viewport-heading"><div class="transform-tools" role="toolbar" aria-label="Transform tools"><button data-tool="translate" aria-label="Move tool" title="Move · G">${icon('move')}<span>Move</span></button><button data-tool="rotate" aria-label="Rotate tool" title="Rotate · R">${icon('rotate')}<span>Rotate</span></button><button data-tool="scale" aria-label="Scale tool" title="Scale · S">${icon('scale')}<span>Scale</span></button></div><div><button data-action="ground" title="Drop to the floor or surface below · double-click the green Y handle">${icon('arrow-down')} Drop to surface</button><button data-action="focus" title="Focus selection · F">${icon('focus')}Focus</button><button data-action="reset-view" aria-label="Reset scene view">Reset view</button></div></div>
-    <div id="viewport" class="viewport"></div><div id="performanceBar" hidden></div><div id="emptyStage" class="empty-stage" hidden><h2>No scene</h2><p>Add a scene or describe one to Muse.</p><button data-action="build-with-muse" class="primary-button">Build with Muse</button></div>
+    <div id="viewport" class="viewport"></div><div id="performanceBar" hidden></div><aside id="gettingStarted" class="getting-started" aria-label="Next steps" hidden><header><strong>Next steps</strong><button type="button" data-tips-close aria-label="Hide next steps" title="Hide next steps">${icon('close')}</button></header><ol><li><button type="button" data-tips-play>${icon('play')}Play</button> runs every shot in order. Pick a shot in the preview to look through one camera.</li><li><b>Move something:</b> select it, then Inspector → <b>Draw path on floor</b>.</li><li><b>Change it in words:</b> tell Muse, for example “make shot 2 circle the hero”.</li><li><b>Render</b> at the top right saves a still or a video of the shot.</li></ol></aside><div id="emptyStage" class="empty-stage" hidden><h2>No scene</h2><p>Add a scene or describe one to Muse.</p><button data-action="build-with-muse" class="primary-button">Build with Muse</button></div>
     <section class="shot-panel" id="shotPanel" aria-label="Shot preview"><div class="shot-switcher shot-preview-header" data-preview-header><button class="shot-preview-grip" data-preview-drag aria-label="Move shot preview" title="Drag to move · Arrow keys to nudge · Double-click or Home to reset">${icon('grip')}</button><select id="shotSelect" aria-label="Active shot"></select><button data-action="add-shot" aria-label="New shot" title="New shot">${icon('plus')}</button><button class="shot-preview-collapse" data-preview-collapse aria-label="Collapse shot preview" aria-expanded="true" aria-controls="shotPreviewBody" title="Collapse shot preview"><span aria-hidden="true">${icon('chevron-down')}</span></button></div><div id="shotPreviewBody" class="shot-preview-body"><div class="shot-heading"><h2>${icon('camera')}<span>Shot preview</span></h2><button class="icon-button" data-action="expand-preview" aria-label="Expand shot preview" aria-expanded="false" title="Expand preview">${icon('expand')}</button></div><div id="previewDock"><div class="preview-frame" id="previewFrame"><div id="preview" class="preview"></div></div></div><div class="shot-footer"><span id="shotFrameStatus"><span class="live-dot"></span>Live · 16:9</span><div class="shot-footer-actions"><button data-action="pilot-camera" title="Fly this camera and record a take">${icon('camera')}Pilot</button><button data-action="edit-shot" id="lensLabel">Edit shot</button></div></div></div></section>
     <div class="viewport-caption"><span id="viewHint">Drag to orbit · Scroll to zoom</span></div>
     <div class="ai-preview-badge" id="aiPreviewBadge" role="status" hidden>Previewing Muse changes</div>
@@ -140,6 +140,8 @@ let tool: ToolMode = 'translate';
 let axis: Axis | null = null;
 let time = 0;
 let playing = false;
+// First-time guidance in the viewport; hidden for good once closed in this browser.
+let tipsHidden=false;try{tipsHidden=localStorage.getItem('littletake.tips.hidden')==='1';}catch{}
 let lastFrame = performance.now();
 let statusTimer: ReturnType<typeof setTimeout> | undefined;
 let stage: Stage;
@@ -340,6 +342,7 @@ function renderNavigation(){
   $('#shotSelect').innerHTML=(!shot?'<option value="">Camera preview</option>':'')+scene.shots.map(item=>'<option value="'+esc(item.id)+'" '+(item.id===shot?.id?'selected':'')+'>'+esc(item.name)+'</option>').join('');
   $('#lensLabel').textContent=shot?'Edit '+shot.name:'Add a shot';
   $('#emptyStage').hidden=content.scenes.length>0||!!editPreview;
+  $('#gettingStarted').hidden=tipsHidden||!!editPreview||scene===emptyView||!scene.shots.length;
   $('[data-action="add-scene"]').toggleAttribute('disabled',!!editPreview);
   $('[data-action="add-shot"]').toggleAttribute('disabled',!!editPreview);
   $('#duration').toggleAttribute('disabled',!!editPreview||scene===emptyView);
@@ -1108,6 +1111,8 @@ app.addEventListener('click',event=>{
   }
 });
 $<HTMLDialogElement>('#previewDialog').addEventListener('close',()=>{$('#previewDock').appendChild($('#previewFrame'));$('[data-action="expand-preview"]').setAttribute('aria-expanded','false');});
+$('#gettingStarted').querySelector('[data-tips-play]')!.addEventListener('click',()=>$<HTMLButtonElement>('#playButton').click());
+$('#gettingStarted').querySelector('[data-tips-close]')!.addEventListener('click',()=>{tipsHidden=true;try{localStorage.setItem('littletake.tips.hidden','1');}catch{}$('#gettingStarted').hidden=true;});
 $('#previewDialog').addEventListener('keydown',event=>{if(event.code==='Space'){event.preventDefault();if(!event.repeat)togglePlay();}});
 $('#hierarchySearch').addEventListener('input',()=>{renderOutliner();renderSelection();});
 document.addEventListener('pointerdown',event=>{document.querySelectorAll<HTMLDetailsElement>('details.studio-menu[open]').forEach(menu=>{if(!menu.contains(event.target as Node))menu.open=false;});});
