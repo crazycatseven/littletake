@@ -82,6 +82,7 @@ export class XRControls {
   private sources = new Map<number, XRInputSource>();
   private gripPressed = new Set<number>();
   private buttonPressed = new Map<number, boolean[]>();
+  private menuStickPressed = new Map<number, boolean>();
   private menuPressed = new Map<number, { index: number; pressed: boolean }>();
   private controllers: THREE.Group[] = [];
   private grips: THREE.Group[] = [];
@@ -125,8 +126,8 @@ export class XRControls {
       this.nearSelection.addHand(grip);
       this.pointers.push(new XRPointerFeedback(controller));
       const outline = new XRObjectOutline(); this.hoverOutlines.push(outline); this.feedbackRoot.add(outline.root);
-      const connected = (event: { data: XRInputSource }) => { this.sources.set(index, event.data); this.buttonPressed.set(index, [4, 5].map(button => !!event.data.gamepad?.buttons?.[button]?.pressed)); const binding = menuButtonBinding(event.data); if (binding) this.menuPressed.set(index, { index: binding.index, pressed: !!event.data.gamepad?.buttons[binding.index]?.pressed }); this.nearTracked.set(index, true); visual.connect(event.data); };
-      const disconnected = () => { this.gripPressed.delete(index); visual.disconnect(); this.pointers[index].root.visible = false; this.hoverOutlines[index].root.visible = false; this.buttonPressed.delete(index); this.nearSelection.clear(index); this.nearTracked.delete(index); if (this.heldCamera?.index === index || this.keyDrag?.index === index || this.menuDrag === index || this.grab?.index === index || this.locomotion?.indices.includes(index)) this.finish(true); this.sources.delete(index); this.resetTimelineInput(); };
+      const connected = (event: { data: XRInputSource }) => { this.sources.set(index, event.data); this.menuStickPressed.set(index, !!event.data.gamepad?.buttons?.[3]?.pressed); this.buttonPressed.set(index, [4, 5].map(button => !!event.data.gamepad?.buttons?.[button]?.pressed)); const binding = menuButtonBinding(event.data); if (binding) this.menuPressed.set(index, { index: binding.index, pressed: !!event.data.gamepad?.buttons[binding.index]?.pressed }); this.nearTracked.set(index, true); visual.connect(event.data); };
+      const disconnected = () => { this.gripPressed.delete(index); visual.disconnect(); this.pointers[index].root.visible = false; this.hoverOutlines[index].root.visible = false; this.buttonPressed.delete(index); this.menuStickPressed.delete(index); this.nearSelection.clear(index); this.nearTracked.delete(index); if (this.heldCamera?.index === index || this.keyDrag?.index === index || this.menuDrag === index || this.grab?.index === index || this.locomotion?.indices.includes(index)) this.finish(true); this.sources.delete(index); this.resetTimelineInput(); };
       const select = () => this.select(index);
       const selectRelease = () => {
         if(this.keyDrag?.index===index){this.updateKeyDrag();this.keyDrag=null;this.resetTimelineInput();this.syncTimeline(this.options.timelineState?.()??null);}
@@ -145,7 +146,7 @@ export class XRControls {
       };
       const release = () => {
         this.gripPressed.delete(index);
-        if(this.heldCamera?.index===index){this.options.handheldAction?.('stop');this.heldCamera=null;return;}
+        if(this.heldCamera?.index===index){this.options.handheldAction?.('stop');this.heldCamera=null;this.syncPanelVisibility();return;}
         if (this.menuDrag === index || this.grab?.index === index && this.grab.input === 'grip') this.finish(false);
         else if (this.locomotion?.indices.includes(index)) {
           const remaining = this.locomotion.indices.filter(hand => hand !== index);
@@ -192,11 +193,11 @@ export class XRControls {
     this.feedbackRoot.visible = false; this.selectionFeedback.sync([], 1);
     this.pointers.forEach(pointer => pointer.root.visible = false);
     this.hoverOutlines.forEach(outline => outline.root.visible = false);
-    this.buttonPressed.clear(); this.menuPressed.clear();
+    this.buttonPressed.clear(); this.menuPressed.clear(); this.menuStickPressed.clear();
     this.nearTracked.clear(); this.nearSelection.clear();
     this.controllerVisuals.forEach(visual => visual.disconnect());
   }
-  private visibility = () => { this.buttonPressed.clear(); this.menuPressed.clear(); this.resetTimelineInput(); if (this.session?.visibilityState !== 'visible') { this.gripPressed.clear(); this.finish(true); this.nearSelection.clear(); } };
+  private visibility = () => { this.buttonPressed.clear(); this.menuPressed.clear(); this.menuStickPressed.clear(); this.resetTimelineInput(); if (this.session?.visibilityState !== 'visible') { this.gripPressed.clear(); this.finish(true); this.nearSelection.clear(); } };
   private reset = () => { this.gripPressed.clear(); this.resetTimelineInput(); this.finish(true); this.leaveCamera(); this.nearSelection.clear(); this.menuNeedsPlacement = true; };
 
   private menuHead(): THREE.Matrix4 {
@@ -261,6 +262,9 @@ export class XRControls {
   private resetTimelineInput(): void { this.timelineArmed = false; this.timelineTime = null; }
   private recordingMode() { return this.options.timelineState?.().recording?.mode ?? 'idle'; }
   private toggleMenu(): void {
+    // Recalling the menu ends only its own drag, never an object grab or recording.
+    if(this.menuDrag!==null&&!this.draggingTimeline){this.menuDrag=null;this.menuSpace.end();}
+    this.menuNeedsPlacement=false;
     this.menu.toggle(); this.menuSpace.place(this.menuHead(), this.rig.scale.x); this.syncMenu();
   }
   private placeTimeline(): void {
@@ -286,6 +290,7 @@ export class XRControls {
     this.menu.setTimeline(state ? { ...state, canAddKey: !!state.selection && this.options.editable() && !!this.options.addKeyframe,
       canDeleteKey: (!!state.selectedKeyTimes?.length || !!state.selection?.frames.some(key => Math.abs(key.time - state.time) < 1e-6)) && this.options.editable() && !!this.options.deleteKeyframe } : null);
     this.keyframeGhosts.sync(state, state?.selection ? this.options.timelineObject?.(state.selection.id) : undefined);
+    this.syncPanelVisibility();
   }
   private updateTimeline(frame: XRFrame | undefined, now: number): void {
     if (!this.timeline) return;
@@ -332,11 +337,18 @@ export class XRControls {
     this.menuFollowAnchor = null;
     this.following = false; this.headAnchor = null; this.camera.layers.enable(3);
   }
+  private syncPanelVisibility(): void {
+    const holding=!!this.heldCamera||!!this.grab;
+    this.menuRoot.visible=!!this.session&&!holding;
+    this.timelineRoot.visible=!!this.session&&this.timeline&&!holding;
+    this.keyframeGhosts.root.visible=!!this.session&&this.timeline&&!holding;
+  }
   private syncMenu(): void {
+    this.syncPanelVisibility();
     const playback = this.options.menuState?.() ?? { playing: false, canUndo: false };
     this.menu.setState({ ...playback, handheld:!!this.options.handheldState?.().id, canHandheld:!!this.options.handheldState?.().available, following: this.following, hasCamera: !!this.options.followCamera?.(), scale: this.following ? 1 : 1 / this.rig.scale.x, timeline: this.timeline, dragging: this.menuDrag !== null && !this.draggingTimeline, timelineDragging: this.menuDrag !== null && this.draggingTimeline });
     const idle = !this.keyDrag && !this.grab && !this.locomotion && this.menuDrag === null && this.recordingMode()==='idle';
-    this.controllerVisuals.forEach(visual => visual.setState({ playing: playback.playing, canUndo: idle && playback.canUndo, canPlay: idle, canMenu: idle }));
+    this.controllerVisuals.forEach(visual => visual.setState({ playing: playback.playing, canUndo: idle && playback.canUndo, canPlay: idle, canMenu: true }));
   }
   private hit(index: number, includeGhosts = true): THREE.Intersection | undefined {
     if (!this.session || this.session.visibilityState !== 'visible' || !this.controllers[index].visible) return;
@@ -378,6 +390,7 @@ export class XRControls {
           const actuator=this.sources.get(index)?.gamepad?.hapticActuators?.[0];
           void actuator?.pulse(.5,60).catch(()=>{});
           if(this.options.handheldState?.().mode==='review')this.heldCamera=null;
+          this.syncPanelVisibility();
         }
       }
       return;
@@ -469,6 +482,7 @@ export class XRControls {
       if(handheld.mode!=='armed'||!this.options.editable())return;
       const start=this.options.pose(handheld.id);if(!start)return;
       this.heldCamera={index,start,origin:grip,orientation:this.grips[index].getWorldQuaternion(new THREE.Quaternion())};
+      this.syncPanelVisibility();
       return;
     }
     if(this.recordingMode()==='review')return;
@@ -495,6 +509,7 @@ export class XRControls {
     const start = this.options.pose(id); if (!start) return;
     if (!this.options.transform(id, start, 'start')) return;
     this.grab = { index, input, id, start, latest: start, near, origin: this.grips[index].getWorldPosition(new THREE.Vector3()), orientation: this.grips[index].getWorldQuaternion(new THREE.Quaternion()) };
+    this.syncPanelVisibility();
   }
   private navigationGrab(indices: number[]): NavigationGrab {
     const hand = this.grips[indices[0]].position.clone();
@@ -549,7 +564,7 @@ export class XRControls {
   }
 
   private updateControllerButtons(): void {
-    if (this.session?.visibilityState !== 'visible') { this.buttonPressed.clear(); this.menuPressed.clear(); return; }
+    if (this.session?.visibilityState !== 'visible') { this.buttonPressed.clear(); this.menuPressed.clear(); this.menuStickPressed.clear(); return; }
     for (const [index, source] of this.sources) {
       // xr-standard left X / Y occupy indices 4 / 5; right A / B do not trigger shortcuts.
       if (source.handedness !== 'left' || source.hand || source.gamepad?.mapping !== 'xr-standard') continue;
@@ -558,16 +573,18 @@ export class XRControls {
       this.buttonPressed.set(index, pressed);
       const binding = this.controllerVisuals[index].menuBinding(source);
       const priorMenu = this.menuPressed.get(index);
+      const stickDown=!!source.gamepad.buttons[3]?.pressed, priorStick=this.menuStickPressed.get(index);
+      this.menuStickPressed.set(index,stickDown);
       const menuDown = binding ? !!source.gamepad.buttons[binding.index]?.pressed : false;
       if (binding) this.menuPressed.set(index, { index: binding.index, pressed: menuDown });
       else this.menuPressed.delete(index);
+      if ((binding && priorMenu?.index === binding.index && !priorMenu.pressed && menuDown) || (priorStick === false && stickDown)) {
+        this.toggleMenu(); this.controllerVisuals[index].acknowledge('menu');
+      }
       // Consume presses even while blocked: releasing a grab must not replay a held button.
       if (this.keyDrag || this.grab || this.locomotion || this.menuDrag !== null || this.recordingMode()!=='idle') continue;
       if (pressed[0] && previous?.[0] === false && this.options.menuState?.().canUndo) { this.options.action('undo'); this.controllerVisuals[index].acknowledge('undo'); }
       if (pressed[1] && previous?.[1] === false) { this.options.action('play'); this.resetTimelineInput(); this.controllerVisuals[index].acknowledge('play'); }
-      if (binding && priorMenu?.index === binding.index && !priorMenu.pressed && menuDown) {
-        this.toggleMenu(); this.controllerVisuals[index].acknowledge('menu');
-      }
     }
   }
 
@@ -655,6 +672,7 @@ export class XRControls {
     this.locomotion = null;
     const grab = this.grab; this.grab = null;
     if (grab) this.options.transform(grab.id, cancel ? grab.start : grab.latest, cancel ? 'cancel' : 'end');
+    this.syncPanelVisibility();
   }
   private timelineTimeAt(u: number, duration: number): number { return THREE.MathUtils.clamp((u*1440-64)/1312,0,1)*duration; }
   private updateKeyDrag(frame?: XRFrame): void {

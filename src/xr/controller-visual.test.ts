@@ -48,8 +48,8 @@ test('controller visuals follow grips, keep a fallback until loading, and clean 
   const yButton = new THREE.Mesh(new THREE.CylinderGeometry(.006, .006, .006, 16), new THREE.MeshStandardMaterial());
   yButton.name = 'actual-y'; yButton.position.set(.02, .04, -.01); loaded.add(yButton);
   const menuButton = new THREE.Mesh(new THREE.CylinderGeometry(.005, .005, .004, 16), new THREE.MeshStandardMaterial());
-  menuButton.name = 'actual-menu'; menuButton.position.set(-.015, .04, .01); loaded.add(menuButton);
-  Object.assign(device, { motionController: { components: { 'x-button': { rootNodeName: 'actual-x' }, 'y-button': { rootNodeName: 'actual-y' }, menu: { rootNodeName: 'actual-menu', gamepadIndices: { button: 7 } } } } });
+  menuButton.name = 'actual-stick'; menuButton.position.set(-.015, .04, .01); loaded.add(menuButton);
+  Object.assign(device, { motionController: { components: { 'x-button': { rootNodeName: 'actual-x' }, 'y-button': { rootNodeName: 'actual-y' }, menu: { rootNodeName: 'unused-menu', gamepadIndices: { button: 7 } }, 'xr-standard-thumbstick': { rootNodeName: 'actual-stick', gamepadIndices: { button: 3 } } } } });
   device.add(loaded); factory.onLoad!(loaded); assert.equal(fallback.visible, false);
   loaded.traverse(node => {
     if (node instanceof THREE.Mesh) {

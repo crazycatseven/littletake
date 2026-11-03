@@ -799,7 +799,8 @@ test('left Menu toggles modes UI without hiding timeline; thumbstick fallback an
   const renderer = { xr: { getController: (i: number) => controllers[i], getControllerGrip: (i: number) => grips[i], getReferenceSpace: () => new EventTarget() } } as unknown as THREE.WebGLRenderer;
   const buttons = Array.from({ length: 8 }, () => ({ pressed: false }));
   const source = { handedness: 'left', profiles: ['oculus-touch-v3'], gripSpace: {}, gamepad: { mapping: 'xr-standard', buttons } };
-  const controls = new XRControls(renderer, { targets: () => [], editable: () => true, select: () => {}, pose: () => pose, transform: () => true, action: () => {}, timelineState: () => ({ time: 1, duration: 5, fps: 24 }) });
+  let recording: 'idle'|'armed'|'recording'|'review'='idle';
+  const controls = new XRControls(renderer, { targets: () => [], editable: () => true, select: () => {}, pose: () => pose, transform: () => true, action: () => {}, timelineState: () => ({ time: 1, duration: 5, fps: 24, recording: {mode:recording} }) });
   const expanded = () => controls.menuRoot.children.filter(child => child.visible).length > 1;
   const fire = (type: string, data?: unknown) => controllers[0].dispatchEvent({ type, data } as never);
   const release = (index: number) => { buttons[index].pressed = false; controls.update(); };
@@ -809,6 +810,10 @@ test('left Menu toggles modes UI without hiding timeline; thumbstick fallback an
     fire('connected', source); aimMenu(controls, controllers[0], 5); fire('selectstart');
     const position = controls.timelineRoot.position.clone();
     press(6); assert.equal(expanded(), true); release(6); // Thumb-rest is never Menu.
+    // A reported Menu slot may never generate input: stick click remains available.
+    press(3); assert.equal(expanded(),false); controls.update();assert.equal(expanded(),false);
+    release(3);press(3);assert.equal(expanded(),true);release(3);
+
     press(7); controls.update(); assert.equal(expanded(), false); assert.equal(controls.timelineRoot.visible, true);
     release(7); controls.rig.position.x = 2; press(7); assert.equal(expanded(), true);
     assert.ok(controls.timelineRoot.position.distanceTo(position) < 1e-6);
@@ -820,6 +825,16 @@ test('left Menu toggles modes UI without hiding timeline; thumbstick fallback an
     fire('disconnected'); source.profiles = ['oculus-touch-v2']; fire('connected', source);
     press(3); assert.equal(expanded(), false); release(3); press(3); assert.equal(expanded(), true);
     assert.equal(controls.timelineRoot.visible, true);
+    for(const mode of ['armed','recording','review'] as const){
+      recording=mode;
+      release(3);controls.menuRoot.position.set(99,99,99);press(3);assert.equal(expanded(),false);
+      assert.ok(controls.menuRoot.position.distanceTo(new THREE.Vector3(99,99,99))>10);
+      release(3);controls.rig.position.x+=1;press(3);assert.equal(expanded(),true);
+      assert.ok(Math.abs(controls.menuRoot.position.x-controls.rig.position.x)<1e-6);
+      assert.ok(controls.timelineRoot.position.distanceTo(position)<1e-6);
+      controls.update();assert.equal(expanded(),true);assert.equal(recording,mode);
+    }
+    recording='idle';
     aimMenu(controls, controllers[0], 5); fire('selectstart'); assert.equal(controls.timelineRoot.visible, false);
   } finally {
     controls.dispose();

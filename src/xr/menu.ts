@@ -118,7 +118,7 @@ export class XRMenu {
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ map: map ?? null, transparent: true, opacity: map ? 1 : 0, depthTest: false, depthWrite: false, toneMapped: false }));
     mesh.renderOrder = 100; mesh.frustumCulled = false; this.root.add(mesh); return mesh;
   }
-  targets(): THREE.Mesh[] { return [...(this.expanded ? [this.handle, this.title, ...this.buttons, this.panel] : [this.handle]), ...(this.timelineRoot.visible && this.timelinePanel.visible ? [this.timelineTitle, this.addKey, this.deleteKey, this.timelinePanel, ...(this.recordingPanel.visible ? [...this.recordingButtons,this.recordingPanel] : [])] : [])]; }
+  targets(): THREE.Mesh[] { return [...(this.root.visible ? this.expanded ? [this.handle, this.title, ...this.buttons, this.panel] : [this.handle] : []), ...(this.timelineRoot.visible && this.timelinePanel.visible ? [this.timelineTitle, this.addKey, this.deleteKey, this.timelinePanel, ...(this.recordingPanel.visible ? [...this.recordingButtons,this.recordingPanel] : [])] : [])]; }
   nearTitle(point: THREE.Vector3, radius: number, timeline = false): THREE.Vector3 | undefined {
     if (timeline ? !this.timelineRoot.visible : !this.expanded || !this.root.visible) return;
     const title = timeline ? this.timelineTitle : this.title;

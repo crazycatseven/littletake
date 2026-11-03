@@ -5,7 +5,7 @@ import { transformSchema } from '../performance/motion';
 import type { SceneEntity, Transform } from '../types';
 import { eulerDegrees } from '../rotation';
 
-export const XR_RECORDING_HZ = 2;
+export const XR_RECORDING_HZ = 1;
 
 export type XRRecordAction = 'record' | 'preview' | 'apply' | 'discard';
 export interface XRRecordingState {

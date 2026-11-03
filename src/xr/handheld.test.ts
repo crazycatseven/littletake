@@ -54,6 +54,7 @@ test('handheld framing is temporary; trigger toggles recording, grip release sto
     // Aim away from panels; Grip acquires the camera without a ray hit.
     controllers[0].quaternion.identity();grips[0].position.set(0,0,-.5);
     fire('squeezestart');grips[0].position.x=.2;controls.update(frame);
+    assert.equal(controls.menuRoot.visible,false);assert.equal(controls.timelineRoot.visible,false);
     assert.equal(mode(),'armed');const framed=structuredClone(take!.pose);assert.deepEqual(camera,before);
     fire('selectstart');fire('selectend');assert.equal(mode(),'recording');
     fire('squeezestart',1);assert.equal(mode(),'armed'); // Dual grip cancels the take and owns navigation.
@@ -63,12 +64,13 @@ test('handheld framing is temporary; trigger toggles recording, grip release sto
     fire('squeezestart');controls.update(frame);const restarted=structuredClone(take!.pose);fire('selectstart');fire('selectend');
     now=500;grips[0].position.x=.5;grips[0].rotation.y=.3;controls.update(frame);
     fire('selectstart');fire('selectend');assert.equal(mode(),'review');assert.equal(take!.time,1);
+    assert.equal(controls.menuRoot.visible,true);assert.equal(controls.timelineRoot.visible,true);
     assert.deepEqual(take!.preview(1),restarted);assert.deepEqual(camera,before);
     click(XR_RECORD_DISCARD);assert.equal(mode(),undefined);
     click(XR_HANDHELD);controllers[0].quaternion.identity();fire('squeezestart');fire('selectstart');fire('selectend');
     now+=250;controls.update(frame);fire('squeezeend');assert.equal(mode(),'review');
     click(XR_RECORD_DISCARD);click(XR_HANDHELD);controllers[0].quaternion.identity();fire('squeezestart');fire('selectstart');fire('selectend');
-    tracked=false;controls.update(frame);assert.equal(mode(),'armed');assert.deepEqual(camera,before);
+    tracked=false;controls.update(frame);assert.equal(mode(),'armed');assert.equal(controls.menuRoot.visible,true);assert.equal(controls.timelineRoot.visible,true);assert.deepEqual(camera,before);
     tracked=true;fire('squeezestart');fire('selectstart');fire('selectend');now+=1500;controls.update(frame);
     assert.equal(mode(),'review');assert.equal(take!.apply().animation!.takes[0].end,2);assert.equal(ordinary,0);
   }finally{controls.dispose();restore();}
