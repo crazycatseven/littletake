@@ -48,7 +48,7 @@ export class XRKeyframeReader {
   private key = '';
   private selection?: XRKeyframeSelection;
   read(entity: SceneEntity | undefined, duration: number): XRKeyframeSelection | undefined {
-    if (!entity || !('kind' in entity) || entity.hidden) { this.key = ''; this.selection = undefined; return; }
+    if (!entity || ('kind' in entity && entity.hidden)) { this.key = ''; this.selection = undefined; return; }
     const key = JSON.stringify([entity, duration]);
     if (key !== this.key) {
       const times = [...new Set(Object.values(animationFor(entity)?.curves ?? {}).flatMap(keys => keys?.map(key => key.time) ?? []))]

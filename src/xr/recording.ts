@@ -2,7 +2,7 @@ import { Euler, MathUtils, Quaternion, Vector3 } from 'three';
 import { animationFor, evaluateTransform } from '../model';
 import { emptyAnimation, keepRecordedTake } from '../animation/model';
 import { transformSchema } from '../performance/motion';
-import type { SceneObject, Transform } from '../types';
+import type { SceneEntity, Transform } from '../types';
 
 export type XRRecordAction = 'record' | 'preview' | 'apply' | 'discard';
 export interface XRRecordingState {
@@ -72,9 +72,9 @@ export function processRecording(raw: PoseSample[], positionTolerance = .02, ang
 }
 
 /** A single-grip take never mutates its source. Only apply() produces a document replacement. */
-export class XRRecording {
+export class XRRecording<T extends SceneEntity = SceneEntity> {
   mode: XRRecordingState['mode'] = 'armed';
-  readonly before: SceneObject;
+  readonly before: T;
   readonly start: number;
   time: number;
   pose: Transform;
@@ -83,8 +83,8 @@ export class XRRecording {
   private last: PoseSample;
   private raw: PoseSample[] = [];
   private processed: PoseSample[] = [];
-  private result?: SceneObject;
-  constructor(item: SceneObject, time: number, readonly duration: number) {
+  private result?: T;
+  constructor(item: T, time: number, readonly duration: number) {
     if (time < 0 || duration - time < .1) throw new Error('Move the playhead earlier to record at least 0.1 seconds.');
     this.before = structuredClone(item); this.start = this.time = time;
     this.pose = evaluateTransform(item, time); this.last = { time, transform: structuredClone(this.pose) };
@@ -124,13 +124,13 @@ export class XRRecording {
     this.last = { time: this.start, transform: structuredClone(this.pose) }; this.raw = [];
   }
   preview(time: number): Transform { return this.result ? evaluateTransform(this.result, time) : structuredClone(this.pose); }
-  keyframeEntity(): SceneObject { return this.result ?? this.before; }
+  keyframeEntity(): T { return this.result ?? this.before; }
   togglePreview(): void { if (this.mode === 'review') { this.previewing = !this.previewing; if (this.previewing) this.time = this.start; } }
   advance(dt: number): void {
     if (!this.previewing) return;
     this.time = Math.min(this.time + Math.max(0, dt), this.processed.at(-1)!.time);
     if (this.time >= this.processed.at(-1)!.time) this.previewing = false;
   }
-  apply(): SceneObject { if (!this.result || this.mode !== 'review') throw new Error('Finish recording first.'); return structuredClone(this.result); }
+  apply(): T { if (!this.result || this.mode !== 'review') throw new Error('Finish recording first.'); return structuredClone(this.result); }
   state(): XRRecordingState { return { mode: this.mode, samples: this.raw.length, keys: this.processed.length, previewing: this.previewing }; }
 }

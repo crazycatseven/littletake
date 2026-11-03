@@ -227,7 +227,7 @@ export class Stage {
         addKeyframe: this.options.onXRAddKeyframe,
         deleteKeyframe: this.options.onXRDeleteKeyframe,
         recordAction: this.options.onXRRecordAction,
-        timelineObject: id => this.views.get(id)?.root,
+        timelineObject: id => this.rootFor(id),
         seek: time => this.options.onXRSeek?.(time),
         timelineChanged: active => this.options.onXRTimelineChange?.(active),
         menuState: () => this.options.xrMenuState?.() ?? { playing: this.playing, canUndo: false },

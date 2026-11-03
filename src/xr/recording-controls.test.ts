@@ -4,16 +4,16 @@ import * as THREE from 'three';
 import { XRControls } from './controls';
 import { XR_RECORD, XR_RECORD_APPLY, XR_RECORD_DISCARD, XR_RECORD_PREVIEW } from './menu';
 import { XRRecording, type XRRecordAction } from './recording';
-import { createObject, History } from '../model';
+import { createObject, createCamera, History } from '../model';
 import { XRKeyframeReader } from './timeline';
 
-test('opt-in XR recording uses a single grip, reviews without mutation, applies once, and leaves ordinary grabs intact', () => {
+for (const target of ['object', 'camera'] as const) test(`${target}: opt-in XR recording uses a single grip, reviews without mutation, applies once, and leaves ordinary grabs intact`, () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
   Object.defineProperty(globalThis, 'document', { configurable: true, value: { createElement: () => ({ getContext: () => ({}) }) } });
   const controllers = [new THREE.Group(), new THREE.Group()], grips = [new THREE.Group(), new THREE.Group()];
   const reference = new EventTarget(), session = Object.assign(new EventTarget(), { visibilityState: 'visible' });
   const renderer = { xr: { getController: (i:number)=>controllers[i], getControllerGrip:(i:number)=>grips[i], getReferenceSpace:()=>reference } } as unknown as THREE.WebGLRenderer;
-  const item = createObject('cube', 1); item.transform.position=[0,0,-2];
+  const item = target === 'camera' ? createCamera('camera', 'Camera') : createObject('cube', 1); item.transform.position=[0,0,-2];
   const before=structuredClone(item), history=new History(item), reader=new XRKeyframeReader();
   const object=new THREE.Mesh(new THREE.BoxGeometry(.1,.1,.1),new THREE.MeshBasicMaterial());object.position.fromArray(item.transform.position);object.userData.entityId=item.id;
   let take:XRRecording|null=null, now=1000, ordinary=0, time=0, tracked=true;

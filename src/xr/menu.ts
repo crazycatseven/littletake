@@ -12,7 +12,7 @@ export const XR_DELETE_KEY = 9;
 export const XR_RECORD = 10, XR_RECORD_PREVIEW = 11, XR_RECORD_APPLY = 12, XR_RECORD_DISCARD = 13;
 export function xrRecordingSvg(state: XRRecordingState, hovered: ReadonlySet<number> = new Set()): string {
   const review = state.mode === 'review', active = state.mode !== 'idle';
-  const status = state.mode === 'recording' ? 'Recording · Release to smooth and review' : state.mode === 'armed' ? 'Ready · Hold trigger or grip on the selected object' : review ? `Smoothed take · ${state.samples} samples → ${state.keys} pose keys · Apply replaces this time range` : 'Single-hand recording · Select an object, then Record';
+  const status = state.mode === 'recording' ? 'Recording · Release to smooth and review' : state.mode === 'armed' ? 'Ready · Hold trigger or grip on the selected object or camera' : review ? `Smoothed take · ${state.samples} samples → ${state.keys} pose keys · Apply replaces this time range` : 'Single-hand recording · Select an object or camera, then Record';
   const labels = [state.mode === 'recording' ? 'Recording' : state.mode === 'armed' ? 'Armed' : 'Record', state.previewing ? 'Pause preview' : 'Preview', 'Apply', 'Discard'];
   const enabled = [!active && state.canRecord, review, review, active && state.mode !== 'recording'];
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="180" viewBox="0 0 1440 180"><rect x="4" y="4" width="1432" height="172" rx="20" fill="#182b26" stroke="${active ? '#ffbd66' : '#587167'}" stroke-width="3"/>

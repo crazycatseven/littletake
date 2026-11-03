@@ -56,3 +56,10 @@ One take belongs to one object and one grab. During recording setup/review, ordi
 Selected keyframes have lime check marks and tinted ghost poses. Multi-selection belongs to one object and clears when switching objects, leaving Timeline or starting a recording. Scrubbing preserves selection; deletion and undo prune keys that no longer exist. Moving the real object still edits only the current key, not every selected key.
 
 Trigger drag-selection shows a translucent range and updates selected markers while dragging. Existing selected keys are retained; dragging back shrinks the new range. Release ends selection, and tracking loss stops the drag while keeping the last selection. Timeline scrubbing and other grab gestures are blocked during selection.
+
+
+## Camera / Shot motion recording
+
+Select the Shot to record before entering VR, then enter **Timeline** and select its camera model. Scrub to the desired scene time, press **Record**, and hold Grip or Trigger on the camera to move it. Near-sphere grabs capture both position and rotation; distant grabs only translate. Release to smooth and reduce the take, then **Preview**, **Apply**, or **Discard**, just as for objects.
+
+Camera keys and translucent poses appear on the timeline and support adding, multi-selecting and deleting keys. Apply updates the camera animation; Shots linked to that camera use the same motion. Existing Shot ranges and FOV animation are preserved. Recording uses scene time and stops at the scene end, not the Shot boundary; start and stop within the intended Shot range. X undoes Apply. Headset movement is not recorded automatically. Existing object recording is unchanged.

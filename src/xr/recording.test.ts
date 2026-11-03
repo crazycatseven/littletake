@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Euler, MathUtils, Quaternion } from 'three';
-import { createObject, evaluateTransform, History } from '../model';
+import { createObject, createCamera, createShot, evaluateFov, evaluateTransform, History } from '../model';
 import { validateAnimation } from '../animation/model';
 import { XRRecording, processRecording, interpolatePose, type PoseSample } from './recording';
 import type { SceneObject, Transform } from '../types';
@@ -92,4 +92,27 @@ test('sampling at different headset rates produces the same processed linear tra
   const a = run(60), b = run(90);
   assert.equal(a.state().samples, b.state().samples);
   for (const time of [0, .2, .5, .8, 1]) assert.ok(Math.abs(a.preview(time).position[0] - b.preview(time).position[0]) < 1e-8);
+});
+
+
+test('camera take preserves lens animation and shot binding while recording translation and rotation', () => {
+  const camera = createCamera('camera', 'Shot camera');
+  camera.animation = {takes: [], curves: {
+    fov: [{time: 0, value: 40, interpolation: 'linear'}, {time: 4, value: 60, interpolation: 'linear'}],
+    'position.x': [{time: 0, value: 0, interpolation: 'linear'}, {time: 4, value: 4, interpolation: 'linear'}],
+  }};
+  const shot = createShot(camera, 'shot', 4), original = structuredClone(camera);
+  const session = new XRRecording(camera, 1, 4);
+  session.begin(0);
+  for (let i=1; i<=30; i++) session.sample(pose(1+i/30, i*2), i*1000/30);
+  session.stop();
+  assert.deepEqual(camera, original);
+  const result = session.apply();
+  assert.equal(result.id, shot.cameraId);
+  assert.deepEqual(result.animation!.curves.fov, original.animation!.curves.fov);
+  assert.equal(evaluateFov(result, 2), 50);
+  assert.deepEqual(result.animation!.curves['position.x']!.filter(key=>key.time<1||key.time>2), original.animation!.curves['position.x']);
+  assert.ok(Math.abs(evaluateTransform(result, 2).rotation[1]-60)<1e-6);
+  const history = new History(camera); history.commit(result);
+  assert.deepEqual(history.undo(), original);
 });
