@@ -1,14 +1,29 @@
-#performanceBar { position: absolute; z-index: 12; left: 50%; bottom: 35px; transform: translateX(-50%); display: flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 8px; width: min(780px, calc(100% - 24px)); padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface-raised); box-shadow: var(--shadow-floating); font-size: 11px; }
-#performanceBar > div { flex: 1 1 100%; min-width: 0; text-align: center; }
-#performanceBar strong { display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 550; }
-#performanceBar small { display: block; font-size: 10px; color: var(--muted); margin-top: 4px; }
-#performanceBar .record-button { background: var(--record); color: var(--record-ink); border-color: var(--error-line); }
-#performanceBar[data-mode="record"] { border-color: var(--error-line); }
-#performanceBar[data-mode="record"] strong { color: var(--error); }
-.performance-active .viewport-heading{pointer-events:none;opacity:.45}
-.performance-active .viewport-heading button{pointer-events:none}
-.performance-timing { display: flex; align-items: center; gap: 6px; font-size: 11px; white-space: nowrap; }
-.performance-timing select { padding: 5px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--paper); color: var(--ink); font: inherit; }
-#performanceBar #performanceMotionState { display: inline-flex; align-items: center; gap: 5px; }
-#performanceBar.waiting-for-motion { border-color: var(--warning-line); }
-#performanceBar.waiting-for-motion strong, #performanceBar.waiting-for-motion #performanceMotionState { color: var(--warning); }
+#performanceBar { position: absolute; z-index: 12; left: 50%; bottom: 16px; transform: translateX(-50%); width: min(640px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow: auto; padding: 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-panel); background: var(--paper); box-shadow: var(--shadow-floating); font-size: var(--font-ui); }
+.performance-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.performance-subject { display: flex; align-items: center; flex: 1; min-width: 0; gap: 8px; }
+.performance-subject strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-ui); font-weight: 550; }
+.performance-subject > svg { color: var(--muted); }
+.performance-recording-label { display: inline-flex; align-items: center; gap: 6px; flex: none; color: var(--error); font-size: var(--font-small); }
+.performance-recording-label svg { width: 12px; height: 12px; fill: currentColor; }
+.performance-duration { flex: none; color: var(--muted); font-size: var(--font-small); }
+.performance-description { margin-top: 9px; color: var(--text-secondary); font-size: var(--font-small); line-height: 1.6; }
+.performance-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 12px; margin-top: 12px; }
+.performance-action-group { display: flex; align-items: center; gap: 5px; }
+.performance-primary-actions { margin-left: auto; }
+#performanceBar button { min-height: 32px; padding: 6px 9px; font-size: var(--font-ui); }
+#performanceBar .icon-button { padding: 7px; }
+#performanceBar .performance-secondary { border-color: var(--line); }
+#performanceBar kbd { margin-left: 5px; color: inherit; opacity: .7; }
+.record-button { margin-left: auto; border-color: var(--error-line); background: var(--record); color: var(--record-ink); }
+#performanceBar .record-button:hover { background: var(--error-surface); }
+.performance-active .viewport-heading { pointer-events: none; opacity: .35; }
+.performance-active .viewport-heading button { pointer-events: none; }
+.performance-active .viewport-caption { visibility: hidden; }
+.performance-timing { display: flex; align-items: center; gap: 7px; font-size: var(--font-small); color: var(--text-secondary); }
+.performance-timing select { min-height: 32px; padding: 5px 8px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--field); color: var(--ink); font: inherit; }
+.performance-recording-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.performance-time-label { font-size: var(--font-small); color: var(--muted); }
+#performanceClock { min-width: 68px; color: var(--ink); }
+#performanceMotionState { display: inline-flex; align-items: center; gap: 5px; font-size: var(--font-small); color: var(--text-secondary); }
+#performanceMotionState svg { width: 12px; height: 12px; }
+#performanceBar.waiting-for-motion .performance-recording-label, #performanceBar.waiting-for-motion #performanceMotionState { color: var(--warning); }

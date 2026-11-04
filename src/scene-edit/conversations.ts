@@ -1,6 +1,7 @@
 import { newId } from "../id.ts";
 import { z } from 'zod';
 import { operationSchema, legacyShotOperationSchema } from './operations.ts';
+import { savedPerformanceSchema } from '../performance/refinement.ts';
 
 export const MAX_HISTORY_MESSAGES = 200;
 export const MAX_HISTORY_CHARACTERS = 120_000;
@@ -13,7 +14,7 @@ const identifier = z.string().min(1).max(64);
 const userMessageSchema = z.strictObject({
   id: identifier, role: z.literal('user'), text: z.string().min(1).max(2000),
   status: z.enum(['pending', 'answered', 'failed', 'stopped']), detail: z.string().max(500).optional(),
-  context: z.strictObject({ sceneId: identifier.nullable(), shotId: identifier.nullable(), selectedId: identifier.nullable().optional(), selectedIds: z.array(identifier).optional(), time: z.number().min(0).max(60).optional() }).optional(),
+  context: z.strictObject({ sceneId: identifier.nullable(), shotId: identifier.nullable(), selectedId: identifier.nullable().optional(), selectedIds: z.array(identifier).optional(), time: z.number().min(0).max(60).optional(), performance: savedPerformanceSchema.optional() }).optional(),
 });
 const assistantMessageSchema = z.strictObject({
   id: identifier, role: z.literal('assistant'), text: z.string().min(1).max(4000), model: z.string().max(160),
@@ -27,6 +28,7 @@ export const conversationsSchema = z.strictObject({
   activeId: identifier,
   threads: z.array(z.strictObject({
     id: identifier, title: z.string().min(1).max(120), draft: z.string().max(2000),
+    performance: savedPerformanceSchema.optional(),
     messages: z.array(z.discriminatedUnion('role', [userMessageSchema, assistantMessageSchema])),
   })).min(1),
 }).superRefine((book, ctx) => {

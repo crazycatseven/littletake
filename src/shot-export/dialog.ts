@@ -6,6 +6,7 @@ import type { ShotRenderer } from './renderer';
 import type { Workspace } from '../project/workspace';
 import { MAX_OUTPUT_BYTES } from '../project/room';
 import { newId } from '../id';
+import { mountMusePreparation } from '../look/dialog';
 
 /** A dialog owns one frozen scene snapshot and releases it on close. */
 export function openShotExport(renderer: ShotRenderer, shot: Shot, time: number, workspace: Workspace): void {
@@ -14,26 +15,30 @@ export function openShotExport(renderer: ShotRenderer, shot: Shot, time: number,
   const hidden = renderer.document.objects.filter(item => item.hidden).length;
   const dialog = document.createElement('dialog'); dialog.className = 'shot-export-dialog';
   dialog.setAttribute('aria-label', 'Render');
-  dialog.innerHTML = `<div class="export-heading"><div><small>VIDEO & STILLS</small><h2>Render</h2></div><button data-close aria-label="Close render">${icon('close')}</button></div>
-    <p data-shot class="export-subtitle"></p><div class="export-layout"><div><div class="export-preview"></div><p class="export-frame-caption"></p></div>
-    <div><fieldset class="export-settings"><div class="export-tabs" role="tablist" aria-label="Output format"><button role="tab" data-format="image" aria-selected="true">Still image</button><button role="tab" data-format="video" aria-selected="false">Video</button></div>
+  dialog.innerHTML = `<div class="export-heading"><div><small>VIDEO, STILLS & STORYBOARDS</small><h2>Render</h2></div><button data-close aria-label="Close render">${icon('close')}</button></div>
+    <p data-shot class="export-subtitle"></p><div class="export-tabs" role="tablist" aria-label="Render output"><button id="renderImageTab" role="tab" data-format="image" aria-controls="renderOutputPanel" aria-selected="true">Still image</button><button id="renderVideoTab" role="tab" data-format="video" aria-controls="renderOutputPanel" aria-selected="false">Video</button><button id="renderMuseTab" role="tab" data-format="muse" aria-controls="renderMusePanel" aria-selected="false">${icon('sparkles')} Storyboards</button></div>
+    <div id="renderOutputPanel" role="tabpanel" class="export-layout"><div><div class="export-preview"></div><p class="export-frame-caption"></p></div>
+    <div><fieldset class="export-settings">
     <label>Resolution<select aria-label="Export resolution"><option value="1920">1920 × 1080</option><option value="1280">1280 × 720</option></select></label>
     <label data-video hidden>Frame rate<select aria-label="Export frame rate"><option value="24">24 fps</option><option value="30">30 fps</option></select></label>
     <p class="export-range"></p><p class="export-exclusions">${hidden} hidden object${hidden === 1 ? '' : 's'} excluded<br>Clean camera view · no editor overlays</p></fieldset>
     <div class="export-progress" hidden><progress max="1" value="0"></progress><span role="status"></span></div><p class="export-message" role="status" aria-live="polite"></p>
-    <div class="export-actions"><button data-cancel hidden>Cancel render</button><button data-render class="primary-button">Render still</button><a data-download class="primary-button" hidden>Download PNG</a></div></div></div>`;
+    <div class="export-actions"><button data-cancel hidden>Cancel render</button><button data-render class="primary-button">Render still</button><a data-download class="primary-button" hidden>Download PNG</a></div></div></div><div id="renderMusePanel" role="tabpanel" aria-labelledby="renderMuseTab" hidden></div>`;
   const room = workspace.room;
   const find = <T extends HTMLElement = HTMLElement>(selector: string) => dialog.querySelector<T>(selector)!;
   find('[data-shot]').textContent = shot.name + ' · ' + camera.name;
   const preview = find('.export-preview'), settings = find<HTMLFieldSetElement>('.export-settings');
   preview.append(renderer.canvas);
-  let format: 'image' | 'video' = 'image', busy = false, url: string | null = null, controller: AbortController | null = null;
+  let format: 'image' | 'video' | 'muse' = 'image', busy = false, url: string | null = null, controller: AbortController | null = null, closing = false, cleaned = false;
+  let preparation: ReturnType<typeof mountMusePreparation> | undefined;
   const clearResult = () => { if (url) URL.revokeObjectURL(url); url = null; find('[data-download]').hidden = true; };
   const showFrame = () => {
     renderer.resize(720, 405); preview.replaceChildren(renderer.render(format === 'image' ? time : shot.start));
     find('.export-frame-caption').textContent = format === 'image' ? `Scene time ${time.toFixed(2)}s · current frame` : `Scene time ${shot.start.toFixed(2)}–${(shot.start + shot.duration).toFixed(2)}s`;
   };
   const update = () => {
+    find('#renderOutputPanel').hidden = format === 'muse'; find('#renderMusePanel').hidden = format !== 'muse';
+    find('#renderOutputPanel').setAttribute('aria-labelledby', format === 'image' ? 'renderImageTab' : 'renderVideoTab');
     settings.disabled = busy;
     find('[data-video]').hidden = format !== 'video';
     find('.export-range').textContent = format === 'image' ? `PNG · Frame at ${time.toFixed(2)}s` : `WebM · ${shot.duration.toFixed(2)} seconds · silent video`;
@@ -41,17 +46,23 @@ export function openShotExport(renderer: ShotRenderer, shot: Shot, time: number,
     const render = find<HTMLButtonElement>('[data-render]'); render.textContent = busy ? 'Rendering…' : format === 'image' ? 'Render still' : 'Render video'; render.disabled = busy || !!issue;
     find('[data-cancel]').hidden = !busy;
     if (issue) find('.export-message').textContent = issue;
-    dialog.querySelectorAll<HTMLButtonElement>('[data-format]').forEach(button => { const active = button.dataset.format === format; button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1; });
+    dialog.querySelectorAll<HTMLButtonElement>('[data-format]').forEach(button => { const active = button.dataset.format === format; button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1; button.disabled = busy || !!preparation?.busy; });
   };
-  const cleanup = () => { clearResult(); renderer.dispose(); dialog.remove(); };
-  dialog.addEventListener('close', () => { controller?.abort(); if (!busy) cleanup(); });
+  const cleanup = () => { if (cleaned || busy || preparation?.busy) return; cleaned = true; preparation?.dispose(); clearResult(); renderer.dispose(); dialog.remove(); };
+  dialog.addEventListener('close', () => { closing = true; controller?.abort(); preparation?.cancel(); cleanup(); });
   find('[data-close]').onclick = () => dialog.close();
   find('[data-cancel]').onclick = () => { controller?.abort(); find('.export-message').textContent = 'Cancelling…'; };
   dialog.querySelectorAll<HTMLButtonElement>('[data-format]').forEach(button => button.onclick = () => {
-    format = button.dataset.format as typeof format; clearResult(); find('.export-message').textContent = ''; showFrame(); update();
+    if (busy || preparation?.busy) return;
+    format = button.dataset.format as typeof format; clearResult(); find('.export-message').textContent = '';
+    if (format === 'muse') {
+      try { preparation ??= mountMusePreparation(find('#renderMusePanel'),renderer,shot,workspace,()=>{ if(closing) cleanup(); else update(); }); }
+      catch (error) { find('#renderMusePanel').textContent = `References could not be prepared. ${(error as Error).message}`; }
+    } else showFrame();
+    update();
   });
   find('.export-tabs').addEventListener('keydown', event => {
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const next = find<HTMLButtonElement>(`[data-format="${format === 'image' ? 'video' : 'image'}"]`); next.click(); next.focus(); }
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const modes = ['image','video','muse'], next = find<HTMLButtonElement>(`[data-format="${modes[(modes.indexOf(format)+(event.key==='ArrowRight'?1:2))%3]}"]`); next.click(); next.focus(); }
   });
   settings.addEventListener('change', () => { clearResult(); find('.export-message').textContent = ''; showFrame(); update(); });
   find('[data-render]').onclick = async () => {

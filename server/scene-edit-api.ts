@@ -7,7 +7,7 @@ import { ReferenceTools } from './reference/sam/tools.ts';
 import type { LocalDepthService } from './reference/geometry/depth.ts';
 import { brotliCompressSync, constants } from 'node:zlib';
 
-const MAX_BODY = 4_100_000;
+const MAX_BODY = 20_000_000;
 function json(value: unknown, status = 200, request?: Request) {
   const body = JSON.stringify(value), headers = new Headers({ 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', Vary: 'Accept-Encoding' });
   const acceptsBrotli = request?.headers.get('accept-encoding')?.split(',').some(part => {

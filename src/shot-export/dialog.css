@@ -1,4 +1,5 @@
-.shot-export-dialog { width:min(940px,calc(100vw - 48px)); max-height:calc(100dvh - 48px); overflow:auto; padding:24px; border:1px solid var(--line); border-radius:var(--radius-dialog); color:var(--ink); background:var(--paper); box-shadow:var(--shadow-floating); }
+.shot-export-dialog { width:min(1040px,calc(100vw - 48px)); max-height:calc(100dvh - 48px); overflow:auto; padding:24px; border:1px solid var(--line); border-radius:var(--radius-dialog); color:var(--ink); background:var(--paper); box-shadow:var(--shadow-floating); }
+.shot-export-dialog [hidden] { display:none !important; }
 .shot-export-dialog::backdrop { background:var(--backdrop); backdrop-filter:none; }
 .export-heading { display:flex; align-items:center; justify-content:space-between; }
 .export-heading small { font-size:9px; letter-spacing:.15em; color:var(--muted); }
