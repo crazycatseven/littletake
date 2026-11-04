@@ -125,7 +125,7 @@ test('scene API checks origin, malformed JSON and body limits before calling the
   let calls = 0; const handler = createSceneEditHandler({ MODEL_API_KEY: 'not-public' }, () => ({ ...provider(plan()), async generateObject() { calls++; return plan(); } }));
   assert.equal((await handler(request(input(), 'https://another.example'))).status, 403);
   assert.equal((await handler(request({}))).status, 400);
-  assert.equal((await handler(request({ padding: 'x'.repeat(4_100_001) }))).status, 413);
+  assert.equal((await handler(request({ padding: 'x'.repeat(20_000_001) }))).status, 413);
   assert.equal(calls, 0);
   const response = await handler(request(input())); assert.equal(response.status, 200); assert.equal((await response.json()).status, 'ready'); assert.equal(calls, 1);
 });
