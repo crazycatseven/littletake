@@ -5,8 +5,9 @@ import type { SceneEditInput, SceneEditResponse } from './types';
 import { saveDiagnostic, type DiagnosticIdentity, type RequestDiagnostic } from './diagnostic-store';
 import { referenceContextSchema } from '../reference/observations';
 import { performanceRequestSchema } from '../performance/refinement';
+import { readSceneEditResponse, type ProgressListener } from './progress';
 
-export async function requestSceneEdit(input: SceneEditInput, signal: AbortSignal, identity?: DiagnosticIdentity): Promise<SceneEditResponse> {
+export async function requestSceneEdit(input: SceneEditInput, signal: AbortSignal, identity?: DiagnosticIdentity, onProgress?: ProgressListener): Promise<SceneEditResponse> {
   const id = newId();
   const record: RequestDiagnostic = { id, turnId: id, conversationId: '', messageId: '', ...identity,
     startedAt: new Date().toISOString(), input: structuredClone(input), status: 'pending' };
@@ -14,15 +15,17 @@ export async function requestSceneEdit(input: SceneEditInput, signal: AbortSigna
   // Persist the exact input before starting a paid request. A reload leaves an identifiable interrupted request.
   await saveDiagnostic(record);
   try {
-    const response = await projectFetch('/api/scene-edit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal });
-    const text = await response.text();
-    let data; try { data = JSON.parse(text); } catch { record.unreadableResponse = text; throw new Error('The edit server did not return a response. Try again.'); }
+    const response = await projectFetch('/api/scene-edit', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' }, body: JSON.stringify(input), signal });
+    const data = await readSceneEditResponse(response, event => {
+      record.server ??= { format: 'LittleTake.scene-edit-diagnostic', version: 1, id, startedAt: record.startedAt, attempts: [] };
+      (record.server.progress ??= []).push(event); onProgress?.(event);
+    }) as any;
     if (data.diagnostic) record.server = data.diagnostic;
     if (data.reference) {
       if (!input.reference || data.reference.sourceId !== input.reference.source.id || data.reference.callsUsed < input.reference.callsUsed || (input.reference.framesRequested && !data.reference.framesRequested)) throw new Error('Reference progress differs from this conversation turn.');
       referenceContextSchema.parse({ source: input.reference.source, observations: data.reference.observations, callsUsed: data.reference.callsUsed, framesRequested: data.reference.framesRequested });
     }
-    if (!response.ok) throw new Error(typeof data.error?.message === 'string' ? data.error.message.slice(0, 300) : 'Muse could not finish this edit.', { cause: data.reference ? { referenceProgress: data.reference } : undefined });
+    if (!response.ok || data.error) throw new Error(typeof data.error?.message === 'string' ? data.error.message.slice(0, 300) : 'Muse could not finish this edit.', { cause: data.reference ? { referenceProgress: data.reference } : undefined });
     if (typeof data.provider !== 'string' || typeof data.model !== 'string') throw new Error('The edit response was incomplete.');
     let result: SceneEditResponse;
     if (data.status === 'needs_reference_frames' && input.reference?.source.kind === 'video' && data.reference && Array.isArray(data.requestedTimes) && data.requestedTimes.length > 0 && data.requestedTimes.length <= 2 && new Set(data.requestedTimes).size === data.requestedTimes.length && data.requestedTimes.every((time: unknown) => typeof time === 'number' && Number.isFinite(time) && time >= 0 && time < input.reference!.source.duration) && typeof data.summary === 'string') result = data;
@@ -37,6 +40,7 @@ export async function requestSceneEdit(input: SceneEditInput, signal: AbortSigna
     record.status = result.status; record.finishedAt = new Date().toISOString(); await saveDiagnostic(record);
     return result;
   } catch (error) {
+    if (error instanceof Error && error.cause && typeof error.cause === 'object' && 'unreadableResponse' in error.cause) record.unreadableResponse = String(error.cause.unreadableResponse);
     record.status = signal.aborted ? 'cancelled' : 'failed'; record.finishedAt = new Date().toISOString();
     record.error = error instanceof Error ? error.message : 'Request failed.';
     await saveDiagnostic(record); throw error;

@@ -1,7 +1,7 @@
 import {humanProxyParts} from '../assets/human.ts';
 import { sceneWorldMatrices, worldTransform } from '../placement/hierarchy.ts';
 import { Box3, BoxGeometry, BufferGeometry, CapsuleGeometry, Color, ConeGeometry, CylinderGeometry, DoubleSide,
-  Euler, Group, MathUtils, Matrix3, Matrix4, Mesh, MeshStandardMaterial, Quaternion, Raycaster, SphereGeometry, PlaneGeometry, Vector3 } from 'three';
+  Euler, Group, MathUtils, Matrix3, Matrix4, Mesh, MeshStandardMaterial, Quaternion, Raycaster, SphereGeometry, PlaneGeometry, Vector3,PerspectiveCamera } from 'three';
 import { createAssetGroup, disposeAssetGroup, poseAssetJoints, type AssetDefinition } from '../assets/model.ts';
 import { evaluateTransform, evaluateJointAngles, sceneEntity } from '../model.ts';
 import type { ProjectContent, SceneObject, Transform, Vec3 } from '../types.ts';
@@ -63,6 +63,10 @@ export function geometryVertices(root: Group): Vector3[] {
   return vertices;
 }
 export const boxData = (box: Box3) => ({ min: box.min.toArray(), max: box.max.toArray(), size: box.getSize(new Vector3()).toArray() });
+/** Shared by CPU inspection, the live shot and export: clip beyond the actual visible set. */
+export function cameraFarForBounds(position:Vector3,bounds:Box3):number {
+  return bounds.isEmpty()?500:Math.max(500,position.distanceTo(bounds.getCenter(new Vector3()))+bounds.getSize(new Vector3()).length());
+}
 /** Actual bottom vertices and bottom-face centroids, bounded for interactive queries. */
 export function bottomPoints(root: Group, bounds: Box3): Vector3[] {
   const points = new Map<string, Vector3>();
@@ -85,6 +89,18 @@ export function upwardSurface(root: Group, x: number, z: number, fromY: number):
 }
 
 /** Disposable CPU geometry; no renderer, GPU context, network or model invocation. */
+/** Solve distance/target from world geometry; visibility still needs a depth-tested render. */
+export function fitCameraToBounds(bounds:Box3,direction:Vector3,fov:number,aspect=16/9,margin=1.15){
+  if(bounds.isEmpty()||direction.lengthSq()<1e-8)throw new Error('Camera fitting needs nonempty bounds and a nonzero world view direction.');
+  const center=bounds.getCenter(new Vector3()),back=direction.clone().normalize(),camera=new PerspectiveCamera(fov,aspect);
+  camera.position.copy(center).add(back);camera.lookAt(center);camera.updateMatrixWorld(true);
+  const right=new Vector3(1,0,0).applyQuaternion(camera.quaternion),up=new Vector3(0,1,0).applyQuaternion(camera.quaternion),tanV=Math.tan(MathUtils.degToRad(fov/2)),tanH=tanV*aspect;let distance=.1;
+  for(const x of [bounds.min.x,bounds.max.x])for(const y of [bounds.min.y,bounds.max.y])for(const z of [bounds.min.z,bounds.max.z]){
+    const point=new Vector3(x,y,z).sub(center);distance=Math.max(distance,point.dot(back)+margin*Math.max(Math.abs(point.dot(right))/tanH,Math.abs(point.dot(up))/tanV)+.1);
+  }
+  return {position:center.clone().addScaledVector(back,distance).toArray() as Vec3,target:center.toArray() as Vec3,fov};
+}
+
 export class SpatialScene {
   readonly scene;
   private roots = new Map<string, Group>();

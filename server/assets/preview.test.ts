@@ -13,6 +13,7 @@ import {renderScenePreview} from './preview.ts';
 import {validateAsset} from '../../src/assets/model.ts';
 import {validateProjectContent} from '../../src/project/model.ts';
 import {serializeContent} from '../../src/project/model.ts';
+import {createEmptyScene,createCamera,createShot,createObject} from '../../src/model.ts';
 
 test('expert cabinet views hide interior geometry behind closed mirrored doors, reveal it when opened, and record both inspection poses', async () => {
   type Part = AssetRecipe['parts'][number];
@@ -67,4 +68,11 @@ test('recorded scene inspection matches actual WebGL visibility across three sho
   const pixels=new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="640" height="1152"><image width="640" height="1152" href="data:image/png;base64,${Buffer.from(cropped.image).toString('base64')}"/></svg>`).render().pixels;
   for(const row of [24+10,24+180,24+350])for(const x of [10,630])assert.deepEqual([...pixels.subarray((row*640+x)*4,(row*640+x)*4+4)],[0,0,0,255]);
   assert.equal(JSON.stringify(project),frozen,'Applying a measured matte cannot modify the source geometry, lens or animation.');
+});
+
+test('large sets keep distant animated subjects visible instead of clipping them at the former 500 metre limit',()=>{
+  const scene=createEmptyScene(),camera=createCamera('camera'),object=createObject('cube',1);scene.duration=5;camera.transform.position=[0,2,0];camera.transform.rotation=[0,0,0];object.transform.position=[0,2,-600];object.transform.scale=[100,4,4];object.color='#ff0000';object.track={start:0,duration:5,from:structuredClone(object.transform),to:{...structuredClone(object.transform),position:[0,2,-900]}};
+  scene.objects=[object];scene.cameras=[camera];scene.shots=[createShot(camera,'shot',5)];const frozen=JSON.stringify(scene),preview=renderScenePreview(scene,[],[{shotId:'shot',time:0},{shotId:'shot',time:5}],undefined,true);
+  assert.ok(preview.frames[0].visibleBoxes[object.id]!.pixels>50);assert.ok(preview.frames[1].visibleBoxes[object.id]!.pixels>20);assert.ok(preview.frames[1].visibleBoxes[object.id]!.pixels<preview.frames[0].visibleBoxes[object.id]!.pixels,'The farther subject must still project smaller.');const occupied=preview.frames.slice(2).map(frame=>{const box=frame.visibleBoxes[object.id]!.box;return Math.max(box[2]-box[0],box[3]-box[1]);});assert.ok(occupied.every(size=>size>.6)&&occupied.some(size=>size>.85),'Automatic inspection must fit the projected bounds instead of wasting most pixels around a long subject.');assert.equal(JSON.stringify(scene),frozen);
+  const alongZ=structuredClone(scene);alongZ.objects[0].transform.scale=[4,4,100];alongZ.objects[0].track=null;const top=renderScenePreview(alongZ,[],[],undefined,true).frames.at(-1)!,box=top.visibleBoxes[object.id]!.box;assert.ok(box[2]-box[0]>.85);assert.ok(Math.abs(top.camera.screenRight[2])>.99,'The diagnostic top view should orient a long subject across the available image width, with measured axes supplied.');
 });

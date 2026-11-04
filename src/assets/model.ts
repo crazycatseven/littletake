@@ -18,7 +18,7 @@ export const assetRecipeSchema = z.strictObject({
 });
 export const assetSchema = assetRecipeSchema.extend({
   id: identifier, source: z.enum(['builtin', 'generated', 'edited']), createdAt: z.string(),
-  bounds: z.strictObject({ min: vector(-1000, 1000), max: vector(-1000, 1000), size: vector(0.001, 1000) }),
+  bounds: z.strictObject({ min: vector(-1000, 1000), max: vector(-1000, 1000), size: vector(0.001, 2000) }),
   template: z.strictObject({ components: componentsSchema.refine(items=>!items.some(c=>c.type==='script'||c.type==='appearanceReference'),'Project scripts and appearance references attach to scene instances, not shared prefab templates.'), track: motionSchema.nullable(), transform: transformSchema.optional(), animation: (animationSchema as z.ZodType<PropertyAnimation>).optional(), jointAngles: jointAnglesSchema.optional() }).optional(),
 });
 export type AssetRecipe = z.infer<typeof assetRecipeSchema>;

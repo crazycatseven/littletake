@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Euler, MathUtils, Quaternion, Vector3 } from 'three';
-import { History, cloneDocument, createDocument, createObject, evaluateTransform, parseDocument, serializeDocument, validateDocument } from '../src/model';
+import { MAX_SCENE_OBJECTS, History, cloneDocument, createDocument, createObject, evaluateTransform, parseDocument, serializeDocument, validateDocument } from '../src/model';
 import type { SceneDocument, Transform, Vec3 } from '../src/types';
 
 const close = (actual: number, expected: number) => assert.ok(Math.abs(actual - expected) < 1e-7, `${actual} should equal ${expected}`);
@@ -136,7 +136,7 @@ test('validation enforces finite bounded transforms, scene length and motion int
 });
 
 test('import limits object count and file size and rejects prototype pollution and accessors', () => {
-  rejection(doc => { doc.objects = Array.from({ length: 101 }, (_, i) => createObject('cube', i + 1)); }, /100 objects/);
+  rejection(doc => { doc.objects = Array.from({ length: MAX_SCENE_OBJECTS + 1 }, (_, i) => createObject('cube', i + 1)); }, new RegExp(MAX_SCENE_OBJECTS + ' objects'));
   assert.throws(() => parseDocument(' '.repeat(20_000_001)), /too large/);
   rejection(doc => { doc.objects = new Array(3); }, /sparse/);
   const badArray = createDocument();
