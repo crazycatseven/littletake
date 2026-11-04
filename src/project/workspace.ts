@@ -86,6 +86,8 @@ export class Workspace {
     };
     this.sessionReady = new Promise(resolve => { channel.postMessage({ type: 'check', lease: this.lease, page }); setTimeout(() => { if (sharedLease) { this.lease = newId(); sessionStorage.setItem('littletake.edit-session', this.lease); } resolve(); }, 100); });
     this.home.className = 'projects-dialog'; this.home.setAttribute('aria-label', 'Projects');
+    // Focus the gallery itself on open, so the browser does not ring the first link (the logo) on every visit.
+    this.home.tabIndex = -1;
     this.share.className = 'project-share-dialog'; this.share.setAttribute('aria-label', 'Share project');
     this.cloudDialog.className = 'project-cloud-dialog'; this.cloudDialog.setAttribute('aria-label', 'Cloud projects');
     document.body.append(this.home, this.share, this.cloudDialog);
@@ -320,13 +322,13 @@ export class Workspace {
   async newProject() { await this.showProjects(); if (this.home.open) await this.action('new'); }
   private showHome(load = true) {
     const generation = ++this.homeGeneration;
-    this.home.innerHTML = `<header class="projects-heading"><a class="brand" href="/">LittleTake</a><span>GALLERY</span><nav>${this.canUpload ? `<button data-project-action="${this.remoteGallery ? 'downloads' : 'cloud'}">${this.remoteGallery ? 'Downloaded projects' : 'Cloud projects'}</button>` : ''}<button data-project-action="join">Join with a code</button><button data-project-action="import">Import project</button><button class="primary-button" data-project-action="new">${icon('plus')} New project</button></nav></header>
+    this.home.innerHTML = `<header class="projects-heading"><a class="brand" href="/" aria-label="LittleTake"><span class="brand-mark">L</span><span>LittleTake</span></a><span>GALLERY</span><nav>${this.canUpload ? `<button data-project-action="${this.remoteGallery ? 'downloads' : 'cloud'}">${this.remoteGallery ? 'Downloaded projects' : 'Cloud projects'}</button>` : ''}<button data-project-action="join">Join with a code</button><button data-project-action="import">Import project</button><button class="primary-button" data-project-action="new">${icon('plus')} New project</button></nav></header>
       <div class="projects-welcome"><div><h1>${this.remoteGallery ? 'Cloud projects' : this.autosave ? 'Projects' : 'Downloaded projects'}</h1><p>${this.autosave ? 'Turn a sentence, a sketch or a film clip into an editable 3D previs: set, characters, cameras and shots. Open an example below, or start a new project.' : 'Open a local copy to edit. Upload manually to replace the cloud project.'}</p></div><span class="projects-count"></span></div>
       <section class="project-examples" aria-label="Examples"><div class="project-examples-heading"><h2>New here? Open an example</h2><p>Each one opens as your own copy. Press play to watch its shots, then change anything by hand or by asking Muse.</p></div><div class="project-example-cards">${EXAMPLES.map(example => `<button class="project-example" data-project-action="example" data-code="${example.slug}"><img src="/examples/${example.slug}.webp" alt="" width="640" height="360" loading="lazy" /><span><strong>${escape(example.name)}</strong><small>${escape(example.detail)}</small></span></button>`).join('')}</div></section>
       <div class="projects-toolbar"><label class="project-search"><span aria-hidden="true">${icon('search')}</span><input type="search" aria-label="Search projects" placeholder="Search projects…" value="${escape(this.projectSearch)}" /></label><label class="project-sort">Sort by<select aria-label="Sort projects"><option value="recent" ${this.projectSort === 'recent' ? 'selected' : ''}>Last edited</option><option value="name" ${this.projectSort === 'name' ? 'selected' : ''}>Name A–Z</option></select></label></div>
       <section class="project-cards" aria-label="Projects"></section>
       ${this.creation ? '<button data-project-action="recover">Retry creating project</button>' : ''}${this.browserRecoveryId ? '<a class="project-recovery-link" href="/api/projects?browserRecovery=' + this.browserRecoveryId + '">Download previous browser data backup</a>' : ''}<p class="projects-error" role="alert" hidden></p><footer>${this.autosave ? 'Projects, assets and conversations are stored on the cloud server.' : 'Local editing has no autosave. Upload to cloud or export a project file before leaving.'}</footer>`;
-    if (!this.home.open) this.home.showModal();
+    if (!this.home.open) { this.home.showModal(); this.home.focus({ preventScroll: true }); }
     document.getElementById('workspaceOpening')?.remove();
     this.renderProjectCards();
     this.home.querySelector<HTMLInputElement>('.project-search input')!.oninput = event => { this.projectSearch = (event.target as HTMLInputElement).value; this.renderProjectCards(); };

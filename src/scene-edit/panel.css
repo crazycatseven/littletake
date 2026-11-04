@@ -18,6 +18,8 @@
 .scene-context-detail { margin-left: auto; color: var(--muted); }
 .context-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); }
 .chat-messages { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 20px 12px; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+/* Soft top edge: messages fade out under the thread header instead of being cut off mid-line. */
+.chat-messages { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px); mask-image: linear-gradient(to bottom, transparent 0, #000 16px); }
 .chat-message { margin-bottom: 22px; font-size: var(--font-body); line-height: 1.7; overflow-wrap: anywhere; }
 .message-label { color: var(--text-secondary); font-size: var(--font-small); font-weight: 550; margin-bottom: 9px; }
 .chat-message.user { background: var(--surface-raised); border-radius: var(--radius-panel); padding: 12px 15px; margin-left: 0; color: var(--text-secondary); }
