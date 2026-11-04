@@ -23,6 +23,8 @@
   letter-spacing:2px;
   color:var(--muted)}
 .projects-heading .brand {color:var(--ink);text-decoration:none;font-size:21px;font-weight:600;letter-spacing:-.7px}
+.projects-heading .brand .brand-mark {width:27px;height:29px;font-size:22px}
+.projects-dialog:focus-visible {outline:none}
 .projects-heading nav {display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
 .projects-welcome {
   min-height:150px;

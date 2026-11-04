@@ -368,13 +368,21 @@ dialog::backdrop { background: var(--backdrop); backdrop-filter: none; }
   .viewport-heading .view-tools { position: absolute; top: 54px; left: 10px; }
 }
 
-.getting-started { position: absolute; z-index: 6; left: 16px; bottom: 34px; width: min(310px, calc(100% - 32px)); padding: 11px 13px 12px; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--paper); box-shadow: var(--shadow-floating); font-size: var(--font-small); line-height: 1.55; color: var(--text-secondary); }
+.getting-started { position: absolute; z-index: 6; left: 14px; bottom: 34px; width: min(272px, calc(100% - 28px)); padding: 9px 12px 11px; border: 1px solid #ffffff14; border-radius: var(--radius-panel); background: color-mix(in srgb, var(--paper) 86%, transparent); backdrop-filter: blur(10px) saturate(1.1); box-shadow: 0 8px 24px #00000059; font-size: var(--font-small); line-height: 1.5; color: var(--text-secondary); }
 .getting-started[hidden] { display: none; }
-.getting-started header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; color: var(--ink); font-size: var(--font-ui); }
+.getting-started header { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px; color: var(--ink); font-size: var(--font-ui); }
 .getting-started header button { width: 22px; height: 22px; padding: 4px; border: 0; color: var(--text-secondary); }
 .getting-started header svg { width: 13px; height: 13px; }
+.getting-started header .getting-started-toggle { display: inline-flex; align-items: center; gap: 6px; width: auto; height: 22px; padding: 2px 6px 2px 2px; margin-left: -2px; color: var(--ink); font-size: var(--font-ui); }
+.getting-started-toggle svg { color: var(--muted); transition: transform .16s ease; }
+.getting-started-toggle strong { font-weight: 600; letter-spacing: -.1px; }
+.getting-started.folded { width: auto; padding: 5px 6px 5px 8px; }
+.getting-started.folded header { margin-bottom: 0; }
+.getting-started.folded .getting-started-toggle svg { transform: rotate(-90deg); }
+.getting-started.folded ol { display: none; }
 .getting-started ol { margin: 0; padding-left: 16px; display: grid; gap: 5px; }
+.getting-started li::marker { color: var(--muted); }
 .getting-started b { color: var(--ink); font-weight: 500; }
-.getting-started li > button { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; margin-right: 2px; border: 1px solid var(--line); border-radius: var(--radius-control); font-size: var(--font-small); color: var(--ink); vertical-align: baseline; }
+.getting-started li > button { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; margin-right: 2px; border: 1px solid var(--line); border-radius: var(--radius-control); font-size: var(--font-small); color: var(--ink); vertical-align: baseline; }
 .getting-started li > button svg { width: 11px; height: 11px; }
 .performance-active .getting-started { display: none; }

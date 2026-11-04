@@ -34,6 +34,8 @@
 .look-actions { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
 .look-actions [hidden] { display:none; }
 .look-footer { position:sticky; bottom:0; z-index:1; padding:8px 0; background:var(--paper); border-top:1px solid var(--line); margin-top:18px; }
+/* Inside the 24px-padded render dialog, reach the dialog's bottom edge so content never shows through below the footer. */
+.shot-export-dialog .look-footer { bottom:-24px; padding-bottom:14px; box-shadow:0 -14px 18px -16px #000000b3; }
 .look-footer .look-message { margin-top:0; }
 .look-footer .look-upload-help { margin-bottom:0; }
 
@@ -52,6 +54,8 @@
 .look-handoff-row { padding:9px 0; border-bottom:1px solid var(--line); }
 .look-handoff-row a { margin-right:auto; }
 .look-handoffs a { color:var(--accent); }
+.look-actions a { color:var(--accent); text-underline-offset:3px; }
+.look-actions a:hover { color:var(--ink); }
 .look-handoffs textarea { box-sizing:border-box; width:100%; min-height:95px; background:var(--field); color:var(--ink); border:1px solid var(--line); border-radius:var(--radius-control); padding:10px; font-family:inherit; font-size:11px; line-height:1.6; }
 .look-handoffs [hidden] { display:none; }
 
