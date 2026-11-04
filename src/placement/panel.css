@@ -1,5 +1,5 @@
-.hierarchy-search { margin:10px 12px 4px; width:calc(100% - 24px); font-size:11px; }
-.hierarchy-tools { display:flex; align-items:center; gap:3px; padding:4px 12px; font-size:10px; color:var(--muted); }
+.hierarchy-search { margin:10px 12px 4px; width:calc(100% - 24px); font-size: var(--font-small); }
+.hierarchy-tools { display:flex; align-items:center; gap:3px; padding:4px 12px; font-size: var(--font-small); color:var(--muted); }
 .hierarchy-tools span { flex:1; }
 .hierarchy-tools button { padding:5px; }
 .hierarchy-tools svg,.visibility-toggle svg { width:14px; height:14px; }
@@ -9,36 +9,36 @@
 .hierarchy-object.is-hidden .object-row { opacity:.48; }
 .visibility-toggle { flex:0 0 26px; padding:5px; color:var(--text-secondary); }
 .hierarchy-object.is-hidden .visibility-toggle { color:var(--warning); }
-.hierarchy-footer { border-top:1px solid var(--line); padding:9px 12px; font-size:10px; color:var(--muted); }
-.hierarchy-toggle { flex:0 0 18px; width:18px; padding:3px 0; font-size:10px; color:var(--muted); }
+.hierarchy-footer { border-top:1px solid var(--line); padding:9px 12px; font-size: var(--font-small); color:var(--muted); }
+.hierarchy-toggle { flex:0 0 18px; width:18px; padding:3px 0; font-size: var(--font-small); color:var(--muted); }
 .hierarchy-toggle:disabled { opacity:0; }
 .hierarchy-object .object-row { padding-left:4px; }
-.hierarchy-root-drop { display:none; position:sticky; bottom:0; min-height:30px; padding:8px; border:1px dashed var(--line-strong); border-radius:var(--radius-control); background:var(--paper); color:var(--muted); font-size:10px; text-align:center; }
+.hierarchy-root-drop { display:none; position:sticky; bottom:0; min-height:30px; padding:8px; border:1px dashed var(--line-strong); border-radius:var(--radius-control); background:var(--paper); color:var(--muted); font-size: var(--font-small); text-align:center; }
 .hierarchy-dragging .hierarchy-root-drop { display:block; }
 .hierarchy-drop-target { outline:1px solid var(--accent)!important; outline-offset:-1px; background:var(--selection)!important; }
-.parent-field { display:flex; align-items:center; gap:10px; margin:10px 0 15px; color:var(--muted); font-size:11px; }
+.parent-field { display:flex; align-items:center; gap:10px; margin:10px 0 15px; color:var(--muted); font-size: var(--font-small); }
 .parent-field select { flex:1; min-width:0; border:1px solid var(--line); border-radius:var(--radius-control); padding:6px 8px; background:var(--field); color:var(--ink); font:inherit; }
-.visibility-card { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:14px 0; padding:10px; border:1px solid var(--line); border-radius:var(--radius-control); background:var(--surface-raised); font-size:11px; }
-.visibility-card small { display:block; font-size:10px; color:var(--muted); margin-top:4px; }
+.visibility-card { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:14px 0; padding:10px; border:1px solid var(--line); border-radius:var(--radius-control); background:var(--surface-raised); font-size: var(--font-small); }
+.visibility-card small { display:block; font-size: var(--font-small); color:var(--muted); margin-top:4px; }
 .visibility-card button { border:1px solid var(--line); padding:6px 10px; }
 .viewport-heading { flex-wrap:wrap; align-content:center; gap:5px; height:auto; min-height:55px; padding-top:8px; padding-bottom:8px; }
 .viewport-heading:has(details[open]) { z-index:8; }
 .viewport-heading .placement-tools { display:flex; gap:4px; align-items:center; margin-right:auto; border:1px solid var(--line); border-radius:var(--radius-control); background:var(--surface-raised); }
 .placement-tools details { position:relative; }
-.placement-tools summary { cursor:pointer; list-style:none; padding:7px 8px; font-size:11px; color:var(--text-secondary); }
+.placement-tools summary { cursor:pointer; list-style:none; padding:7px 8px; font-size: var(--font-small); color:var(--text-secondary); }
 .placement-tools summary::-webkit-details-marker { display:none; }
 .snap-control { display:flex; border-left:1px solid var(--line); border-right:1px solid var(--line); }
 .placement-tools [aria-pressed="true"] { background:var(--selection); color:var(--selection-ink); }
-.placement-popover { position:absolute; z-index:15; top:calc(100% + 8px); left:0; width:260px; padding:14px; border:1px solid var(--line); border-radius:var(--radius-panel); background:var(--paper); box-shadow:var(--shadow-floating); font-size:11px; }
-.placement-popover strong { font-size:12px; }
+.placement-popover { position:absolute; z-index:15; top:calc(100% + 8px); left:0; width:260px; padding:14px; border:1px solid var(--line); border-radius:var(--radius-panel); background:var(--paper); box-shadow:var(--shadow-floating); font-size: var(--font-small); }
+.placement-popover strong { font-size: var(--font-ui); }
 .placement-popover label { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:12px; }
 .placement-popover input { width:83px; }
-.placement-popover p { color:var(--muted); font-size:10px; line-height:1.5; margin:10px 0 0; }
+.placement-popover p { color:var(--muted); font-size: var(--font-small); line-height:1.5; margin:10px 0 0; }
 .alignment-row { display:flex; align-items:center; gap:3px; margin-top:9px; }
 .alignment-row span { width:15px; color:var(--muted); }
 .alignment-row button { flex:1; background:var(--surface-raised); padding:5px!important; }
-.hidden-count { position:absolute; bottom:12px; right:12px; font-size:10px; color:var(--warning); padding:5px 8px; border:1px solid var(--warning-line); border-radius:var(--radius-control); background:var(--warning-surface); pointer-events:none; }
-.shot-export-button { flex-shrink:0; font-size:10px; }
-.shot-heading h2 { white-space:nowrap; font-size:10px; }
+.hidden-count { position:absolute; bottom:12px; right:12px; font-size: var(--font-small); color:var(--warning); padding:5px 8px; border:1px solid var(--warning-line); border-radius:var(--radius-control); background:var(--warning-surface); pointer-events:none; }
+.shot-export-button { flex-shrink:0; font-size: var(--font-small); }
+.shot-heading h2 { white-space:nowrap; font-size: var(--font-small); }
 .shot-heading .shot-export-button { padding:4px; gap:4px; }
 @media(max-width:1300px) { .viewport-heading { justify-content:flex-start; } .viewport-heading>div:last-child { margin-left:auto; } .placement-popover { left:auto; right:0; } }

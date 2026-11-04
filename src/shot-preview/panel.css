@@ -1,5 +1,5 @@
 #shotPanel { display: flex; flex-direction: column; max-width: calc(100% - 16px); max-height: calc(100% - 16px); }
-#shotPanel .shot-preview-header { flex: none; gap: 4px; padding: 6px; cursor: grab; touch-action: none; user-select: none; }
+#shotPanel .shot-preview-header { flex: none; gap: 4px; padding: 6px; border-bottom: 1px solid var(--line-soft); cursor: grab; touch-action: none; user-select: none; }
 #shotPanel .shot-preview-header select { flex: 1; width: 0; }
 #shotPanel .shot-heading { cursor: grab; touch-action: none; user-select: none; }
 #shotPanel .shot-preview-grip { width: 18px; color: var(--muted); cursor: grab; }
@@ -7,6 +7,8 @@
 #shotPanel .shot-preview-collapse { width: 24px; color: var(--text-secondary); }
 #shotPanel.is-dragging, #shotPanel.is-dragging .shot-preview-header, #shotPanel.is-dragging .shot-heading, #shotPanel.is-dragging .shot-preview-grip { cursor: grabbing; }
 .shot-preview-body { min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
-.shot-footer-actions { display: flex; align-items: center; gap: 6px; }
+.shot-footer-actions { display: flex; align-items: center; flex: none; gap: 2px; }
+.shot-footer > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shot-footer-actions button { min-height: 28px; }
 .shot-footer-actions svg { width: 12px; height: 12px; }
 .camera-piloting .viewport-heading, .camera-piloting .view-navigation, .camera-piloting .viewport-caption { visibility: hidden; pointer-events: none; }

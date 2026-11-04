@@ -7,7 +7,7 @@ export interface SceneEditDiagnostic {
     request: { instructions: string; content: unknown; history: unknown; schema: unknown; schemaName: string; format?: 'json_object' | 'json_schema';reasoningEffort?:'low'|'medium'|'high';maxOutputTokens?:number };
     rawOutput?: string; rawProposal?: unknown; error?: { code: string; message: string };
   }[];
-  outcome?: 'ready' | 'needs_views' | 'needs_reference_frames' | 'failed'; error?: { code: string; message: string };
+  outcome?: 'ready' | 'needs_views' | 'needs_reference_frames' | 'needs_motion_review' | 'failed'; error?: { code: string; message: string };
   toolCalls?: { name: string; arguments: string; startedAt: string; finishedAt?: string; result?: unknown; error?: string }[];
   toolTurns?: { input: unknown; output: unknown;error?:{code:string;message:string} }[];
   measurements?:{model:string;concept:string;media:string;frames:unknown}[];

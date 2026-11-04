@@ -39,3 +39,4 @@ export function renameFolder(catalog: AssetCatalog, from: string, to: string): v
 
 export const SCENE_OBJECT_DRAG = 'application/x-littletake-scene-object';
 export const LIBRARY_ASSET_DRAG = 'application/x-littletake-asset';
+export const REFERENCE_IMAGE_DRAG = 'application/x-littletake-reference-image';

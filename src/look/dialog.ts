@@ -4,13 +4,19 @@ import { projectFetch } from '../project/client';
 import './dialog.css';
 import type { ShotRenderer } from '../shot-export/renderer';
 import type { Shot } from '../types';
-import { exportVideo, videoExportIssue } from '../shot-export/export';
 import { briefInput, videoPackage, type BriefFrame, type VideoBrief } from './brief';
-import { frameSubjects, framedObjects } from './subjects';
+import { BRIEF_LIMITS, downloadStoryboardImage, referenceJPEG, renderStoryboards, storyboardTimes, type StoryboardPage } from './storyboard';
+import { framedObjects, inPicture } from './subjects';
 import type { Workspace } from '../project/workspace';
 import { copyText } from '../clipboard';
-import { museInstruction } from './handoff';
+import { museInstruction, videoPrompt } from './handoff';
 import { MAX_OUTPUT_BYTES } from '../project/room';
+import { loadAppearance } from '../appearance/images';
+import { appearanceFile, appearanceInstructions, type AppearanceImage } from '../appearance/model';
+import { AIStoryboard, type CapturedPanel } from './ai-storyboard';
+import { drawBoardPanel } from './board-panel';
+import { worldTransform } from '../placement/hierarchy';
+import { evaluateFov } from '../model';
 
 interface Frame { time: number; label: string; previs: string; boxes: Map<string, [number, number, number, number]>; result?: string; savedId?: string; message: string; state: 'waiting' | 'running' | 'done' | 'failed' }
 
@@ -21,79 +27,148 @@ function toJPEG(source: CanvasImageSource, width: number, height: number, max: n
   return canvas.toDataURL('image/jpeg', .9);
 }
 
-const frameTimes = (shot: Shot, time: number, mode: 'current' | 'keys', fps: number) => mode === 'current' ? [{ time: Math.max(shot.start, Math.min(time, shot.start + shot.duration - 1 / fps)), label: 'Current frame' }] : [
-  { time: shot.start, label: 'Start' }, { time: shot.start + shot.duration / 2, label: 'Middle' }, { time: Math.max(shot.start, shot.start + shot.duration - 1 / fps), label: 'End' },
-];
-
-/** Muse Image renders finished film stills from clean previs frames; the composition stays the camera's. */
-export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number, workspace: Workspace): void {
+/** Render owns the frozen renderer; this panel prepares references and an editable Muse instruction. */
+export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer, shot: Shot, workspace: Workspace, onBusyChange: () => void) {
   shot = structuredClone(shot);
   const doc = renderer.document, camera = doc.cameras.find(item => item.id === shot.cameraId)!;
-  const dialog = document.createElement('dialog'); dialog.className = 'look-dialog'; dialog.setAttribute('aria-label', 'Look frames');
-  dialog.innerHTML = `<div class="look-heading"><div><small>MUSE IMAGE</small><h2>Look frames</h2></div><button data-close aria-label="Close look frames">${icon('close')}</button></div>
-    <p class="look-subtitle"></p><div class="look-layout"><div class="look-frames" aria-live="polite"></div>
-    <fieldset class="look-settings"><div class="look-tabs" role="tablist" aria-label="Frames"><button role="tab" data-mode="keys" aria-selected="true">Start · middle · end</button><button role="tab" data-mode="current" aria-selected="false">Current frame</button></div>
-    <label>Look and mood<textarea rows="5" maxlength="600" placeholder="e.g. 1930s European grand hotel, pastel pink and lavender, symmetrical, soft daylight, 35 mm film grain"></textarea></label>
-    <label>Style reference <span>(optional)</span><input type="file" accept="image/png,image/jpeg,image/webp"></label>
-    <label class="look-check"><input type="checkbox" data-anchor checked> Keep the look consistent across frames and shots</label>
-    <p class="look-anchor" hidden>Matching the approved look of this scene · <button data-reset>Reset look</button></p>
-    <p class="look-note">Composition, camera and blocking come from the previs. Each frame costs one Muse Image call.</p></fieldset></div>
-    <section class="look-brief" hidden><div class="look-brief-head"><small>VIDEO BRIEF · MUSE SPARK</small><button data-copy>Copy prompt</button></div><p data-prompt></p>
-    <dl><dt>Camera</dt><dd data-camera></dd><dt>Beats</dt><dd><ol data-beats></ol></dd><dt>Avoid</dt><dd data-negative></dd></dl></section>
-    <section class="look-handoffs"><div><h3>Generate with Muse</h3><p>Publish the frames shown here, references and prompt as a fixed, read-only page. Anyone with its link can view them. Your project and conversations stay private.</p></div><div data-handoffs></div><textarea data-instruction readonly hidden aria-label="Muse instruction"></textarea><div class="look-handoff-actions"><button data-publish>Create Muse link</button><button data-instruction-copy hidden>Copy instruction and link</button><a data-open-muse href="https://muse.ai/" target="_blank" rel="noopener noreferrer">Open Muse ${icon('external')}</a><button data-import-video>Import finished video</button><input data-video type="file" accept="video/mp4,video/webm" hidden></div></section>
-    <p class="look-message" role="status"></p><div class="look-actions"><button data-cancel hidden>Cancel</button><button data-brief title="Muse Spark writes a prompt for any image-to-video model from these frames and the shot's timing">Write video brief</button><button data-package hidden>Download package</button><button data-render class="primary-button">Render look frames</button></div>`;
+  dialog.className = 'muse-preparation';
+  dialog.innerHTML = `<p class="look-subtitle"></p><div class="board-modes" role="tablist" aria-label="Storyboard style"><button role="tab" data-board-mode="proxy" aria-selected="true">Proxy storyboard</button><button role="tab" data-board-mode="ai" aria-selected="false">${icon('sparkles')} AI storyboard</button></div><div class="look-layout"><div><section data-proxy-board><p class="look-sampling">One frame every 0.5 s + the last frame · 9 frames per page</p><div class="look-storyboards" aria-live="polite"></div><details class="look-source-frames"><summary>First frame & individual images</summary><p>Download the 1920 × 1080 first frame separately for the opening composition.</p><div class="look-frames"></div></details></section><section class="ai-storyboard" hidden aria-label="AI storyboard panels"></section><button data-prepare hidden>Prepare storyboards</button></div>
+    <fieldset class="look-settings"><label>Story, action & style<textarea data-direction rows="5" maxlength="600" aria-describedby="storyboardDirectionHelp" placeholder="What happens in this shot? For example: a knight braces, ducks a dragon's swipe, then raises his sword to counterattack. Hand-painted fantasy, sunset light."></textarea></label><p id="storyboardDirectionHelp" class="look-sampling">Used to generate the storyboard. Describe what the subjects do and feel. The proxy guides camera and placement; Muse adds expressive poses and reactions. Set specific beats in the panel directions.</p>
+    <div data-ai-settings hidden><label>Style reference <span>(optional)</span><input type="file" accept="image/png,image/jpeg,image/webp"></label><p data-style-status class="look-sampling"></p><p class="look-sampling">Object references guide identity across all four panels. The style reference guides the overall visual treatment.</p></div>
+    <details class="look-prompt-section" open><summary>Video prompt <span>(for export)</span></summary><button data-brief>Generate prompt</button><p class="look-sampling">Muse reads the storyboard and motion to write the video prompt you export. To change the storyboard's action, edit Story, action & style above.</p><section class="look-brief"><div class="look-brief-head"><label for="museVideoPrompt">Prompt for Muse</label><button data-copy>Copy full prompt</button></div><textarea id="museVideoPrompt" data-prompt rows="8" maxlength="12000" placeholder="Generate a video prompt from your storyboard, or write your own here. Edit before copying or exporting to Muse."></textarea></section></details>
+    </fieldset></div><footer class="look-footer"><p class="look-message" role="status"></p><div class="look-actions"><button data-cancel hidden>Cancel</button><button data-package class="primary-button">Download storyboards & prompt</button><button data-page hidden>Download page</button><a data-open-muse href="https://muse.ai/" target="_blank" rel="noopener noreferrer">Open Muse ${icon('external')}</a></div><p class="look-upload-help">In Muse, attach the first-frame image, all storyboard pages and the bound appearance images, then paste the prompt. These are image inputs; render a video separately in the Video tab.</p></footer>
+    <details class="look-handoffs"><summary>Share a reference link or import the finished video</summary><p>Publish a fixed page with these images and this prompt. Anyone with the link can view it. Send it to Muse manually; generation does not start here.</p><div data-handoffs></div><textarea data-instruction readonly hidden aria-label="Muse instruction"></textarea><div class="look-handoff-actions"><button data-publish>Create reference link</button><button data-instruction-copy hidden>Copy instruction and link</button><button data-import-video>Import finished video</button><input data-video type="file" accept="video/mp4,video/webm" hidden></div></details>`;
   const find = <T extends HTMLElement = HTMLElement>(selector: string) => dialog.querySelector<T>(selector)!;
-  find('.look-subtitle').textContent = `${shot.name} · ${camera.name} · composition locked to the shot camera`;
-  const direction = find<HTMLTextAreaElement>('textarea'); direction.value = workspace.lookSettings(doc.id).direction;
-  let mode: 'current' | 'keys' = 'keys', frames: Frame[] = [], style: string | undefined, busy = false, available = false, controller: AbortController | null = null, brief: VideoBrief | null = null;
-  let anchor: string | undefined, loading = true, uploading = false;
+  find('.look-subtitle').textContent = `${shot.name} · ${camera.name} · ${shot.duration.toFixed(2)}s. Export your blocking or turn it into illustrated storyboards.`;
+  const direction = find<HTMLTextAreaElement>('[data-direction]'), prompt = find<HTMLTextAreaElement>('[data-prompt]'); direction.value = workspace.lookSettings(doc.id).direction;
+  let frames: Frame[] = [], pages: StoryboardPage[] = [], style: string | undefined, busy = true, imageAvailable = false, briefAvailable = false, controller: AbortController | null = new AbortController(), brief: VideoBrief | null = null, disposed = false;
+  let briefId = newId(), saveTimer: ReturnType<typeof setTimeout> | undefined;
+  let loading = true, uploading = false, mode: 'proxy' | 'ai' = 'proxy', board: AIStoryboard | undefined;
   let publication: { id: string; archive: Blob } | null = null;
   const room = workspace.room;
-  const save = (kind: 'look-frame' | 'video-brief', name: string, value: unknown) => workspace.putOutput({ id: newId(), kind, sceneId: doc.id, shotId: shot.id, name, mime: 'application/json' }, new Blob([JSON.stringify(value)], { type: 'application/json' }), room);
-  const message = (text: string) => { find('.look-message').textContent = text; };
+  let appearance: AppearanceImage[] = [], appearanceError = '';
+  find('#storyboardDirectionHelp').insertAdjacentHTML('afterend', '<section class="look-appearance" hidden><h3>Object appearance</h3><p>Bound to the objects in this shot. Included in the prompt and download.</p><div class="look-appearance-images"></div></section>');
+  const loadReferences = async () => {
+    try {
+      appearance = await loadAppearance(workspace, doc, new Set([...frames.flatMap(frame => [...frame.boxes.keys()]), ...(board?.panels.flatMap(panel => [...panel.source.visible]) ?? [])]), room);
+      appearanceError = '';
+      find('.look-appearance').hidden = !appearance.length;
+      find('.look-appearance-images').replaceChildren(...appearance.map(reference => {
+        const figure = document.createElement('figure'), image = new Image(), caption = document.createElement('figcaption'), link = document.createElement('a');
+        image.src = reference.image; image.alt = reference.bindings.map(binding => binding.objectName).join(', ');
+        caption.textContent = reference.bindings.map(binding => `${binding.objectName} · ${binding.primary ? 'Primary' : 'Detail'}`).join('; ');
+        link.href = reference.image; link.download = appearanceFile(reference); link.title = 'Download appearance reference'; link.onclick = event => { event.preventDefault(); downloadStoryboardImage(reference.image, link.download); }; link.append(image); figure.append(link, caption); return figure;
+      }));
+    } catch (error) { appearanceError = (error as Error).message; throw error; }
+  };
+  const save = (kind: 'look-frame' | 'video-brief', name: string, value: unknown) => workspace.putOutput({ id: kind === 'video-brief' ? briefId : newId(), kind, sceneId: doc.id, shotId: shot.id, name, mime: 'application/json' }, new Blob([JSON.stringify(value)], { type: 'application/json' }), room);
+  const message = (text: string) => { if (!disposed) find('.look-message').textContent = text; };
+  const savePrompt = async () => {
+    clearTimeout(saveTimer); saveTimer = undefined;
+    if (brief && videoPrompt(shot,brief,direction.value).trim()) await save('video-brief', shot.name + ' · video brief', { brief: structuredClone(brief), direction: direction.value, frameIds: frames.flatMap(frame => frame.savedId ? [frame.savedId] : []) });
+  };
 
-  const capture = () => {
-    renderer.resize(1280, 720);
-    frames = frameTimes(shot, time, mode, doc.fps ?? 24).map(item => { const previs = toJPEG(renderer.render(item.time), 1280, 720, 1280); return { ...item, previs, boxes: renderer.screenBoxes(), message: '', state: 'waiting' }; });
+  const sourceFrames = async (signal: AbortSignal) => mode === 'ai' ? board!.frames(signal) : frames.map(frame => ({ at: Math.max(0, frame.time - shot.start), look: frame.result, previs: frame.previs }));
+  const styleFrames = () => [...new Set([frames[0], frames[Math.floor((frames.length - 1) / 2)], frames.at(-1)!])].filter(Boolean);
+  const capturePanel = (at: number): CapturedPanel => {
+    renderer.resize(1280, 720); const canvas = renderer.render(shot.start + at), previs = referenceJPEG(canvas, 1280, 720, 1280), boxes = renderer.screenBoxes();
+    const pose = worldTransform(doc, camera.id, shot.start + at);
+    return { previs, input: previs, visible: new Set(boxes.keys()), camera: { position: pose.position, rotation: pose.rotation, fov: evaluateFov(camera, shot.start + at) }, subjects: framedObjects(doc, shot.cameraId, shot.start + at).filter(({ object }) => inPicture(boxes.get(object.id))).slice(0, 40).map(({ object, position, depth }) => ({
+      id: object.id, name: object.name.trim().slice(0, 80), position, depth, box: boxes.get(object.id),
+      ...(object.asset || object.kind === 'human' ? { view: renderer.subjectView(object.id) } : {}),
+    })) };
+  };
+  const activePages = () => mode === 'ai' ? board!.pages() : pages;
+  const runBoard = async (operation: (signal: AbortSignal) => Promise<void>) => {
+    if (busy || uploading || loading) return;
+    busy = true; controller = new AbortController(); update(); drawAI();
+    try { await operation(controller.signal); await loadReferences(); publication = null; }
+    catch (error) { message(controller.signal.aborted ? 'Cancelled. Finished images and previous versions are kept.' : (error as Error).message); }
+    finally { busy = false; drawAI(); update(); }
+  };
+  const drawAI = () => {
+    if (disposed || !board || mode !== 'ai') return;
+    drawBoardPanel(find('.ai-storyboard'), board, busy || uploading || loading || !workspace.canEdit || !!appearanceError, imageAvailable, operation => { void runBoard(operation); });
+  };
+  const capture = async (signal: AbortSignal) => {
+    const times = storyboardTimes(shot, doc.fps ?? 24), captured: Frame[] = [];
+    for (const [index, time] of times.entries()) {
+      signal.throwIfAborted();
+      // Render one full-size opening image; keep subsequent source frames at 720p.
+      const width = index === 0 ? 1920 : 1280;
+      if (index < 2) renderer.resize(width, width * 9 / 16);
+      const previs = toJPEG(renderer.render(time), width, width * 9 / 16, width);
+      captured.push({ time, label: index === 0 ? 'First frame' : index === times.length - 1 ? 'Last frame' : `Frame ${index + 1}`, previs, boxes: renderer.screenBoxes(), message: '', state: 'waiting' });
+      message(`Preparing storyboards · ${index + 1} / ${times.length} frames`);
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    const sheets = await renderStoryboards(shot, captured.map(frame => ({ at: Math.max(0, frame.time - shot.start), previs: frame.previs })), signal);
+    signal.throwIfAborted(); frames = captured; pages = sheets; publication = null;
+  };
+  const drawPages = () => {
+    if (disposed) return;
+    find('.look-storyboards').replaceChildren(...pages.map((page, index) => {
+      const figure = document.createElement('figure'); figure.className = 'look-storyboard';
+      const link = document.createElement('a'); link.href = page.image; link.download = `storyboard-${String(index + 1).padStart(2,'0')}.jpg`; link.title = 'Download this storyboard page';
+      link.onclick = event => { event.preventDefault(); downloadStoryboardImage(page.image, link.download); };
+      const image = new Image(); image.src = page.image; image.alt = `Storyboard page ${index + 1}, frames ${page.frames[0].index}–${page.frames.at(-1)!.index}`; image.loading = 'lazy'; link.append(image);
+      const caption = document.createElement('figcaption'); caption.textContent = `Page ${index + 1} / ${pages.length} · ${page.frames[0].at.toFixed(2)}–${page.frames.at(-1)!.at.toFixed(2)} s`;
+      const download = document.createElement('a'); download.href = page.image; download.download = link.download; download.textContent = 'Download page'; download.onclick = event => { event.preventDefault(); downloadStoryboardImage(page.image, download.download); }; caption.append(download);
+      figure.append(link, caption); return figure;
+    }));
+    if (frames.length) {
+      const first = document.createElement('a'); first.href = frames[0].previs; first.download = 'first-frame.jpg'; first.textContent = 'Download first frame · 1920 × 1080'; first.className = 'look-first-frame'; first.onclick = event => { event.preventDefault(); downloadStoryboardImage(frames[0].previs, first.download); }; find('.look-storyboards').prepend(first);
+    }
   };
   const draw = () => {
-    const columns = document.createElement('div'); columns.className = 'look-columns'; columns.innerHTML = '<span>PREVIS</span><span>MUSE IMAGE LOOK</span>';
-    find('.look-frames').replaceChildren(columns, ...frames.map(frame => {
-      const card = document.createElement('figure'); card.className = 'look-card'; card.dataset.state = frame.state;
-      const previs = new Image(); previs.src = frame.previs; previs.alt = `Previs at ${frame.time.toFixed(2)}s`;
+    if (disposed) return;
+    find('.look-frames').replaceChildren(...frames.map((frame, index) => {
+      const styled = !!frame.result || frame.state === 'running' || frame.state === 'failed';
+      const card = document.createElement('figure'); card.className = `look-card${styled ? ' has-look' : ''}`; card.dataset.state = frame.state;
+      const previs = new Image(); previs.src = frame.previs; previs.alt = `Previs at ${(frame.time-shot.start).toFixed(2)}s`; previs.loading = 'lazy';
       const result = document.createElement('div'); result.className = 'look-result';
-      if (frame.result) { const image = new Image(); image.src = frame.result; image.alt = `Look frame at ${frame.time.toFixed(2)}s`; result.append(image); }
+      if (frame.result) { const image = new Image(); image.src = frame.result; image.alt = `Look frame at ${(frame.time-shot.start).toFixed(2)}s`; result.append(image); }
       else result.textContent = frame.state === 'running' ? 'Rendering…' : frame.state === 'failed' ? frame.message : 'Not rendered yet';
-      const caption = document.createElement('figcaption'); caption.textContent = `${frame.label} · ${frame.time.toFixed(2)}s`;
-      if (frame.result) {
-        const link = document.createElement('a'); link.href = frame.result; link.textContent = 'Download';
-        link.download = `${(shot.name.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'shot')}-look-${frame.time.toFixed(2)}s.${frame.result.slice(11, frame.result.indexOf(';')).replace('jpeg', 'jpg')}`;
+      const caption = document.createElement('figcaption'); caption.textContent = `${index + 1}. ${frame.label} · ${(frame.time-shot.start).toFixed(2)}s`;
+      for (const [kind,image] of [['previs',frame.previs],['look',frame.result]] as const) if (image) {
+        const link = document.createElement('a'); link.href = image; link.textContent = kind === 'previs' ? 'Download reference' : 'Download styled image';
+        link.download = `${(shot.name.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'shot')}-${kind}-${index+1}.${image.slice(11, image.indexOf(';')).replace('jpeg', 'jpg')}`;
+        link.onclick = event => { event.preventDefault(); downloadStoryboardImage(image, link.download); };
         caption.append(link);
       }
-      card.append(previs, result, caption); return card;
+      card.append(previs); if (styled) card.append(result); card.append(caption); return card;
     }));
   };
   const update = () => {
-    find<HTMLFieldSetElement>('.look-settings').disabled = busy || uploading;
+    if (disposed) return;
+    find<HTMLFieldSetElement>('.look-settings').disabled = busy || uploading || loading;
+    find('.ai-storyboard').inert = busy || uploading || loading;
     find('[data-cancel]').hidden = !busy;
-    const render = find<HTMLButtonElement>('[data-render]'); render.textContent = busy ? 'Working…' : 'Render look frames'; render.disabled = busy || uploading || loading || !available || !workspace.canEdit;
-    find<HTMLButtonElement>('[data-brief]').disabled = busy || uploading || loading || !available || !workspace.canEdit;
+    const ready = mode === 'proxy' ? !!pages.length : !!board?.complete;
+    dialog.dataset.boardMode = mode;
+    find('[data-page]').hidden = mode !== 'ai'; find<HTMLButtonElement>('[data-page]').disabled = busy || uploading || loading || !ready;
+    find('.look-upload-help').hidden = mode === 'ai';
+    find<HTMLButtonElement>('[data-brief]').disabled = busy || uploading || loading || !!appearanceError || !ready || !briefAvailable || !workspace.canEdit;
     direction.readOnly = !workspace.canEdit; find<HTMLInputElement>('input[type=file]').disabled = !workspace.canEdit;
-    const pack = find<HTMLButtonElement>('[data-package]'); pack.hidden = !brief; pack.disabled = busy || uploading;
-    find<HTMLButtonElement>('[data-publish]').disabled = busy || uploading || loading || !workspace.canEdit || (!brief && !direction.value.trim());
-    find<HTMLButtonElement>('[data-import-video]').disabled = busy || !workspace.canEdit;
+    const hasPrompt = !!brief && !!videoPrompt(shot,brief,direction.value).trim();
+    prompt.readOnly = busy || uploading || loading || !workspace.canEdit;
+    find<HTMLButtonElement>('[data-copy]').disabled = busy || uploading || !hasPrompt;
+    find<HTMLButtonElement>('[data-package]').disabled = busy || uploading || loading || !!appearanceError || !ready;
+    find('[data-package]').textContent = hasPrompt ? 'Download storyboards & prompt' : 'Download storyboard';
+    find<HTMLButtonElement>('[data-publish]').disabled = busy || uploading || loading || !!appearanceError || !ready || !workspace.canEdit;
+    find<HTMLButtonElement>('[data-import-video]').disabled = busy || uploading || !workspace.canEdit;
     find<HTMLButtonElement>('[data-instruction-copy]').disabled = busy;
-    find('.look-anchor').hidden = !(anchor && find<HTMLInputElement>('[data-anchor]').checked);
-    dialog.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(button => { const active = button.dataset.mode === mode; button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1; });
+    dialog.querySelectorAll<HTMLButtonElement>('[data-board-mode]').forEach(button => { button.disabled = busy || uploading || loading; button.setAttribute('aria-selected', String(button.dataset.boardMode === mode)); button.tabIndex = button.dataset.boardMode === mode ? 0 : -1; });
+    find('[data-proxy-board]').hidden = mode !== 'proxy'; find('.ai-storyboard').hidden = mode !== 'ai'; find('[data-ai-settings]').hidden = mode !== 'ai';
+    find('[data-prepare]').hidden = busy || (!!pages.length && !appearanceError);
+    find('[data-prepare]').textContent = appearanceError ? 'Retry reference images' : 'Prepare storyboards';
+    find<HTMLButtonElement>('[data-prepare]').disabled = loading || uploading;
+    onBusyChange();
   };
   const showBrief = () => {
-    find('.look-brief').hidden = !brief;
-    if (!brief) return;
-    find('[data-prompt]').textContent = brief.prompt; find('[data-camera]').textContent = brief.camera; find('[data-negative]').textContent = brief.negative || '—';
-    find('[data-beats]').replaceChildren(...brief.beats.map(beat => { const item = document.createElement('li'); item.textContent = `${beat.at.toFixed(2)} s · ${beat.action}`; return item; }));
+    prompt.value = brief ? videoPrompt(shot,brief,direction.value) : '';
   };
   const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => { const image = new Image(); image.onload = () => resolve(image); image.onerror = () => reject(new Error('A frame could not be read.')); image.src = src; });
-  const cleanup = () => { renderer.dispose(); dialog.remove(); };
   const shared = () => {
     const receipts = (room?.handoffs ?? []).filter(value => value.sceneId === doc.id && value.shotId === shot.id);
     find('[data-handoffs]').replaceChildren(...receipts.map(receipt => {
@@ -109,49 +184,80 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number,
       return row;
     }));
   };
-  dialog.addEventListener('close', () => { controller?.abort(); if (!busy) cleanup(); });
-  find('[data-close]').onclick = () => dialog.close();
   find('[data-cancel]').onclick = () => { controller?.abort(); message('Cancelling…'); };
-  find('[data-reset]').onclick = () => { if (!workspace.canEdit) return; anchor = undefined; workspace.setLookSettings(doc.id, { anchorId: null }); update(); };
-  find('[data-anchor]').onchange = update;
-  direction.oninput = () => { workspace.setLookSettings(doc.id, { direction: direction.value }); brief = null; publication = null; showBrief(); update(); };
-  dialog.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(button => button.onclick = () => { mode = button.dataset.mode as typeof mode; brief = null; publication = null; capture(); draw(); showBrief(); update(); });
-  find('[data-copy]').onclick = () => { if (brief) copyText(brief.prompt, dialog).then(() => message('Prompt copied.'), () => message('Copy failed. Select the prompt text instead.')); };
+  direction.oninput = () => { workspace.setLookSettings(doc.id, { direction: direction.value }); publication = null; if (brief) message(mode === 'ai' ? 'Story changed. Regenerate the storyboard, then update the exported video prompt if needed.' : 'Direction changed. Generate again or edit the video prompt to include it.'); drawAI(); update(); };
+  dialog.querySelectorAll<HTMLButtonElement>('[data-board-mode]').forEach(button => button.onclick = async () => {
+    if (busy || uploading || loading) return;
+    mode = button.dataset.boardMode as typeof mode;
+    find<HTMLDetailsElement>('.look-prompt-section').open = mode === 'proxy';
+    publication = null; update();
+    if (mode === 'ai' && !board) await runBoard(async () => {
+      board = new AIStoryboard(shot, doc.fps ?? 24, doc.id, workspace, capturePanel, () => ({ direction: direction.value, style, appearance }), () => { drawAI(); update(); }, message, renderer.sourceState);
+      try { await board.load(); } catch (error) { board = undefined; throw error; }
+    });
+    if (mode === 'ai' && board) message(board.complete ? 'AI storyboard restored. Download the original sheet or prepare a video prompt.' : 'Four moments from this shot. Generate one 2 × 2 storyboard, or adjust the moments first.');
+    drawAI(); update();
+  });
+  find('.board-modes').onkeydown = event => {
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const next = find<HTMLButtonElement>(`[data-board-mode="${mode === 'ai' ? 'proxy' : 'ai'}"]`); next.click(); next.focus(); }
+  };
+  find('[data-prepare]').onclick = async () => {
+    if (busy || loading) return;
+    busy = true; controller = new AbortController(); update();
+    try { if (!pages.length) { await capture(controller.signal); drawPages(); draw(); } await loadReferences(); message(`${frames.length} frames · ${pages.length} storyboard pages ready.`); }
+    catch (error) { message(controller.signal.aborted ? 'Preparation cancelled. Try again when ready.' : (error as Error).message); }
+    finally { busy = false; update(); }
+  };
+  prompt.oninput = () => {
+    brief ??= { prompt: prompt.value.trim().slice(0,4000) || 'Creator prompt', camera: '', beats: [], negative: '', model: 'creator' };
+    brief.promptText = prompt.value; publication = null; clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => { void savePrompt().catch(error => message(`Prompt is available here, but could not be saved. ${error.message}`)); }, 600);
+    update();
+  };
+  find('[data-copy]').onclick = () => { if (brief) copyText(videoPrompt(shot,brief,direction.value), dialog).then(() => message('Full prompt copied. Attach the reference images in Muse.'), () => { prompt.select(); message('Select and copy the prompt.'); }); };
   find('[data-brief]').onclick = async () => {
     if (busy) return;
     busy = true; controller = new AbortController(); update(); message('Muse Spark is writing the video brief…');
     try {
       const sent: BriefFrame[] = [];
-      for (const frame of frames.slice(0, 3)) {
-        const image = await loadImage(frame.result ?? frame.previs);
-        sent.push({ at: Math.max(0, frame.time - shot.start), image: toJPEG(image, image.naturalWidth, image.naturalHeight, 960), kind: frame.result ? 'look' : 'previs' });
+      // All pages reach the writer; never truncate a long shot to its first few moments.
+      const details = mode === 'ai' ? (await sourceFrames(controller.signal)).slice(0, 1) : styleFrames().filter(frame => frame === frames[0] || frame.result).map(frame => ({ at: Math.max(0, frame.time - shot.start), look: frame.result, previs: frame.previs }));
+      for (const frame of details) {
+        const image = await loadImage(frame.look ?? frame.previs);
+        sent.push({ at: frame.at, image: referenceJPEG(image, image.naturalWidth, image.naturalHeight, 1280), kind: frame.look ? 'look' : 'previs' });
       }
-      const response = await projectFetch('/api/brief', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(briefInput(doc, shot, direction.value, sent)), signal: controller.signal });
+      for (const page of activePages()) {
+        const image = await loadImage(page.image);
+        sent.push({ at: page.frames[0].at, image: referenceJPEG(image, image.naturalWidth, image.naturalHeight), kind: 'storyboard', tiles: page.frames });
+      }
+      const body = JSON.stringify(briefInput(doc, shot, direction.value, sent, appearance));
+      if (new Blob([body]).size > BRIEF_LIMITS.maxBodyBytes) throw new Error('These references are too large for prompt generation. You can write the prompt manually and download all images.');
+      controller.signal.throwIfAborted();
+      const response = await projectFetch('/api/brief', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: controller.signal });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error?.message ?? 'The video brief could not be written.');
-      brief = data as VideoBrief; showBrief();
+      controller.signal.throwIfAborted();
+      brief = data as VideoBrief;
+      brief.promptText = [videoPrompt(shot, brief, direction.value), appearanceInstructions(appearance)].filter(Boolean).join('\n\n');
+      showBrief();
       publication = null;
-      await save('video-brief', shot.name + ' · video brief', { brief, direction: direction.value, frameIds: frames.flatMap(frame => frame.savedId ? [frame.savedId] : []) });
-      message(sent.some(frame => frame.kind === 'look') ? 'Video brief ready.' : 'Video brief ready from previs frames. Render look frames first for a styled brief.');
+      brief.promptText = videoPrompt(shot,brief,direction.value);
+      await savePrompt();
+      message('Prompt ready. Edit it below, then copy it and attach the reference images in Muse.');
     } catch (error) { message(controller.signal.aborted ? 'Cancelled.' : (error as Error).message); }
-    finally { busy = false; if (dialog.open) update(); else cleanup(); }
+    finally { busy = false; update(); }
   };
   const makePackage = async () => {
-    let previs: Blob | null = null;
-    if (!videoExportIssue()) {
-      renderer.resize(1280, 720);
-      try { previs = await exportVideo(renderer, shot, doc.fps ?? 24, controller!.signal, (done, total) => message(`Preparing previs ${done} / ${total} frames…`)); }
-      catch (error) { if (controller!.signal.aborted) throw error; message('Video encoding failed; this snapshot will contain still references.'); }
-    }
-    const value: VideoBrief = brief ?? { prompt: direction.value.trim(), camera: 'Match the framing and movement shown by the previs frames and animation.', beats: [], negative: 'No extra cuts, subjects, text or slideshow.', model: 'creator' };
-    return videoPackage(doc, shot, value, direction.value, frames.map(frame => ({ at: Math.max(0, frame.time - shot.start), look: frame.result, previs: frame.previs })), previs,
-      [...(style ? [{ image: style, role: 'style' as const, label: 'Style reference' }] : []), ...(anchor ? [{ image: anchor, role: 'scene' as const, label: 'Scene continuity reference' }] : [])]);
+    const instruction = brief && videoPrompt(shot, brief, direction.value).trim() ? brief : { prompt: '', camera: '', beats: [], negative: '', model: 'creator', promptText: [direction.value.trim() || shot.name, appearanceInstructions(appearance)].filter(Boolean).join('\n\n') };
+    return videoPackage(doc, shot, instruction, direction.value, await sourceFrames(controller!.signal), activePages(),
+      style ? [{ image: style, role: 'style', label: 'Style reference' }] : [], appearance, mode);
   };
   find('[data-publish]').onclick = async () => {
-    if (busy || (!brief && !direction.value.trim())) return;
+    if (busy) return;
     busy = true; controller = new AbortController(); update(); message('Preparing the reference snapshot…');
     try {
       publication ??= { id: newId(), archive: await makePackage() };
+      controller.signal.throwIfAborted();
       message('Publishing references…');
       const receipt = await workspace.publishHandoff(publication.archive, publication.id, room);
       find<HTMLTextAreaElement>('[data-instruction]').value = museInstruction(workspace.handoffUrl(receipt));
@@ -160,12 +266,13 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number,
       const local = ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
       message(local ? 'Reference page saved. This is a local link; Muse can open it after the application is deployed at a public HTTPS address.' : 'Reference page published. Copy the instruction and send it in your official Muse conversation.');
     } catch (error) { message(controller.signal.aborted ? 'Preparation cancelled. No new generation was started.' : (error as Error).message); }
-    finally { busy = false; if (dialog.open) update(); else cleanup(); }
+    finally { busy = false; update(); }
   };
   find('[data-instruction-copy]').onclick = () => copyText(find<HTMLTextAreaElement>('[data-instruction]').value, dialog).then(() => message('Instruction and link copied. Paste them in Muse.'), () => { find<HTMLTextAreaElement>('[data-instruction]').select(); message('Select and copy the instruction.'); });
   find('[data-import-video]').onclick = () => find<HTMLInputElement>('[data-video]').click();
   find<HTMLInputElement>('[data-video]').onchange = async () => {
     const file = find<HTMLInputElement>('[data-video]').files?.[0]; if (!file) return;
+    uploading = true; update();
     try {
       if (file.size > MAX_OUTPUT_BYTES) throw new Error('Finished videos must be smaller than 64 MB.');
       const bytes = new Uint8Array(await file.slice(0, 12).arrayBuffer());
@@ -174,83 +281,62 @@ export function openLookFrames(renderer: ShotRenderer, shot: Shot, time: number,
       await workspace.putOutput({ id: newId(), kind: 'final-video', sceneId: doc.id, shotId: shot.id, name: shot.name + ' · ' + file.name.slice(0, 100), mime }, file, room); message('Finished video added to Renders.');
     }
     catch (error) { message((error as Error).message); }
-    finally { find<HTMLInputElement>('[data-video]').value = ''; }
+    finally { uploading = false; find<HTMLInputElement>('[data-video]').value = ''; update(); }
   };
   find('[data-package]').onclick = async () => {
-    if (busy || !brief) return;
+    if (busy) return;
     busy = true; controller = new AbortController(); update();
     try {
       const blob = await makePackage();
+      controller.signal.throwIfAborted();
       const url = URL.createObjectURL(blob), link = document.createElement('a');
-      link.href = url; link.download = (shot.name.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'shot') + '-video-package.zip'; link.click();
+      link.href = url; link.download = (shot.name.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'shot') + (mode === 'ai' ? '-ai-storyboard.zip' : '-video-package.zip'); link.click();
       setTimeout(() => URL.revokeObjectURL(url), 30_000);
       message(`Package ready · ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
     } catch (error) { message(controller.signal.aborted ? 'Cancelled. No package was saved.' : (error as Error).message); }
-    finally { busy = false; if (dialog.open) update(); else cleanup(); }
+    finally { busy = false; update(); }
   };
+  find('[data-page]').textContent = 'Download image';
+  find('[data-page]').onclick = () => { void runBoard(async () => {
+    activePages().forEach((page, index) => downloadStoryboardImage(page.image, `ai-storyboard-${index + 1}.${page.image.slice(11, page.image.indexOf(';')).replace('jpeg', 'jpg')}`));
+    message('Original storyboard image downloaded.');
+  }); };
   find<HTMLInputElement>('.look-settings input[type=file]').onchange = async event => {
-    const file = (event.target as HTMLInputElement).files?.[0]; style = undefined; publication = null;
+    const file = (event.target as HTMLInputElement).files?.[0]; publication = null;
     if (!file) return;
     uploading = true; update(); message('Saving the style reference…');
-    try { const bitmap = await createImageBitmap(file); style = toJPEG(bitmap, bitmap.width, bitmap.height, 1024); bitmap.close(); const saved = await workspace.putOutput({ id: newId(), kind: 'style-reference', sceneId: doc.id, shotId: '', name: 'Style reference', mime: 'image/jpeg' }, await (await fetch(style)).blob(), room); workspace.setLookSettings(doc.id, { styleId: saved.id }); message('Style reference saved with this project.'); }
+    try { const bitmap = await createImageBitmap(file); const nextStyle = toJPEG(bitmap, bitmap.width, bitmap.height, 1024); bitmap.close(); const saved = await workspace.putOutput({ id: newId(), kind: 'style-reference', sceneId: doc.id, shotId: '', name: 'Style reference', mime: 'image/jpeg' }, await (await fetch(nextStyle)).blob(), room); style = nextStyle; workspace.setLookSettings(doc.id, { styleId: saved.id }); find('[data-style-status]').textContent = file.name; message('Style reference saved with this project.'); }
     catch (error) { message((error as Error).message); }
-    finally { uploading = false; if (dialog.open) update(); }
+    finally { uploading = false; drawAI(); update(); }
   };
-  find('[data-render]').onclick = async () => {
-    if (busy) return;
-    const look = direction.value.trim();
-    if (!look) { message('Describe the look and mood first.'); direction.focus(); return; }
-    busy = true; controller = new AbortController(); capture(); brief = null; publication = null; showBrief(); update();
-    const consistent = find<HTMLInputElement>('[data-anchor]').checked;
-    frames.forEach(frame => { frame.state = 'waiting'; frame.result = undefined; frame.message = ''; });
-    let done = 0, previous: string | undefined, saveProblem = "";
-    try {
-      for (const frame of frames) {
-        frame.state = 'running'; draw(); message(`Rendering ${frame.label.toLowerCase()} · ${done + 1} of ${frames.length}`);
-        // Within one render, each frame follows the previous finished frame, so neighbouring frames change only by the blocking between them.
-        const reference = consistent ? previous ?? anchor : undefined;
-        const subjects = frameSubjects(framedObjects(doc, shot.cameraId, frame.time), frame.boxes);
-        const body = { frame: frame.previs, direction: look, subjects, ...(reference ? { anchor: reference } : {}), ...(style ? { style } : {}) };
-        try {
-          const response = await projectFetch('/api/look', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
-          const data = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(data.error?.message ?? 'The look frame could not be rendered.');
-          frame.result = data.image; frame.state = 'done'; done++;
-          // A small anchor carries the look without pulling later frames towards its composition.
-          previous = await new Promise<string>(resolve => {
-            const image = new Image(); image.onload = () => resolve(toJPEG(image, image.naturalWidth, image.naturalHeight, 512)); image.onerror = () => resolve(data.image); image.src = data.image;
-          });
-          const saved = await save('look-frame', shot.name + ' · ' + frame.label, { time: frame.time, previs: frame.previs, image: data.image, direction: look }); frame.savedId = saved.id;
-          if (consistent && !anchor) { anchor = previous; workspace.setLookSettings(doc.id, { anchorId: saved.id }); }
-        } catch (error) {
-          frame.state = frame.result ? 'done' : 'failed'; frame.message = controller.signal.aborted ? 'Cancelled' : (error as Error).message;
-          if (frame.result) { saveProblem = 'Image ready and kept on this device. ' + frame.message; break; }
-          if (controller.signal.aborted) break;
-        }
-        draw();
-      }
-      message(saveProblem || (controller.signal.aborted ? 'Cancelled. Finished frames are kept.' : `${done} of ${frames.length} look frame${frames.length === 1 ? '' : 's'} ready.`));
-    } finally {
-      busy = false; frames.filter(frame => frame.state !== 'done' && frame.state !== 'failed').forEach(frame => { frame.state = 'waiting'; });
-      if (dialog.open) { draw(); update(); } else cleanup();
-    }
-  };
-  document.body.append(dialog);
-  try { capture(); draw(); shared(); update(); dialog.showModal(); } catch (error) { cleanup(); throw error; }
-  projectFetch('/api/look').then(response => response.json()).then(data => { available = Boolean(data.available); if (!available) message('Muse Image is not configured on this server. Set MODEL_API_KEY to render look frames.'); update(); })
-    .catch(() => { message('The look-frame service could not be reached.'); });
+  shared(); update();
+  const connection = new AbortController();
+  void Promise.allSettled([
+    projectFetch('/api/look', { signal: connection.signal }).then(response => response.json()).then(data => { imageAvailable = Boolean(data.available); drawAI(); update(); }),
+    projectFetch('/api/brief', { signal: connection.signal }).then(response => response.json()).then(data => { briefAvailable = Boolean(data.available); if (!briefAvailable) message('Prompt generation is unavailable. You can still write a prompt and download references.'); update(); })
+      .catch(() => message('Prompt generation could not be reached. You can still write a prompt and download references.')),
+  ]);
   void (async () => {
     try {
+      await new Promise(resolve => setTimeout(resolve, 0));
+      // Cancelling image capture must still leave the creator's saved prompt available.
+      const savedBrief = room?.outputs.find(output => output.kind === 'video-brief' && output.sceneId === doc.id && output.shotId === shot.id);
+      if (savedBrief) { const value = JSON.parse(await (await workspace.output(savedBrief.id)).text()); brief = value.brief; briefId = savedBrief.id; if (brief) brief.promptText ??= videoPrompt(shot,brief,value.direction ?? direction.value); }
+      await capture(controller!.signal); drawPages(); draw(); await loadReferences();
       const settings = workspace.lookSettings(doc.id);
-      if (settings.anchorId) anchor = JSON.parse(await (await workspace.output(settings.anchorId)).text()).image;
       if (settings.styleId) style = await new Promise<string>((resolve, reject) => { void workspace.output(settings.styleId!).then(blob => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(blob); }, reject); });
+      find('[data-style-status]').textContent = style ? 'Project style reference loaded' : '';
       const savedFrames = room?.outputs.filter(output => output.kind === 'look-frame' && output.sceneId === doc.id && output.shotId === shot.id) ?? [];
       const loaded = new Set<number>();
-      for (const output of savedFrames) { const value = JSON.parse(await (await workspace.output(output.id)).text()), frame = frames.find(frame => Math.abs(frame.time - value.time) < .001); if (frame && !loaded.has(frame.time)) { frame.result = value.image; frame.previs = value.previs; frame.state = 'done'; frame.savedId = output.id; loaded.add(frame.time); } }
-      const savedBrief = room?.outputs.find(output => output.kind === 'video-brief' && output.sceneId === doc.id && output.shotId === shot.id);
-      if (savedBrief) brief = JSON.parse(await (await workspace.output(savedBrief.id)).text()).brief;
-      if (loaded.size || brief) message('Saved results restored. Render again to use the current scene.');
-    } catch (error) { message((error as Error).message); }
-    finally { loading = false; if (dialog.open) { draw(); showBrief(); update(); } }
+      for (const output of savedFrames) { const value = JSON.parse(await (await workspace.output(output.id)).text()), frame = frames.find(frame => Math.abs(frame.time - value.time) < .001); if (frame && value.previs === frame.previs && !loaded.has(frame.time)) { frame.result = value.image; frame.state = 'done'; frame.savedId = output.id; loaded.add(frame.time); } }
+      if (loaded.size || brief) message('Saved prompt and matching reference images restored. If the shot has changed, regenerate the prompt.');
+      if (!loaded.size && !brief) message(`${frames.length} frames · ${pages.length} storyboard page${pages.length === 1 ? '' : 's'}. Generate a prompt or write your own below.`);
+    } catch (error) { message(controller!.signal.aborted ? 'Preparation cancelled. Try again when ready.' : (error as Error).message); }
+    finally { loading = false; busy = false; if (!disposed) { draw(); showBrief(); update(); } }
   })();
+  return {
+    get busy() { return busy || uploading; },
+    cancel() { controller?.abort(); },
+    dispose() { if (saveTimer) void savePrompt().catch(() => {}); disposed = true; connection.abort(); controller?.abort(); },
+  };
 }

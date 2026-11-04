@@ -6,17 +6,21 @@ import { applyProjectOperations, type SceneSnapshot, type SceneView } from './op
 import { conversationHistory, newConversation, type AssistantMessage, type ConversationBook, type UserMessage } from './conversations.ts';
 import type { SceneEditInput, SceneEditResponse } from './types.ts';
 import type { ReferenceContext, ReferenceProgress } from '../reference/observations.ts';
+import { performanceSelection, performanceFrames, performanceOperations, type PerformanceTarget } from '../performance/refinement.ts';
+import type { AppearanceImage } from '../appearance/model.ts';
 
 export interface EditorContext { project: ProjectContent; sceneId: string | null; shotId: string | null; revision: number; time: number; selectedId: string | null; selectedIds?: string[] }
 export interface SessionOptions {
   context(): EditorContext;
   prepare(): void;
+  play?(): void;
   focus?(context: NonNullable<UserMessage['context']>): boolean;
-  capture(project: ProjectContent, sceneId: string | null, shotId: string | null, time: number, view: SceneView): SceneSnapshot;
+  capture(project: ProjectContent, sceneId: string | null, shotId: string | null, time: number, view: SceneView, compact?: boolean): SceneSnapshot;
   preview(project: ProjectContent | null, focus?: { sceneId: string | null; shotId: string | null }): void;
   apply(project: ProjectContent, base: string, focus: { sceneId: string | null; shotId: string | null }): boolean;
   changed(): void;
   reference?(threadId: string): Promise<ReferenceContext | undefined>;
+  appearance?(context: EditorContext): Promise<AppearanceImage[]>;
   saveReferenceObservations?(progress: ReferenceProgress): Promise<void>;
   requestReferenceFrames?(threadId: string, sourceId: string, times: number[], signal: AbortSignal): Promise<ReferenceContext>;
   request?(input: SceneEditInput, signal: AbortSignal): Promise<SceneEditResponse>;
@@ -35,7 +39,31 @@ export class ConversationSession {
   get active() { return this.book.threads.find(thread => thread.id === this.book.activeId)!; }
   get busy() { return this.run !== null; }
   get previewMessageId() { return this.preview?.messageId ?? null; }
+  get previewRange() {
+    const operations = this.preview && this.assistant(this.preview.messageId)?.edit?.operations.filter(operation => operation.type === 'refine_take');
+    const takes = operations?.flatMap(operation => {
+      const scene = this.preview!.project.scenes.find(scene => scene.id === operation.sceneId);
+      const take = scene && [...scene.objects, ...scene.cameras].find(item => item.id === operation.id)?.animation?.takes.find(take => take.id === operation.takeId);
+      return take ? [take] : [];
+    });
+    return takes?.length ? { start: Math.min(...takes.map(take => take.start)), end: Math.max(...takes.map(take => take.end)) } : null;
+  }
+  playReview(id: string) { this.review(id, this.after); if (this.preview?.messageId === id) this.options.play?.(); }
   private emit() { this.options.changed(); }
+  attachPerformance(targets: PerformanceTarget[]) {
+    const context = this.options.context(), selected = performanceSelection(context.project, targets), selectedIds = [...new Set(selected.map(entry => entry.item.id))];
+    this.cancel(); this.clearPreview();
+    if (this.options.focus && !this.options.focus({ sceneId: targets[0].sceneId, shotId: targets[0].shotId, selectedId: selectedIds.at(-1)!, selectedIds, time: Math.min(...selected.map(entry => entry.take.start)) })) return;
+    this.active.performance = structuredClone(targets);
+    if (!this.active.draft.trim()) this.active.draft = 'Refine these recordings while preserving their intent, timing and route.';
+    this.emit();
+  }
+  detachPerformance(index?: number) {
+    this.cancel();
+    if (index !== undefined) this.active.performance?.splice(index, 1); else delete this.active.performance;
+    if (!this.active.performance?.length) delete this.active.performance;
+    this.emit();
+  }
   replaceBook(book: ConversationBook) {
     this.cancel(); this.clearPreview(); this.evidence = []; this.evidenceMessageId = null;
     this.book.activeId = book.activeId; this.book.threads = book.threads; this.emit();
@@ -45,6 +73,7 @@ export class ConversationSession {
     this.book.threads = book.threads.map(incoming => {
       const thread = this.book.threads.find(item => item.id === incoming.id);
       if (!thread) return structuredClone(incoming);
+      if (!incoming.performance) delete thread.performance;
       const messages = incoming.messages.map(message => {
         const existing = thread.messages.find(item => item.id === message.id);
         if(existing)for(const key of Object.keys(existing))if(!Object.hasOwn(message,key))delete (existing as unknown as Record<string,unknown>)[key];
@@ -120,6 +149,7 @@ export class ConversationSession {
     const request = this.active.messages.slice(0, index).reverse().find(m => m.role === 'user');
     if (request?.role === 'user') {
       this.active.draft = request.text;
+      if (request.context?.performance) this.active.performance = structuredClone(request.context.performance); else delete this.active.performance;
       if (request.context && this.options.focus && !this.options.focus(request.context)) { this.emit(); return; }
       await this.send();
     }
@@ -143,7 +173,8 @@ export class ConversationSession {
     this.clearPreview(); this.options.prepare();
     const context = this.options.context(), project = structuredClone(context.project);
     const selectedIds = [...(context.selectedIds ?? (context.selectedId ? [context.selectedId] : []))];
-    message.context = { sceneId: context.sceneId, shotId: context.shotId, selectedId: context.selectedId, selectedIds, time: context.time };
+    const performance = retryId ? message.context?.performance : thread.performance;
+    message.context = { sceneId: context.sceneId, shotId: context.shotId, selectedId: context.selectedId, selectedIds, time: context.time, ...(performance ? { performance: structuredClone(performance) } : {}) };
     const run: Run = { id: newId(), threadId: thread.id, message, controller: new AbortController(), base: serializeContent(project), revision: context.revision };
     this.run = run; this.evidence = []; this.evidenceMessageId = message.id; this.activity = 'Muse is thinking…'; this.emit();
     if (this.run !== run) return;
@@ -160,12 +191,51 @@ export class ConversationSession {
     try {
       const input: SceneEditInput = { project, sceneId: context.sceneId, shotId: context.shotId, time: context.time, selectedId: context.selectedId, selectedIds, prompt: message.text,
         history: conversationHistory(thread.messages.slice(0, -1)), snapshots: [] };
-      const reference = this.options.reference ? await this.options.reference(thread.id) : undefined;
+      if (this.options.appearance) input.appearance = await this.options.appearance({ ...context, project });
+      if (!current()) return;
+      const reference = !performance && this.options.reference ? await this.options.reference(thread.id) : undefined;
       if (!current()) return;
       if (reference) input.reference = reference;
       const request = this.options.request ?? ((input: SceneEditInput, signal: AbortSignal) => requestSceneEdit(input, signal,
         { turnId: run.id, conversationId: thread.id, messageId: message.id }));
-      let response = await request(input, run.controller.signal);
+      let response: SceneEditResponse;
+      if (performance) {
+        performanceSelection(project, performance);
+        if (context.sceneId !== performance[0].sceneId) throw new Error('Return to the recordings\' scene, or detach the animations.');
+        input.performance = { targets: performance }; input.selectedIds = [...new Set(performance.map(target => target.entityId))]; input.selectedId = input.selectedIds.at(-1)!;
+        const capture = async (content: ProjectContent, variant: 'before' | 'after') => {
+          const frames = performanceFrames(project, performance);
+          const snapshots: SceneSnapshot[] = [];
+          for (const [index, frame] of frames.entries()) {
+            if (!current()) throw new Error('Recording review stopped.');
+            this.activity = `Rendering ${variant === 'before' ? 'recorded' : 'refined'} performance · ${index + 1}/${frames.length}…`; this.emit();
+            // Yield between small offscreen renders so Stop and the rest of the editor stay responsive.
+            await new Promise(resolve => setTimeout(resolve, 0));
+            if (!current()) throw new Error('Recording review stopped.');
+            snapshots.push({ ...this.options.capture(content, performance[0].sceneId, frame.shotId, frame.time, frame.view, true), shotId: frame.shotId, variant });
+          }
+          return snapshots;
+        };
+        input.snapshots = await capture(project, 'before'); this.evidence = input.snapshots;
+        this.activity = 'Muse is reading the performance and its images…'; this.emit();
+        response = await request(input, run.controller.signal);
+        if (!current()) return;
+        let reviewedOperations: unknown;
+        if (response.status === 'needs_motion_review') {
+          const candidate = response.candidate;
+          const operations = performanceOperations(performance, candidate);
+          const proposed = applyProjectOperations(project, operations, context.time);
+          reviewedOperations = operations;
+          const after = await capture(proposed, 'after');
+          input.performance = { targets: performance, candidate }; input.snapshots = [...input.snapshots, ...after]; this.evidence = input.snapshots;
+          this.activity = 'Muse is comparing the original and refined images…'; this.emit();
+          response = await request(input, run.controller.signal);
+          if (!current()) return;
+        }
+        if (response.status !== 'ready') throw new Error('The recording review did not finish. The original recording is unchanged.');
+        if (response.plan.operations.length && JSON.stringify(response.plan.operations) !== JSON.stringify(reviewedOperations))
+          throw new Error('The final proposal differs from the rendered candidate. No changes were applied.');
+      } else response = await request(input, run.controller.signal);
       let frameFollowup = false, viewFollowup = false;
       for (let step = 0; step < 3; step++) {
         if (!current()) return;
@@ -173,6 +243,7 @@ export class ConversationSession {
         if (!current()) return;
         if (input.reference && response.reference) input.reference = { source: input.reference.source, observations: response.reference.observations, callsUsed: response.reference.callsUsed, framesRequested: response.reference.framesRequested };
         if (response.status === 'ready') break;
+        if (response.status === 'needs_motion_review') throw new Error('Choose a recording before asking for a performance review.');
         if (response.status === 'needs_reference_frames') {
           if (frameFollowup || !input.reference || !this.options.requestReferenceFrames) throw new Error('Additional reference frames are unavailable for this turn. Use the current candidates or attach the reference again.');
           frameFollowup = true; this.activity = `Reading original reference at ${response.requestedTimes.map(time => time.toFixed(2) + 's').join(' and ')}…`; this.emit();

@@ -1,23 +1,28 @@
+.control-component{border:1px solid var(--line);border-radius:var(--radius-panel);overflow:hidden;background:var(--surface-raised)}.control-component summary{display:flex;align-items:center;gap:7px;padding:8px;background:var(--surface-raised);cursor:pointer;font-size: var(--font-small)}.control-component summary button{margin-left:auto;padding:3px}.control-component summary input{accent-color:var(--accent);margin:0}.component-fields{padding:12px}.component-fields>.primary-button{width:100%;height:35px;margin-bottom:13px}.component-fields>label{display:block;margin:12px 0;color:var(--muted);font-size: var(--font-small)}.component-fields select{display:block;width:100%;margin-top:6px;border:1px solid var(--line);padding:7px;background:var(--paper);font:inherit;color:var(--ink)}.component-fields .component-number{display:flex;align-items:center;justify-content:space-between}.component-number input{width:65px;padding:6px}.component-number small{margin-left:5px}.component-fields p{font-size: var(--font-small);color:var(--muted);line-height:1.8}.component-fields>small{display:block;margin-top:8px;color:var(--text-secondary);font-size: var(--font-small)}
 .component-add-button { width: 100%; margin-top: 10px; }
+.control-component { font-size: var(--font-ui); }
+.control-component summary { min-height: 38px; font-size: var(--font-ui); }
+.component-fields select { border-radius: var(--radius-control); background: var(--field); }
+.component-fields > .primary-button { font-size: var(--font-ui); }
 .component-section .control-component + .control-component { margin-top: 10px; }
 .component-vector { display: flex; gap: 7px; margin: 8px 0; padding: 0; border: 0; min-width: 0; }
-.component-vector legend { margin-bottom: 8px; color: var(--muted); font-size: 11px; }
-.component-vector label { flex: 1; min-width: 0; color: var(--muted); font-size: 10px; }
+.component-vector legend { margin-bottom: 8px; color: var(--muted); font-size: var(--font-small); }
+.component-vector label { flex: 1; min-width: 0; color: var(--muted); font-size: var(--font-small); }
 .component-vector input { display: block; box-sizing: border-box; width: 100%; min-width: 0; margin-top: 4px; padding: 6px; border: 1px solid var(--line); border-radius: var(--radius-control); font: inherit; color: var(--ink); background: var(--paper); }
 .component-picker { position: fixed; inset: auto; margin: 0; width: min(320px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--paper); color: var(--ink); box-shadow: var(--shadow-floating); font: inherit; }
 .component-picker::backdrop { background: transparent; }
-.component-picker header { display: flex; align-items: center; justify-content: space-between; padding: 4px 4px 10px; font-size: 12px; }
+.component-picker header { display: flex; align-items: center; justify-content: space-between; padding: 4px 4px 10px; font-size: var(--font-ui); }
 .component-picker header button { padding: 2px 7px; font-size: 16px; }
-.component-picker input[type="search"] { box-sizing: border-box; width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--field); color: var(--ink); font: inherit; font-size: 12px; }
+.component-picker input[type="search"] { box-sizing: border-box; width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--field); color: var(--ink); font: inherit; font-size: var(--font-ui); }
 .component-options { display: grid; gap: 4px; margin-top: 8px; }
 .component-option { display: block; width: 100%; padding: 10px; text-align: left; white-space: normal; border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; }
 .component-option > span { display: flex; align-items: center; gap: 8px; }
-.component-option strong { font-size: 12px; font-weight: 550; }
-.component-option > small { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.component-option strong { font-size: var(--font-ui); font-weight: 550; }
+.component-option > small { display: block; margin-top: 5px; color: var(--muted); font-size: var(--font-small); line-height: 1.5; }
 .component-option:hover:not(:disabled), .component-option:focus-visible { background: var(--selection); border-color: var(--line); outline: none; }
 .component-option:disabled { opacity: .65; cursor: default; }
-.component-added { margin-left: auto; color: var(--accent); font-size: 10px; }
-.component-empty, .component-picker-note { margin: 8px 4px 4px; padding: 6px 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.component-added { margin-left: auto; color: var(--accent); font-size: var(--font-small); }
+.component-empty, .component-picker-note { margin: 8px 4px 4px; padding: 6px 0; color: var(--muted); font-size: var(--font-small); line-height: 1.5; }
 .component-picker [hidden] { display: none; }
 .control-component .component-chevron { width: 12px; height: 12px; }
 .control-component[open] > summary > .component-chevron { transform: rotate(90deg); }

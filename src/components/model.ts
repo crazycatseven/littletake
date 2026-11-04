@@ -3,15 +3,17 @@ import { Euler, MathUtils, Quaternion, Vector3 } from 'three';
 import type { Transform } from '../types.ts';
 import { applyTransformModifiers } from './transform.ts';
 import { scriptComponentSchema } from '../scripts/model.ts';
+import { appearanceComponentSchema } from '../appearance/model.ts';
 
 export const componentSchema = z.discriminatedUnion('type', [
+  appearanceComponentSchema,
   scriptComponentSchema,
   z.strictObject({ type: z.literal('movement'), enabled: z.boolean(), mode: z.enum(['walk', 'drive', 'free']), space: z.enum(['local', 'world']), speed: z.number().min(.1).max(20), turnSpeed: z.number().min(1).max(360) }),
   z.strictObject({ type: z.literal('hinge'), enabled: z.boolean(), speed: z.number().min(1).max(360) }),
   z.strictObject({ type: z.literal('pivot'), enabled: z.boolean(), offset: z.tuple([z.number().min(-1000).max(1000), z.number().min(-1000).max(1000), z.number().min(-1000).max(1000)]) }),
   z.strictObject({ type: z.literal('followPath'), enabled: z.boolean(), pathId: z.string().max(64), progress: z.number().min(0).max(1), facing: z.boolean(), roll: z.number().min(-180).max(180) }),
 ]);
-export const componentsSchema = z.array(componentSchema).max(3)
+export const componentsSchema = z.array(componentSchema).max(4)
   .refine(items => new Set(items.map(c => c.type)).size === items.length, 'Each component can only be added once.')
   .refine(items => items.filter(c => c.type === 'movement' || c.type === 'hinge' || c.type === 'script').length <= 1, 'Only one input controller can be attached.');
 export type ObjectComponent = z.infer<typeof componentSchema>;
@@ -26,6 +28,7 @@ export interface ComponentScript {
   update?(component: ObjectComponent, pose: Transform, keys: Set<string>, dt: number, runtime: { velocity: number; yaw: number }): void;
 }
 export const componentScripts: Record<ObjectComponent['type'], ComponentScript> = {
+  appearanceReference: { title: 'Appearance Reference', description: 'Bind reference images to this object for Muse and Render.', fields: [], actions: [], help: () => 'References define appearance. The proxy still defines placement and motion.' },
   script: { title:'Script Component', description:'A project controller written by you or Muse.',addable:false,fields:[],actions:[{id:'control',label:'Start Control'}],help:()=> 'Project script · keyboard and mouse input · recorded to property keys.' },
   followPath: { title:'Follow Path', description:'Move along an editable 3D path using Progress keyframes.', fields:[], actions:[], help:()=> 'Animate Progress in the scene timeline. Edit the path to reshape the motion.' },
   movement: {
