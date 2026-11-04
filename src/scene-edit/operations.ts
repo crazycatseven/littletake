@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Matrix4, Vector3 } from 'three';
-import { createEmptyScene, ensureAnimation, evaluateTransform, sceneEntity, setTransformMotion } from '../model.ts';
+import { MAX_SCENE_OBJECTS,createEmptyScene, ensureAnimation, evaluateTransform, sceneEntity, setTransformMotion } from '../model.ts';
 import { validateProjectContent } from '../project/model.ts';
 import type { ProjectContent, SceneEntity, Transform, Vec3 } from '../types.ts';
 import { trackPoses, motionSchema, recordedTrack } from '../performance/motion.ts';
@@ -16,6 +16,7 @@ import { jointProperty, putKey, replacePropertyKeys, setKeyInterpolation, type P
 import { scriptOperationSchema, isScriptOperation, applyScriptOperation } from '../scripts/operations.ts';
 import { eulerDegrees } from '../rotation.ts';
 import { refineRecordedTake, refineTakeOperationSchema } from '../performance/refinement.ts';
+export const MAX_EDIT_OPERATIONS=512;
 
 const vector = (min: number, max: number) => z.array(z.number().min(min).max(max)).length(3) as unknown as z.ZodType<Vec3>;
 const position = vector(-1000, 1000);
@@ -43,7 +44,7 @@ const cameraFields = { id, name, fov: z.number().min(10).max(120), transform, tr
 const shotFields = { id, name, cameraId: id, start: z.number().min(0).max(60), duration: z.number().min(0.1).max(60) };
 // Historical chat receipts keep their original proposed framing; this is never offered to the model.
 export const legacyShotOperationSchema = z.strictObject({ type: z.literal('add_shot'), sceneId: id, shot: z.strictObject({ ...cameraFields, ...shotFields }) });
-export const operationSchema = z.union([
+export const operationSchema = z.discriminatedUnion('type', [
   refineTakeOperationSchema,
   ...scriptOperationSchema.options,
   ...spatialOperationSchema.options,
@@ -74,12 +75,12 @@ export const operationSchema = z.union([
   z.strictObject({ sceneId: id, type: z.literal('set_duration'), duration: z.number().min(1).max(60) }),
 ]);
 export const objectCountSchema = z.strictObject({
-  sceneId: id, source: z.string().min(1).max(200), comparison: z.enum(['at_most', 'exactly']), count: z.number().int().min(0).max(100),
+  sceneId: id, source: z.string().min(1).max(200), comparison: z.enum(['at_most', 'exactly']), count: z.number().int().min(0).max(MAX_SCENE_OBJECTS),
 });
 export const editPlanSchema = z.strictObject({
   summary: z.string().trim().min(1).max(4000),
   requestedViews: z.array(viewSchema).max(2),
-  operations: z.array(operationSchema).max(64),
+  operations: z.array(operationSchema).max(MAX_EDIT_OPERATIONS),
   objectCounts: z.array(objectCountSchema).max(24).optional(),
 });
 export type SceneOperation = z.infer<typeof operationSchema>;
@@ -106,7 +107,7 @@ function poseTarget(item: SceneEntity, target: z.infer<typeof pose>) {
 export function applyProjectOperations(source: ProjectContent, operations: SceneOperation[], time: number): ProjectContent {
   const project = validateProjectContent(source);
   if (!Number.isFinite(time) || time < 0 || time > 60) throw new Error('Invalid scene time.');
-  const parsed = z.array(operationSchema).max(64).parse(operations);
+  const parsed = z.array(operationSchema).max(MAX_EDIT_OPERATIONS).parse(operations);
   for (const [index, operation] of parsed.entries()) {
     if(isScriptOperation(operation)){applyScriptOperation(project,operation);continue;}
     if (operation.type === 'add_scene') {

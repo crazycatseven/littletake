@@ -71,6 +71,24 @@
 .chat-error { font-size: var(--font-small); color: var(--error); padding: 10px 12px; border-left: 2px solid var(--error-line); background: var(--error-surface); line-height: 1.7; margin-bottom: 25px; }
 .chat-error button, .chat-stopped button { color: inherit; padding: 5px 0; display: block; font-size: var(--font-small); text-decoration: underline; }
 .chat-stopped { color: var(--muted); font-size: var(--font-small); margin-bottom: 22px; }
+.agent-progress { margin: 0 0 24px; color: var(--text-secondary); font-size: 12px; line-height: 1.7; }
+.agent-progress summary { display: flex; align-items: center; gap: 10px; min-height: 35px; padding: 4px 0; cursor: pointer; list-style: none; border-radius: 3px; }
+.agent-progress summary::-webkit-details-marker { display: none; }
+.progress-latest { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.progress-indicator { flex: none; display: inline-flex; color: var(--accent); }
+.agent-progress[data-status=running] .progress-indicator .ui-icon { animation: progress-spin 1s linear infinite; }
+.agent-progress[data-status=error] .progress-indicator { color: var(--error); }
+.progress-chevron { color: var(--muted); font-size: 14px; }
+.agent-progress[open] .progress-chevron { transform: rotate(180deg); }
+.progress-history { list-style: none; margin: 10px 0 0 5px; padding: 0 10px 0 18px; border-left: 1px solid var(--line); }
+.progress-history li { position: relative; margin: 0; padding: 0 0 16px; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.progress-history li::before { position: absolute; left: -22px; top: 5px; content: ''; width: 6px; height: 6px; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--paper); }
+.progress-history li[data-status=error] { color: var(--error); }
+.progress-history li[data-status=running]::before { background: var(--accent); border-color: var(--accent); }
+.progress-history time { display: block; color: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; }
+.progress-history img { display: block; width: 100%; max-height: 240px; object-fit: contain; margin-top: 9px; border: 1px solid var(--line); border-radius: var(--radius-control); }
+.progress-sources { display: grid; gap: 5px; margin-top: 8px; font-size: 10px; }
+.progress-sources a { color: var(--text-secondary); text-decoration: underline; }
 .ai-view-evidence { display: flex; gap: 7px; margin-top: 12px; }
 .performance-evidence { margin-top:12px; font-size: var(--font-small); color:var(--text-secondary); }
 .performance-evidence summary { cursor:pointer; }
@@ -106,6 +124,8 @@
 @media (prefers-reduced-motion: reduce) { .chat-waiting i { animation: none; } }
 @media (max-width:1100px) { .chat-messages { padding: 16px 14px 10px; } .scene-context { margin: 0 14px; } }
 @media (max-width:850px) { .panel-tabs { padding: 0 10px; gap: 2px; } .chat-messages { padding: 16px 12px 8px; } }
+@keyframes progress-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .agent-progress[data-status=running] .progress-indicator .ui-icon { animation: none; } }
 @media (max-height:760px) { .chat-messages { padding-top:10px; padding-bottom:8px; } }
 .chat-reference{padding:8px 12px;border-top:1px solid var(--line);font-size: var(--font-ui);max-height:230px;overflow:auto;color:var(--muted)}
 .chat-reference p{margin:5px 0}.chat-reference summary{cursor:pointer;color:var(--ink);overflow-wrap:anywhere}

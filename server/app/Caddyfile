@@ -1,5 +1,6 @@
 {$LITTLETAKE_DOMAIN} {
-    encode zstd gzip
+    @compressible not path /api/scene-edit
+    encode @compressible zstd gzip
     reverse_proxy app:8080
     header Referrer-Policy same-origin
 }

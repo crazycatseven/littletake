@@ -1,7 +1,7 @@
 import { AIError, type AIContent, type AIProvider, type SegmentedFrame, type StructuredRequest, type ToolRequest, type ToolResponse } from './provider.ts';
 import { segmentConcept } from '../reference/sam.ts';
 
-interface MetaConfig { apiKey: string; model: string }
+interface MetaConfig { apiKey: string; model: string; imageModel?: string }
 
 /** Muse's Responses API is the only place that knows Meta's wire format. */
 export class MetaProvider implements AIProvider {
@@ -15,6 +15,7 @@ export class MetaProvider implements AIProvider {
     const data = await this.respond({
       ...(request.reasoningEffort?{reasoning:{effort:request.reasoningEffort},max_output_tokens:20_000}:{}),
       ...(request.maxOutputTokens?{max_output_tokens:request.maxOutputTokens}:{}),
+      ...(request.webSearch?{tools:[{type:'web_search',search_context_size:'high'}],include:['web_search_call.results']}:{}),
       instructions: request.format === 'json_object'
         ? `${request.instructions}\nReturn one JSON object conforming to this schema. The application validates every field and operation:\n${JSON.stringify(request.schema)}`
         : request.instructions,
@@ -25,6 +26,7 @@ export class MetaProvider implements AIProvider {
       })), { type: 'message', role: 'user', content: request.content.map(part => part.type === 'text'
         ? { type: 'input_text', text: part.text } : part.type === 'image' ? { type: 'input_image', image_url: part.dataUrl } : { type: 'input_video', video_url: part.dataUrl }) }],
     }, request.signal);
+    request.onResponse?.(data);
     const text = this.outputText(data);
     request.onOutput?.(text);
     if (data.status && data.status !== 'completed') throw new AIError('incomplete_response', 'Muse did not finish its response. Please try again.');
@@ -34,6 +36,18 @@ export class MetaProvider implements AIProvider {
 
   async segmentMedia(media:Extract<AIContent,{type:'image'|'video'}>,concept:string,signal?:AbortSignal):Promise<SegmentedFrame[]>{
     return parseSAMRegions(await segmentConcept(concept, media, this.config.apiKey, this.transport, signal));
+  }
+
+  async generateImage(request: { prompt: string; references?: AIContent[]; signal?: AbortSignal; onResponse?(response: unknown): void }) {
+    const model=this.config.imageModel??'muse-image-1.0';
+    const data=await this.respond({model,input:[{role:'user',content:[{type:'input_text',text:request.prompt},...(request.references??[]).filter(part=>part.type==='image').map(part=>({type:'input_image',image_url:part.dataUrl}))]}],
+      tools:[{type:'image_generation',enable_image_search:true,enable_web_search:true,enable_shell:false,reasoning_strength:'high',size:'1536x1024',output_format:'png'}]},request.signal);
+    request.onResponse?.(data);
+    const result=data.output?.find(item=>item.type==='image_generation_call'&&typeof item.result==='string')?.result;
+    if((data.status&&data.status!=='completed')||!result)throw new AIError('incomplete_image','Muse Image did not return a complete scene design.');
+    const bytes=Buffer.from(result,'base64'),mime=bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))?'png':bytes.subarray(0,4).toString()==='RIFF'?'webp':bytes[0]===255&&bytes[1]===216?'jpeg':null;
+    if(!mime||bytes.length>15_000_000)throw new AIError('invalid_image','Muse Image returned an unreadable scene design.');
+    return {image:`data:image/${mime};base64,${bytes.toString('base64')}`,model};
   }
 
   async generateToolTurn(request: ToolRequest): Promise<ToolResponse> {
@@ -47,7 +61,10 @@ export class MetaProvider implements AIProvider {
     return { output: data.output ?? [], calls: (data.output ?? []).filter(item => item.type === 'function_call').map(item => ({ id: item.call_id!, name: item.name!, arguments: item.arguments! })), text: this.outputText(data) };
   }
 
-  private outputText(data: MetaResponse): string { return data.output_text ?? data.output?.flatMap(item => item.content ?? []).filter(part => part.type === 'output_text').map(part => part.text ?? '').join('') ?? ''; }
+  private outputText(data: MetaResponse): string {
+    const final=data.output?.filter(item=>item.type==='message'&&item.phase!=='commentary').at(-1);
+    return final?final.content?.filter(part=>part.type==='output_text').map(part=>part.text??'').join('')??'':data.output_text??'';
+  }
 
   private async respond(body: Record<string, unknown>, signal?: AbortSignal): Promise<MetaResponse> {
     let response: Response;
@@ -55,9 +72,9 @@ export class MetaProvider implements AIProvider {
       response = await this.transport('https://api.meta.ai/v1/responses', {
         method: 'POST',
         headers: { Authorization: `Bearer ${this.config.apiKey}`, 'Content-Type': 'application/json' },
-        signal: AbortSignal.any([AbortSignal.timeout(Number(body.max_output_tokens)>=32_000?165_000:150_000), ...(signal ? [signal] : [])]),
+        signal: AbortSignal.any([AbortSignal.timeout('model' in body?180_000:300_000), ...(signal ? [signal] : [])]),
         body: JSON.stringify({
-          model: this.model, store: false, reasoning: { effort: 'low' }, max_output_tokens: 10_000,
+          model: this.model, store: false, ...('model' in body?{}:{reasoning: { effort: 'low' }, max_output_tokens: 10_000}),
           ...body,
         }),
       });
@@ -93,4 +110,4 @@ export function parseSAMRegions(text:string):SegmentedFrame[]{
   return frames;
 }
 
-interface MetaResponse { status?: string; output_text?: string; output?: { type?: string; call_id?: string; name?: string; arguments?: string; content?: { type?: string; text?: string }[] }[] }
+interface MetaResponse { status?: string; output_text?: string; output?: { type?: string;phase?:string; call_id?: string; name?: string; arguments?: string; result?: string; content?: { type?: string; text?: string }[] }[] }

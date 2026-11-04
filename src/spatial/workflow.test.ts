@@ -16,6 +16,7 @@ import { createSpatialHandler } from '../../server/spatial/api.ts';
 import { AssetLibrary } from '../../server/assets/library.ts';
 import { MetaProvider } from '../../server/ai/meta.ts';
 import { proposeSceneEdit } from '../../server/scene-edit.ts';
+import { designHTTPFixture, researchFetchFixture, fixtureSceneReview, envelope } from '../../server/scene-design/fixtures.ts';
 import { inspectSpatial, solveSpatial } from './methods.ts';
 import { migrateMotionTrack } from '../animation/model.ts';
 import type { SpatialOperation } from './schema.ts';
@@ -151,40 +152,45 @@ test('spatial API edits a rotated prefab set, preserves sampled motion, reloads 
   assert.equal(bad.status, 400); assert.equal((await bad.json()).applied, false);
 });
 
-test('native Muse tools inspect and solve a new scene with a library asset, then apply only the final reviewed plan', async () => {
+test('native Muse tools inspect and solve a new scene with a library asset, then apply only the final reviewed plan', async t => {
+  const network = globalThis.fetch; globalThis.fetch = researchFetchFixture; t.after(() => { globalThis.fetch = network; });
   const source: ProjectContent = { name: 'Empty project', scenes: [] }, original = JSON.stringify(source);
   const library = new AssetLibrary(await mkdtemp(path.join(tmpdir(), 'littletake-spatial-'))), diagnostic = newDiagnostic();
   let round = 0, prefix: unknown[] = [], spatial: SpatialOperation;
   const transport = (async (_url: unknown, init: RequestInit) => {
     const body = JSON.parse(init.body as string), outputs = body.input.filter((item: any) => item.type === 'function_call_output').map((item: any) => JSON.parse(item.output));
+    const design = designHTTPFixture(body); if (design) return Response.json(design);
+    if (body.instructions?.includes('scene visual reviewer')) return Response.json(envelope(fixtureSceneReview));
     assert.ok(body.tools.some((tool: any) => tool.name === 'inspect_spatial')); assert.ok(body.tools.some((tool: any) => tool.name === 'preview_spatial'));
     const call = (name: string, arguments_: unknown) => Response.json({ status: 'completed', output: [{ type: 'function_call', call_id: 'spatial_' + round, name, arguments: JSON.stringify(arguments_), status: 'completed' }] });
     round++;
-    if (round === 1) return call('read_asset', { assetId: 'builtin-chair' });
-    if (round === 2) return call('instantiate_asset', { assetId: 'builtin-chair', sceneId: 'new_set', name: 'Chair', transform: pose([2, 8, 0]) });
-    if (round === 3) {
-      prefix = [{ type: 'add_scene', sceneId: 'new_set', name: 'New set', duration: 5 }, outputs[1].operation];
-      return call('inspect_spatial', { sceneId: 'new_set', time: 0, objectIds: [outputs[1].objectId], frame: world, precedingOperations: prefix });
-    }
+    if (round === 1) return call('plan_scene', { sceneId: 'new_set', brief: 'Build the requested chair set and inspect its measured ground contact.' });
+    if (round === 2) return call('read_asset', { assetId: 'builtin-chair' });
+    if (round === 3) return call('instantiate_asset', { assetId: 'builtin-chair', sceneId: 'new_set', name: 'Chair', designAsset: 'Requested asset', transform: pose([2, 8, 0]) });
     if (round === 4) {
-      assert.equal(outputs[2].ok, true); assert.equal(outputs[2].applied, false); near(outputs[2].objects[0].bounds.min[1], 8);
-      spatial = { type: 'place_on', sceneId: 'new_set', time: 0, scope: 'static', id: outputs[1].objectId, supportId: null, horizontal: 'keep', clearance: 0 };
-      return call('preview_spatial', { operation: { ...spatial, supportId: 'missing' }, precedingOperations: prefix });
+      prefix = [{ type: 'add_scene', sceneId: 'new_set', name: 'New set', duration: 5 }, outputs[2].operation];
+      return call('inspect_spatial', { sceneId: 'new_set', time: 0, objectIds: [outputs[2].objectId], frame: world, precedingOperations: prefix });
     }
     if (round === 5) {
-      assert.equal(outputs[3].ok, false); assert.match(outputs[3].error, /Unknown object/);
+      assert.equal(outputs[3].ok, true); assert.equal(outputs[3].applied, false); near(outputs[3].objects[0].bounds.min[1], 8);
+      spatial = { type: 'place_on', sceneId: 'new_set', time: 0, scope: 'static', id: outputs[2].objectId, supportId: null, horizontal: 'keep', clearance: 0 };
+      return call('preview_spatial', { operation: { ...spatial, supportId: 'missing' }, precedingOperations: prefix });
+    }
+    if (round === 6) {
+      assert.equal(outputs[4].ok, false); assert.match(outputs[4].error, /Unknown object/);
       return call('preview_spatial', { operation: spatial!, precedingOperations: prefix });
     }
-    assert.equal(outputs[4].ok, true); assert.equal(outputs[4].applied, false); near(outputs[4].updates[0].transform.position[1], 0);
-    return Response.json({ status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: JSON.stringify({ summary: 'Prepared the grounded chair.', requestedViews: [], objectCounts: [], operations: [...prefix, outputs[4].operation] }) }] }] });
+    assert.equal(outputs[5].ok, true); assert.equal(outputs[5].applied, false); near(outputs[5].updates[0].transform.position[1], 0);
+    if (round === 7) return call('render_scene', { sceneId: 'new_set', frames: [], operations: [...prefix, outputs[5].operation] });
+    return Response.json(envelope({ summary: 'Prepared the grounded chair.', requestedViews: [], objectCounts: [], operations: [], scenePreviewId: outputs[6].scenePreviewId }));
   }) as typeof fetch;
   const response = await proposeSceneEdit({ project: source, sceneId: null, shotId: null, selectedId: null, prompt: 'Build a new set with a chair on the ground.', time: 0, snapshots: [] },
     new MetaProvider({ apiKey: 'test-only-placeholder', model: 'test' }, transport), undefined, diagnostic, library);
   assert.equal(response.status, 'ready'); if (response.status !== 'ready') return;
-  assert.equal(round, 6); assert.equal(JSON.stringify(source), original);
+  assert.equal(round, 8); assert.equal(JSON.stringify(source), original);
   const result = applyProjectOperations(source, response.plan.operations, 0);
   const measured = inspectSpatial(result, { sceneId: 'new_set', time: 0, objectIds: [result.scenes[0].objects[0].id], frame: world });
   near(measured.objects[0].bounds.min[1], 0); assert.equal(result.assets!.length, 1);
-  assert.deepEqual(diagnostic.toolCalls!.map(call => call.name), ['read_asset', 'instantiate_asset', 'inspect_spatial', 'preview_spatial', 'preview_spatial']);
+  assert.deepEqual(diagnostic.toolCalls!.map(call => call.name), ['plan_scene', 'read_asset', 'instantiate_asset', 'inspect_spatial', 'preview_spatial', 'preview_spatial', 'render_scene']);
   assert.equal(diagnostic.outcome, 'ready'); assert.ok(diagnostic.toolCalls!.find(call => call.error));
 });
