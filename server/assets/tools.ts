@@ -14,6 +14,7 @@ import { spatialOperationSchema, spatialQuerySchema } from '../../src/spatial/sc
 import { ReferenceTools, REFERENCE_TOOL_INSTRUCTIONS } from '../reference/sam/tools.ts';
 import { ScriptTools, scriptToolDefinitions } from '../scripts/tools.ts';
 import { SCRIPT_CONTRACT } from '../../src/scripts/contract.ts';
+import { appearanceContent, type AppearanceImage } from '../../src/appearance/model.ts';
 
 const id = assetReferenceSchema.shape.id;
 const reference = z.strictObject({ assetId: id });
@@ -88,7 +89,7 @@ export class AssetTools {
   private inspectedScene?:{sceneId:string;operations:string;applyTime:number;shots:Set<string>};
   private scenePreviews=new Map<string,{sceneId:string;operations:string;applyTime:number;shots:Set<string>;plan:SceneOperation[]}>();
   private selectedScenePreviewId?:string;
-  constructor(private library: AssetLibrary, private project: ProjectContent, private provider: AIProvider, private diagnostic?: SceneEditDiagnostic,private onAsset?:(asset:AssetDefinition)=>void,private frameBounds?:ImageBounds,private referenceTools?:ReferenceTools) {this.scripts=new ScriptTools(project);}
+  constructor(private library: AssetLibrary, private project: ProjectContent, private provider: AIProvider, private diagnostic?: SceneEditDiagnostic,private onAsset?:(asset:AssetDefinition)=>void,private frameBounds?:ImageBounds,private referenceTools?:ReferenceTools,private appearance:AppearanceImage[]=[]) {this.scripts=new ScriptTools(project);}
   // Assets supplied with the project (placed ones, or a reference run's approved assets) come with their metadata; only library candidates need read_asset first.
   private reusableAsset(id:string){return this.readAssets.get(id)??this.project.assets?.find(asset=>asset.id===id);}
 
@@ -134,7 +135,7 @@ export class AssetTools {
         if(args.baseAssetId&&!base)throw new Error('Read the base asset before delegating its variant.');
         const frame=args.referenceFrameId?this.referenceTools?.context?.source.frames.find(frame=>frame.id===args.referenceFrameId):undefined;
         if(args.referenceFrameId&&!frame)throw new Error('Use an exact attached reference frame ID for the asset expert.');
-        const { asset, job } = await generateAsset(args.brief, this.provider, this.library, signal,{references:frame?[{type:'image',dataUrl:frame.dataUrl}]:this.references,base,resumeJobId:args.resumeJobId});
+        const { asset, job } = await generateAsset(args.brief, this.provider, this.library, signal,{references:frame?[{type:'image',dataUrl:frame.dataUrl},...appearanceContent(this.appearance)]:this.references,base,resumeJobId:args.resumeJobId});
         response = await expose(asset); response.result = { jobId: job.id, status: job.status, asset: response.result, review: job.review }; break;
       }
       case 'get_asset_job': {
@@ -201,7 +202,7 @@ export class AssetTools {
     }) };
   }
   async generate(request: StructuredRequest): Promise<unknown> {
-    const images=request.content.filter(part=>part.type==='image');this.references=images.some(part=>part.reference)?images.filter(part=>part.reference):images;
+    const images=request.content.filter((part): part is Extract<AIContent,{type:'image'}>=>part.type==='image'&&!this.appearance.some(image=>image.image===part.dataUrl));this.references=[...(images.some(part=>part.reference)?images.filter(part=>part.reference):images),...appearanceContent(this.appearance)];
     if(!this.input.length)this.input.push(...(request.history??[]).map(message=>({type:'message',role:message.role,content:[{type:message.role==='user'?'input_text':'output_text',text:message.text}]})));
     this.input.push({type:'message',role:'user',content:request.content.slice(this.contentCount).map(part=>part.type==='text'?{type:'input_text',text:part.text}:part.type==='video'?{type:'input_video',video_url:part.dataUrl}:{type:'input_image',image_url:part.dataUrl})});this.contentCount=request.content.length;
     const input=this.input;

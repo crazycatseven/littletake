@@ -12,7 +12,11 @@ export async function readVideoPackage(blob: Blob) {
   }
   const manifest = videoManifestSchema.parse(JSON.parse(new TextDecoder().decode(files.get('manifest.json'))));
   const expected = new Set(['manifest.json', 'brief.md']);
-  const media = [...manifest.frames, ...manifest.references];
+  if (manifest.references.some(reference => reference.role === 'appearance')) {
+    if (!files.has('appearance-references.md')) throw new Error('The appearance reference guide is missing.');
+    expected.add('appearance-references.md');
+  }
+  const media = [...manifest.frames, ...manifest.references, ...(manifest.storyboards ?? [])];
   for (const item of media) {
     const bytes = files.get(item.file), mime = mediaType(item.file);
     if (!bytes || !mime.startsWith('image/') || !imageMatches(bytes, mime)) throw new Error('A reference image is missing or invalid.');
@@ -20,6 +24,10 @@ export async function readVideoPackage(blob: Blob) {
     if (expected.has(item.file)) throw new Error('Reference file names must be unique.');
     expected.add(item.file);
   }
+  if (manifest.firstFrame && !manifest.frames.some(frame => frame.file === manifest.firstFrame && frame.at === 0)) throw new Error('The first frame must be the beginning of this shot.');
+  const tiles = manifest.storyboards?.flatMap(page => page.frames) ?? [], sources = manifest.frames.filter(frame => frame.kind === 'previs');
+  if (tiles.length && (tiles.length !== sources.length || tiles.some((tile, index) => tile.index !== index + 1 || tile.at !== sources[index]?.at || (index > 0 && tile.at < tiles[index - 1].at)))) throw new Error('Storyboard tiles must match every source frame in time order.');
+  if (manifest.storyboardStyle === 'ai' && (sources.some(frame => !manifest.frames.some(other => other.kind === 'look' && other.at === frame.at)) || !manifest.frames.some(frame => frame.file === manifest.firstFrame && frame.kind === 'look'))) throw new Error('AI storyboards need a generated image for every panel and for the first frame.');
   if (manifest.previs) {
     const video = files.get(manifest.previs);
     if (!video || mediaType(manifest.previs) !== 'video/webm' || !Buffer.from(video.subarray(0, 4)).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))) throw new Error('The previs video is missing or invalid.');

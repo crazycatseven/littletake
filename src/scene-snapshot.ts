@@ -31,7 +31,7 @@ export function topDownCamera(bounds: THREE.Box3, aspect = 1): THREE.Orthographi
 }
 
 /** Render on demand into a disposable target. The live canvas and camera stay intact. */
-export function renderSceneSnapshot(renderer: THREE.WebGLRenderer, scene: THREE.Scene, shotCamera: THREE.PerspectiveCamera, objects: SnapshotObject[], view: SceneView, time: number, cameraId: string | null = 'camera',measureVisible=false,frameBounds?:ImageBounds,imageOptions?:{width:number;height:number;type:'image/webp';quality:number}): SceneSnapshot {
+export function renderSceneSnapshot(renderer: THREE.WebGLRenderer, scene: THREE.Scene, shotCamera: THREE.PerspectiveCamera, objects: SnapshotObject[], view: SceneView, time: number, cameraId: string | null = 'camera',measureVisible=false,frameBounds?:ImageBounds,imageOptions?:{width:number;height:number;type:'image/webp'|'image/jpeg';quality:number}): SceneSnapshot {
   const width = imageOptions?.width ?? 1024, height = imageOptions?.height ?? (view === 'top_down' ? 1024 : 576);
   scene.updateMatrixWorld(true);
   const bounds = new THREE.Box3();

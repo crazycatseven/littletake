@@ -4,6 +4,7 @@ import { editPlanSchema } from './operations';
 import type { SceneEditInput, SceneEditResponse } from './types';
 import { saveDiagnostic, type DiagnosticIdentity, type RequestDiagnostic } from './diagnostic-store';
 import { referenceContextSchema } from '../reference/observations';
+import { performanceRequestSchema } from '../performance/refinement';
 
 export async function requestSceneEdit(input: SceneEditInput, signal: AbortSignal, identity?: DiagnosticIdentity): Promise<SceneEditResponse> {
   const id = newId();
@@ -27,6 +28,11 @@ export async function requestSceneEdit(input: SceneEditInput, signal: AbortSigna
     if (data.status === 'needs_reference_frames' && input.reference?.source.kind === 'video' && data.reference && Array.isArray(data.requestedTimes) && data.requestedTimes.length > 0 && data.requestedTimes.length <= 2 && new Set(data.requestedTimes).size === data.requestedTimes.length && data.requestedTimes.every((time: unknown) => typeof time === 'number' && Number.isFinite(time) && time >= 0 && time < input.reference!.source.duration) && typeof data.summary === 'string') result = data;
     else if (data.status === 'needs_views' && Array.isArray(data.requestedViews) && data.requestedViews.length > 0 && data.requestedViews.length <= 2 && new Set(data.requestedViews).size === data.requestedViews.length && data.requestedViews.every((v: unknown) => v === 'top_down' || v === 'shot') && typeof data.summary === 'string') result = data;
     else if (data.status === 'ready') result = { ...data, plan: editPlanSchema.parse(data.plan) };
+    else if (data.status === 'needs_motion_review' && input.performance && !input.performance.candidate) {
+      const parsed = performanceRequestSchema.parse({ targets: input.performance.targets, candidate: data.candidate });
+      if (!parsed.candidate) throw new Error('Muse returned an incomplete recording proposal.');
+      result = { status: 'needs_motion_review', candidate: parsed.candidate, provider: data.provider, model: data.model };
+    }
     else throw new Error('Muse returned an unsupported edit response.');
     record.status = result.status; record.finishedAt = new Date().toISOString(); await saveDiagnostic(record);
     return result;

@@ -10,6 +10,7 @@ import { createProject } from '../../src/project/storage.ts';
 import { videoPackage } from '../../src/look/brief.ts';
 import type { HandoffReceipt } from '../../src/look/handoff.ts';
 import type { ProjectRoom } from '../../src/project/room.ts';
+import { storyboardTimes, STORYBOARD_PAGE_SIZE } from '../../src/look/storyboard.ts';
 
 test('a protected server keeps projects and results across restart; public shot snapshots stay fixed, scoped and revocable', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'littletake-handoff-'));
@@ -26,7 +27,12 @@ test('a protected server keeps projects and results across restart; public shot 
   const room: ProjectRoom = await created.json(), code = room.code, doc = project.scenes[0], shot = doc.shots[0];
   const png = new PNG({ width: 8, height: 8 }); png.data.fill(200); const image = 'data:image/png;base64,' + PNG.sync.write(png).toString('base64');
   const prompt = 'Orbit the mascot, reveal the dragon at the end. <script>alert("unsafe")</script>';
-  const archive = await videoPackage(doc, shot, { prompt, camera: 'A continuous orbit.', beats: [{ at: 0, action: 'Hold close-up.' }], negative: 'No early dragon reveal.', model: 'creator' }, 'Warm firelight', [{ at: 0, previs: image, look: image }], null, [{ image, role: 'character', label: 'Muse mascot' }]);
+  const brief = { prompt, camera: 'A continuous orbit.', beats: [{ at: 0, action: 'Hold close-up.' }], negative: 'No early dragon reveal.', model: 'creator', promptText: `Creator's final edit:\n${prompt}\nKeep the dragon hidden until the last second.` };
+  const briefId = randomUUID(), briefOutput = { id: briefId, kind: 'video-brief', sceneId: doc.id, shotId: shot.id, name: 'Edited prompt', mime: 'application/json' };
+  assert.equal((await get(`/api/projects?code=${code}&output=1`, { method: 'POST', headers: { ...headers, 'x-littletake-output': encodeURIComponent(JSON.stringify(briefOutput)) }, body: JSON.stringify({brief,direction:'Warm firelight'}) })).status,200);
+  const frames = storyboardTimes(shot,doc.fps??24).map(time=>({at:time-shot.start,previs:image}));
+  const pages = Array.from({length:Math.ceil(frames.length/STORYBOARD_PAGE_SIZE)},(_,page)=>({image,frames:frames.slice(page*STORYBOARD_PAGE_SIZE,(page+1)*STORYBOARD_PAGE_SIZE).map((frame,index)=>({index:page*STORYBOARD_PAGE_SIZE+index+1,at:frame.at}))}));
+  const archive = await videoPackage(doc, shot, brief, 'Warm firelight', frames, pages, [{ image, role: 'character', label: 'Muse mascot' }]);
   const id = randomUUID(), publish = (credential = lease, body = archive, publicationId = id) => get(`/api/handoffs?code=${code}&id=${publicationId}`, { method: 'POST', headers: { ...headers, 'x-littletake-edit-lease': credential, 'Content-Type': 'application/zip' }, body });
   assert.equal((await publish(randomUUID())).status, 403, 'viewers cannot publish');
   const published = await publish(); assert.equal(published.status, 201); const receipt: HandoffReceipt = await published.json();
@@ -36,7 +42,11 @@ test('a protected server keeps projects and results across restart; public shot 
   for (const secret of [code, lease, page, 'PRIVATE CONVERSATION, DO NOT SHARE']) assert.ok(!html.includes(secret), 'public references exclude project access and conversations');
   assert.ok(!html.includes('<script>alert'));
   assert.equal((await get(base, { method: 'POST' })).status, 405, 'public URLs are read-only');
-  const manifest = await (await get(base + 'manifest.json')).json(); assert.equal(manifest.brief.prompt, prompt);
+  const manifest = await (await get(base + 'manifest.json')).json(); assert.equal(manifest.brief.prompt, brief.promptText);
+  assert.equal(manifest.brief.promptText,brief.promptText); assert.ok(html.includes('Keep the dragon hidden until the last second.'));
+  assert.ok(html.includes('Download first frame') && html.includes('Download page'));
+  assert.equal(manifest.storyboards.length,pages.length); assert.equal(manifest.firstFrame,'first-frame.png'); assert.equal(manifest.previs,null);
+  const board = await get(base + manifest.storyboards[0].file); assert.equal(board.status,200); assert.deepEqual(Buffer.from(await board.arrayBuffer()),PNG.sync.write(png));
   const originalImage = await get(base + manifest.frames[0].file); assert.equal(originalImage.headers.get('content-type'), 'image/png');
   assert.deepEqual(Buffer.from(await originalImage.arrayBuffer()), PNG.sync.write(png));
   const partial = await get(base + manifest.frames[0].file, { headers: { Range: 'bytes=0-7' } }); assert.equal(partial.status, 206); assert.equal((await partial.arrayBuffer()).byteLength, 8);
@@ -48,7 +58,7 @@ test('a protected server keeps projects and results across restart; public shot 
 
   project.name = 'Changed after publication'; project.revision++;
   assert.equal((await send(`/api/projects?code=${code}`, { action: 'save', savedVersion: room.savedVersion, project })).status, 200);
-  assert.equal((await (await get(base + 'manifest.json')).json()).brief.prompt, prompt);
+  assert.equal((await (await get(base + 'manifest.json')).json()).brief.prompt, brief.promptText);
   const video = await readFile('public/demo/grand-budapest-zero/input-web.mp4'), outputId = randomUUID();
   const output = { id: outputId, kind: 'final-video', sceneId: doc.id, shotId: shot.id, name: 'Imported finished video', mime: 'video/mp4' };
   assert.equal((await get(`/api/projects?code=${code}&output=1`, { method: 'POST', headers: { ...headers, 'x-littletake-output': encodeURIComponent(JSON.stringify(output)) }, body: video })).status, 200);
@@ -58,9 +68,10 @@ test('a protected server keeps projects and results across restart; public shot 
   assert.equal(restored.project.conversations.threads[0].draft, project.conversations.threads[0].draft);
   assert.equal(restored.handoffs?.[0].token, receipt.token); assert.equal(restored.outputs[0].id, outputId);
   assert.deepEqual(Buffer.from(await (await get(`/api/projects?code=${code}&output=${outputId}`, { headers })).arrayBuffer()), video);
+  assert.deepEqual((await (await get(`/api/projects?code=${code}&output=${briefId}`, {headers})).json()).brief,brief,'the edited prompt survives project reopen and server restart');
   assert.equal((await get(base)).status, 200, 'public references survive a server restart');
   assert.equal((await get('/api/projects?code=' + receipt.token, { headers })).status, 404, 'a share token is not a project join code');
   const revoked = await get(`/api/handoffs?code=${code}&id=${id}&revoke=1`, { method: 'POST', headers }); assert.equal(revoked.status, 200);
-  for (const resource of ['', 'manifest.json', manifest.frames[0].file, 'package.zip']) assert.equal((await get(base + resource)).status, 410, 'withdrawing a link also withdraws its raw media');
+  for (const resource of ['', 'manifest.json', manifest.frames[0].file, manifest.storyboards[0].file, 'package.zip']) assert.equal((await get(base + resource)).status, 410, 'withdrawing a link also withdraws its raw media');
   assert.equal((await get(`/api/projects?code=${code}`, { headers })).status, 200, 'withdrawing references does not delete the project');
 });
