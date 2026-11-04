@@ -97,6 +97,7 @@ export class XRControls {
   private draggingTimeline = false;
   private viewerLocal = new THREE.Matrix4();
   private menuNeedsPlacement = true;
+  private menuHidden = false;
   private cleanups: (() => void)[] = [];
   private grab: { index: number; input: 'grip' | 'trigger'; id: string; start: Transform; origin: THREE.Vector3; orientation: THREE.Quaternion; latest: Transform; near: boolean } | null = null;
   private heldCamera: { index: number; start: Transform; origin: THREE.Vector3; orientation: THREE.Quaternion } | null = null;
@@ -174,6 +175,7 @@ export class XRControls {
     this.menuNeedsPlacement = true;
     this.camera.updateMatrix(); this.viewerLocal.copy(this.camera.matrix);
     this.menuSpace.place(this.menuHead(), this.rig.scale.x);
+    this.menuHidden = false;
     this.menuRoot.visible = true;
     this.feedbackRoot.visible = true;
     if (!this.menu.expanded) this.menu.toggle();
@@ -253,7 +255,8 @@ export class XRControls {
       if (this.menuDrag !== null) {
         const source = this.sources.get(this.menuDrag);
         if (this.session.visibilityState !== 'visible' || !source?.gripSpace || !this.reference || !frame?.getPose(source.gripSpace, this.reference)) this.finish(true);
-        else (this.draggingTimeline ? this.timelineSpace : this.menuSpace).move(this.grips[this.menuDrag].getWorldPosition(new THREE.Vector3()), head, this.rig.scale.x);
+        else (this.draggingTimeline ? this.timelineSpace : this.menuSpace).move(this.grips[this.menuDrag].getWorldPosition(new THREE.Vector3()), head, this.rig.scale.x,
+          this.draggingTimeline ? this.grips[this.menuDrag].getWorldQuaternion(new THREE.Quaternion()) : undefined);
       } else this.menuSpace.resize(head, this.rig.scale.x);
       if (this.timeline) this.timelineSpace.resize(head, this.rig.scale.x);
     }
@@ -261,11 +264,15 @@ export class XRControls {
 
   private resetTimelineInput(): void { this.timelineArmed = false; this.timelineTime = null; }
   private recordingMode() { return this.options.timelineState?.().recording?.mode ?? 'idle'; }
-  private toggleMenu(): void {
+  private toggleMenu(hideCompletely = false): void {
     // Recalling the menu ends only its own drag, never an object grab or recording.
     if(this.menuDrag!==null&&!this.draggingTimeline){this.menuDrag=null;this.menuSpace.end();}
     this.menuNeedsPlacement=false;
-    this.menu.toggle(); this.menuSpace.place(this.menuHead(), this.rig.scale.x); this.syncMenu();
+    if (hideCompletely) {
+      this.menuHidden = !this.menuHidden;
+      if (!this.menuHidden && !this.menu.expanded) this.menu.toggle();
+    } else this.menu.toggle();
+    this.menuSpace.place(this.menuHead(), this.rig.scale.x); this.syncMenu();
   }
   private placeTimeline(): void {
     const head = this.menuHead();
@@ -339,7 +346,7 @@ export class XRControls {
   }
   private syncPanelVisibility(): void {
     const holding=!!this.heldCamera||!!this.grab;
-    this.menuRoot.visible=!!this.session&&!holding;
+    this.menuRoot.visible=!!this.session&&!holding&&!this.menuHidden;
     this.timelineRoot.visible=!!this.session&&this.timeline&&!holding;
     this.keyframeGhosts.root.visible=!!this.session&&this.timeline&&!holding;
   }
@@ -474,7 +481,8 @@ export class XRControls {
     if (point && !this.locomotion) {
       this.menuDrag = index; this.menuNeedsPlacement = false;
       this.draggingTimeline = timelineDrag;
-      (timelineDrag ? this.timelineSpace : this.menuSpace).begin(point, grip); this.nearSelection.clear(); this.resetTimelineInput();
+      (timelineDrag ? this.timelineSpace : this.menuSpace).begin(point, grip,
+        timelineDrag ? this.grips[index].getWorldQuaternion(new THREE.Quaternion()) : undefined); this.nearSelection.clear(); this.resetTimelineInput();
       return;
     }
     const handheld=this.options.handheldState?.();
@@ -579,7 +587,7 @@ export class XRControls {
       if (binding) this.menuPressed.set(index, { index: binding.index, pressed: menuDown });
       else this.menuPressed.delete(index);
       if ((binding && priorMenu?.index === binding.index && !priorMenu.pressed && menuDown) || (priorStick === false && stickDown)) {
-        this.toggleMenu(); this.controllerVisuals[index].acknowledge('menu');
+        this.toggleMenu(true); this.controllerVisuals[index].acknowledge('menu');
       }
       // Consume presses even while blocked: releasing a grab must not replay a held button.
       if (this.keyDrag || this.grab || this.locomotion || this.menuDrag !== null || this.recordingMode()!=='idle') continue;

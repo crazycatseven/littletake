@@ -68,10 +68,16 @@ test('timeline header drags independently and add-key is gated by selection, loc
     assert.ok(controls.timelineRoot.position.distanceTo(before) > .1);
     assert.deepEqual(controls.menuRoot.position, menuPosition);
     assert.ok(Math.abs(controls.timelineRoot.rotation.x) < 1e-8); assert.ok(Math.abs(controls.timelineRoot.rotation.z) < 1e-8);
+    const initialRotation = controls.timelineRoot.quaternion.clone();
+    grips[0].quaternion.setFromEuler(new THREE.Euler(.15, .1, .1));
+    controls.updateView(frame);
+    assert.ok(controls.timelineRoot.quaternion.angleTo(grips[0].quaternion.clone().multiply(initialRotation)) < 1e-6);
     aim(XR_ADD_KEY); fire('selectstart'); assert.equal(added, 0);
     aim(XR_DELETE_KEY); fire('selectstart'); assert.equal(deleted, 0);
-    fire('squeezeend'); const placed = controls.timelineRoot.position.clone();
+    fire('squeezeend'); const placed = controls.timelineRoot.position.clone(), placedRotation = controls.timelineRoot.quaternion.clone();
+    grips[0].quaternion.identity();
     grips[0].position.x += .4; controls.updateView(frame); assert.deepEqual(controls.timelineRoot.position, placed);
+    assert.ok(controls.timelineRoot.quaternion.angleTo(placedRotation) < 1e-6);
     aim(XR_ADD_KEY); fire('selectstart'); assert.equal(added, 1);
     selected = false; fire('selectstart'); assert.equal(added, 1);
     selected = true; editable = false; fire('selectstart'); assert.equal(added, 1);
@@ -801,7 +807,7 @@ test('left Menu toggles modes UI without hiding timeline; thumbstick fallback an
   const source = { handedness: 'left', profiles: ['oculus-touch-v3'], gripSpace: {}, gamepad: { mapping: 'xr-standard', buttons } };
   let recording: 'idle'|'armed'|'recording'|'review'='idle';
   const controls = new XRControls(renderer, { targets: () => [], editable: () => true, select: () => {}, pose: () => pose, transform: () => true, action: () => {}, timelineState: () => ({ time: 1, duration: 5, fps: 24, recording: {mode:recording} }) });
-  const expanded = () => controls.menuRoot.children.filter(child => child.visible).length > 1;
+  const expanded = () => controls.menuRoot.visible && controls.menuRoot.children.filter(child => child.visible).length > 1;
   const fire = (type: string, data?: unknown) => controllers[0].dispatchEvent({ type, data } as never);
   const release = (index: number) => { buttons[index].pressed = false; controls.update(); };
   const press = (index: number) => { buttons[index].pressed = true; controls.update(); };
@@ -812,6 +818,7 @@ test('left Menu toggles modes UI without hiding timeline; thumbstick fallback an
     press(6); assert.equal(expanded(), true); release(6); // Thumb-rest is never Menu.
     // A reported Menu slot may never generate input: stick click remains available.
     press(3); assert.equal(expanded(),false); controls.update();assert.equal(expanded(),false);
+    assert.equal(controls.menuRoot.visible,false); // Hide the handle as well as the mode icons.
     release(3);press(3);assert.equal(expanded(),true);release(3);
 
     press(7); controls.update(); assert.equal(expanded(), false); assert.equal(controls.timelineRoot.visible, true);
