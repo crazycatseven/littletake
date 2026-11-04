@@ -9,7 +9,7 @@ import { evaluateComponents, evaluateFov, evaluateJointAngles } from './model';
 import { activePivot, fromPivotPose, toPivotPose } from './components/transform';
 import { assetGroupBounds, createAssetGroup, disposeAssetGroup, poseAssetJoints, type AssetDefinition } from './assets/model';
 import { DEFAULT_SCENE_LOOK } from './scene-edit/look';
-import { createObjectGroup, primitiveGeometry } from './spatial/geometry';
+import { createObjectGroup, primitiveGeometry,cameraFarForBounds } from './spatial/geometry';
 import { renderSceneSnapshot,renderCameraFrame } from './scene-snapshot';
 
 import { configureHandles } from './placement/gizmo';
@@ -74,7 +74,6 @@ export class Stage {
   private readonly scene = new THREE.Scene();
   private readonly editorBackground = new THREE.Color();
   private readonly editorGround = new THREE.Color();
-  private readonly editorFog: THREE.Fog;
   private readonly perspectiveCamera = new THREE.PerspectiveCamera(45, 1, 0.05, 500);
   private readonly orthographicCamera = new THREE.OrthographicCamera(-10, 10, 10, -10, .05, 500);
   private editorCamera: THREE.PerspectiveCamera | THREE.OrthographicCamera = this.perspectiveCamera;
@@ -144,6 +143,7 @@ export class Stage {
   private lastFrame = 0;
   private disposed = false;
   private currentDoc: SceneDocument | null = null;
+  private framedSceneId: string | null = null;
   private currentTime = 0;
 
   constructor(options: StageOptions) {
@@ -151,9 +151,7 @@ export class Stage {
     const theme = getComputedStyle(options.viewport);
     this.editorBackground.set(theme.getPropertyValue('--viewport-background').trim());
     this.editorGround.set(theme.getPropertyValue('--viewport-ground').trim());
-    this.editorFog = new THREE.Fog(this.editorBackground, 45, 150);
     this.scene.background = new THREE.Color('#e9e7e2');
-    this.scene.fog = new THREE.Fog('#e9e7e2', 45, 150);
     this.renderer = this.createRenderer();
     this.previewRenderer = this.createRenderer();
     const canvas = this.renderer.domElement;
@@ -314,7 +312,6 @@ export class Stage {
     if (lookKey !== this.lookKey) {
       this.lookKey = lookKey;
       (this.scene.background as THREE.Color).set(look.background);
-      this.scene.fog!.color.set(look.background);
       this.groundMaterial.color.set(look.ground);
       this.ambient.color.set(look.ambientColor); this.ambient.intensity = look.ambientIntensity;
       this.sun.color.set(look.keyColor); this.sun.intensity = look.keyIntensity; this.sun.position.fromArray(look.keyPosition);
@@ -374,7 +371,9 @@ export class Stage {
       if (this.dragEntityId === preview.id) this.copyIconToShot();
       else this.applyWorldMatrix(this.shotCamera, world.get(preview.id)!, false);
       const fov = evaluateFov(preview, time);
-      if (this.shotCamera.fov !== fov) { this.shotCamera.fov = fov; this.shotCamera.updateProjectionMatrix(); }
+      const bounds=new THREE.Box3();for(const view of this.views.values())if(view.root.visible)bounds.union(view.bounds.clone().applyMatrix4(view.root.matrixWorld));
+      const far=cameraFarForBounds(this.shotCamera.position,bounds);
+      if (this.shotCamera.fov !== fov||this.shotCamera.far!==far) { this.shotCamera.fov = fov;this.shotCamera.far=far; this.shotCamera.updateProjectionMatrix(); }
       if(this.pilotCameraId){
         this.applyWorldMatrix(this.editorCamera,world.get(preview.id)!,false);
         this.editorCamera.matrixAutoUpdate=true;
@@ -388,6 +387,8 @@ export class Stage {
     this.selectedId = validSelectedId;
     this.selectedIds = selectedIds.filter(id => this.views.has(id) || id === this.iconCameraId);
     this.syncSelection();
+    // Temporary captures run with playing=true and must not move the author's editor view.
+    if (!playing && doc.objects.length && this.framedSceneId !== doc.id) { this.framedSceneId = doc.id; this.resetView(); }
   }
 
   setMotionPath(path: MotionPath|null, index=-1, editable=true, part:import('./motion-paths/model').PathPart='point'): void { this.pathEditor.show(path,index,editable,part); }
@@ -545,6 +546,17 @@ export class Stage {
     this.setProjection(false);
     this.editorCamera.position.set(8, 6, 10);
     this.orbit.target.set(0, 1, 0);
+    const bounds = new THREE.Box3();
+    for (const view of this.views.values()) if (view.root.visible) bounds.union(view.bounds.clone().applyMatrix4(view.root.matrixWorld));
+    if (!bounds.isEmpty()) {
+      const radius = Math.max(bounds.getSize(new THREE.Vector3()).length() / 2, 1);
+      const halfFov = Math.atan(Math.tan(this.perspectiveCamera.fov * DEG / 2) * Math.min(1, this.perspectiveCamera.aspect));
+      const distance = radius / Math.sin(halfFov) * 1.15;
+      bounds.getCenter(this.orbit.target);
+      this.orbit.maxDistance = Math.max(150, distance * 4);
+      for (const camera of [this.perspectiveCamera, this.orthographicCamera]) { camera.far = Math.max(500, this.orbit.maxDistance + radius * 2); camera.updateProjectionMatrix(); }
+      this.editorCamera.position.copy(this.orbit.target).addScaledVector(new THREE.Vector3(8, 6, 10).normalize(), distance);
+    }
     this.orbit.update();
   }
 
@@ -1325,15 +1337,13 @@ export class Stage {
     else {
       // Editor chrome has its own ground/background. Restore the scene's
       // environment before preview, snapshots and exports can use it.
-      const { background, fog } = this.scene, ground = this.groundMaterial.color;
+      const { background } = this.scene, ground = this.groundMaterial.color;
       try {
         this.scene.background = this.editorBackground;
-        this.scene.fog = this.editorFog;
         this.groundMaterial.color = this.editorGround;
         this.renderer.render(this.scene, this.editorCamera);
       } finally {
         this.scene.background = background;
-        this.scene.fog = fog;
         this.groundMaterial.color = ground;
       }
     }

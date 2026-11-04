@@ -120,7 +120,7 @@ test('Agent requests an exact missing frame, reads and segments it, reuses resul
     }) as typeof fetch);
     await assert.rejects(proposeSceneEdit(parseSceneEditInput({ project, sceneId: 'set', shotId: null, selectedId: null, time: 0, history: [], snapshots: [], prompt: 'Read the person.', reference }),
       loopingProvider, undefined, loopDiagnostic, library, loopReferences), (error: unknown) => error instanceof AIError && error.code === 'tool_loop');
-    assert.equal(rounds, invalidFrame ? 2 : 3);
+    assert.equal(rounds, 3, 'The first distinct validation error is repair feedback; two repeated errors stop the loop.');
     assert.equal(samCalls - callsBefore, invalidFrame ? 0 : 1);
     assert.equal(loopDiagnostic.toolCalls?.length, rounds);
     assert.equal(loopReferences.progress()!.observations.length, invalidFrame ? 0 : 1);

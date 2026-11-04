@@ -1,4 +1,5 @@
 import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import { defineConfig, loadEnv } from 'vite';
 import { createApplication } from './server/app/application.ts';
@@ -26,8 +27,9 @@ export default defineConfig(({ mode }) => {
           });
           const response = await app.fetch(request);
           if (!response) { res.statusCode = 404; res.end(); return; }
-          res.statusCode = response.status; response.headers.forEach((value, key) => res.setHeader(key, value)); res.end(Buffer.from(await response.arrayBuffer()));
-        } catch { res.statusCode = 500; res.end(JSON.stringify({ error: { message: 'The project service could not finish this request.' } })); }
+          res.statusCode = response.status; response.headers.forEach((value, key) => res.setHeader(key, value));
+          if (response.body) { res.flushHeaders(); await pipeline(Readable.fromWeb(response.body as import('node:stream/web').ReadableStream), res); } else res.end();
+        } catch { if (!res.headersSent) res.statusCode = 500; if (!res.destroyed) res.end(JSON.stringify({ error: { message: 'The project service could not finish this request.' } })); }
       });
     },
   }] };

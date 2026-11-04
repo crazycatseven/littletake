@@ -18,6 +18,7 @@ const STARTER_PROMPTS: [label: string, prompt: string][] = [
   ['Dragon over the Golden Gate', 'Build a sweeping flight: a knight rides a red dragon that dives from above the north tower of the Golden Gate Bridge, swoops under the deck and climbs out past the south tower at golden hour, over 12 seconds. Three shots: a high wide shot, a chase shot under the deck, and a low shot from the water.'],
   ['Two friends at a café', 'Build a small café: two friends talk at a table by the window, one leans in and laughs. 8 seconds, three shots: a wide two-shot, then an over-the-shoulder shot on each of them.'],
 ];
+import {activeWorkspace} from '../project/client';
 
 interface Options extends Omit<SessionOptions, 'changed'> {
   root: HTMLElement; book: ConversationBook; changed(): void; clearSelection(): void; removeSelection(id: string): void;
@@ -39,6 +40,7 @@ export class SceneEditPanel {
   private animationChoices: { target: PerformanceTarget; name: string; detail: string; disabled: string }[] = [];
   private pendingAnimations = new Set<string>();
   private animationPickerContext = '';
+  private progressOpen = new Set<string>();
   constructor(private readonly options: Options) {
     options.root.innerHTML = `
       <div class="conversation-heading"><button type="button" data-chat="history" aria-label="Conversation history" aria-expanded="false"><span class="conversation-title"></span><span class="chevron">${icon('chevron-down')}</span></button><button type="button" class="icon-button" data-chat="new" aria-label="New conversation" title="New conversation">${icon('plus')}</button><details class="conversation-menu"><summary aria-label="Conversation options" title="Conversation options">${icon('more')}</summary><div class="conversation-menu-content"><div class="conversation-model">Model <span id="museModel">Muse</span></div><button type="button" data-chat="diagnostics">${icon('download')} Download diagnostics</button></div></details></div>
@@ -57,6 +59,16 @@ export class SceneEditPanel {
       <form class="chat-composer"><div class="performance-context" hidden></div><div class="selection-context" hidden></div><textarea id="sceneInstruction" aria-label="Message Muse" maxlength="2000" rows="3" placeholder="Describe an edit or ask about the scene…" title="Enter to send · Shift + Enter for a new line"></textarea><div class="composer-footer"><button type="button" data-chat="animations" aria-expanded="false" title="Select recorded animations to refine together">${icon('sparkles')} Animation</button><button type="button" data-chat="attach-reference" title="Attach an original image or reference clip for Muse">${icon('plus')} Reference</button><button type="submit" class="send-button" aria-label="Send message" title="Send message · Enter">${icon('arrow-up')}</button><button type="button" data-chat="stop" hidden>${icon('stop')} Stop</button></div></form>
       <div class="chat-footnote"><span class="diagnostic-status" role="status"></span></div>`;
     this.prompt = this.query('textarea'); this.messages = this.query('.chat-messages');
+    this.messages.addEventListener('click', event => {
+      const details = (event.target as HTMLElement).closest('summary')?.parentElement;
+      if (!(details instanceof HTMLDetailsElement) || !details.dataset.progress) return;
+      if (details.open) this.progressOpen.delete(details.dataset.progress); else this.progressOpen.add(details.dataset.progress);
+    });
+    this.messages.addEventListener('toggle', event => {
+      const details = event.target;
+      if (!(details instanceof HTMLDetailsElement) || !details.isConnected || !details.dataset.progress) return;
+      if (details.open) this.progressOpen.add(details.dataset.progress); else this.progressOpen.delete(details.dataset.progress);
+    }, true);
     this.session = new ConversationSession(options.book, { ...options,
       reference: async threadId => { if (this.referenceLoading?.threadId === threadId) await this.referenceLoading.promise; return loadReference(threadId); },
       saveReferenceObservations: async progress => {
@@ -245,27 +257,42 @@ export class SceneEditPanel {
     const shot = this.options.context().project.scenes.flatMap(scene => scene.shots).find(shot => shot.id === snapshot.shotId);
     return `${snapshot.variant === 'after' ? 'Refined' : 'Original'} · ${snapshot.view === 'top_down' ? 'Top view' : shot?.name ?? 'Shot view'} · ${snapshot.time.toFixed(2)}s`;
   }
-  private renderMessage(message: ChatMessage): string {
+  private renderMessage(message: ChatMessage, previous?: ChatMessage, next?: ChatMessage): string {
     const evidence = this.session.evidenceMessageId === message.id && this.session.evidence.length
       ? `<details class="performance-evidence"><summary>Rendered views shared with Muse · ${this.session.evidence.length}</summary><div class="ai-view-evidence">${this.session.evidence.map((snapshot, index) => `<button type="button" data-evidence="${index}" title="Inspect rendered frame"><img src="${esc(snapshot.dataUrl)}" alt="${esc(this.evidenceCaption(snapshot))}"/><span>${esc(this.evidenceCaption(snapshot))}</span></button>`).join('')}</div></details>` : '';
-    const body = `<article class="chat-message ${message.role}"><div class="message-label" ${message.role === 'assistant' ? `title="${esc(message.model)}"` : ''}>${message.role === 'user' ? 'You' : 'Muse'}</div><p>${esc(message.text)}</p>${evidence}${message.role === 'assistant' ? this.editCard(message) : ''}</article>`;
-    if (message.role !== 'user' || !['failed', 'stopped'].includes(message.status)) return body;
-    return body + `<div class="chat-${message.status === 'failed' ? 'error' : 'stopped'}">${esc(message.detail || 'Response interrupted. Your message is saved.')}${message === this.session.active.messages.at(-1) ? `<button type="button" data-retry="${esc(message.id)}" ${this.session.busy ? 'disabled' : ''}>Retry response</button>` : ''}</div>`;
+    const label = message.role === 'assistant' && previous?.role === 'user' && previous.progress?.length ? ''
+      : `<div class="message-label" ${message.role === 'assistant' ? `title="${esc(message.model)}"` : ''}>${message.role === 'user' ? 'You' : 'Muse'}</div>`;
+    const body = `<article class="chat-message ${message.role}">${label}<p>${esc(message.text)}</p>${evidence}${message.role === 'assistant' ? this.editCard(message) : ''}</article>`;
+    if (message.role !== 'user') return body;
+    const events = message.progress ?? [], recorded = events.at(-1), receipt = next?.role === 'assistant' ? next.edit : undefined;
+    const terminal = receipt?.status === 'applied' ? 'Changes applied.' : receipt?.status === 'discarded' ? 'Changes discarded.' : receipt?.status === 'stale' ? 'The scene changed. Update the proposal.' : null;
+    const latest = recorded && terminal ? { ...recorded, status: receipt?.status === 'stale' ? 'error' as const : 'done' as const, message: terminal }
+      : recorded && message.status === 'stopped' && recorded.status === 'running' ? { ...recorded, status: 'error' as const, message: 'Work was interrupted. Expand the history for details.' } : recorded;
+    const start = events[0] ? Date.parse(events[0].at) : 0;
+    const progress = latest ? `<div class="message-label">Muse</div><details class="agent-progress" data-progress="${esc(message.id)}" data-status="${latest.status}" ${this.progressOpen.has(message.id) ? 'open' : ''}><summary aria-label="${esc(latest.message)}, work history" title="${esc(latest.message)}"><span class="progress-indicator" aria-hidden="true">${icon(latest.status === 'done' ? 'check' : latest.status === 'error' ? 'close' : 'loader')}</span><span class="progress-latest" role="status">${esc(latest.message)}</span><span class="progress-chevron" aria-hidden="true">${icon('chevron-down')}</span></summary><ol class="progress-history" aria-label="Work history" aria-live="off">${events.map(event => {
+      const seconds = Math.max(0, Math.floor((Date.parse(event.at) - start) / 1000));
+      const code=activeWorkspace()?.room?.code,imageURL=event.imageOutputId&&code?'/api/projects?code='+encodeURIComponent(code)+'&output='+encodeURIComponent(event.imageOutputId):undefined;
+      return `<li data-status="${event.status}">${esc(event.message)}<time datetime="${esc(event.at)}">${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}</time>${imageURL?`<a href="${esc(imageURL)}" target="_blank" rel="noopener"><img src="${esc(imageURL)}" alt="Scene concept" loading="lazy"/></a>`:''}${event.sources?.length?`<div class="progress-sources">${event.sources.map(source=>`<a href="${esc(source.url)}" target="_blank" rel="noopener noreferrer">${esc(source.title)}</a>`).join('')}</div>`:''}</li>`;
+    }).join('')}</ol></details>` : '';
+    if (!['failed', 'stopped'].includes(message.status)) return body + progress;
+    return body + progress + `<div class="chat-${message.status === 'failed' ? 'error' : 'stopped'}">${esc(message.detail || 'Response interrupted. Your message is saved.')}${message === this.session.active.messages.at(-1) ? `<button type="button" data-retry="${esc(message.id)}" ${this.session.busy ? 'disabled' : ''}>Retry response</button>` : ''}</div>`;
   }
   refreshConversation() { this.render(); }
   private render() {
     const thread = this.session.active, switched = this.renderedThread !== thread.id;
     this.query('.conversation-title').textContent = thread.title;
     if (this.prompt.value !== thread.draft) this.prompt.value = thread.draft;
-    const content = thread.messages.length ? thread.messages.map(message => this.renderMessage(message)).join('') : thread.performance?.length
+    const content = thread.messages.length ? thread.messages.map((message,index) => this.renderMessage(message,thread.messages[index-1],thread.messages[index+1])).join('') : thread.performance?.length
       ? `<div class="empty-chat"><p><strong>Refine your recording.</strong> Tell Muse what you want the movement to express. It reviews the rendered frames and proposes changes you can compare before applying.</p><div class="chat-suggestions"><button type="button" data-suggestion="Smooth accidental jitter while preserving deliberate movement, pauses and timing.">Smooth movement</button><button type="button" data-suggestion="Review the framing in these recordings and make the intended action easier to read.">Improve framing</button></div></div>`
       : `<div class="empty-chat"><p><strong>Describe a shot in a sentence.</strong> Muse builds an editable 3D set with characters, cameras and shots, and shows it as a preview before anything changes. Pick a starting point, edit it if you like, then press Enter.</p><div class="chat-suggestions">${STARTER_PROMPTS.map(([label, prompt]) => `<button type="button" data-suggestion="${esc(prompt)}">${esc(label)}</button>`).join('')}<button type="button" data-suggestion="What could we improve about the framing?">Review framing</button></div></div>`;
-    const html = content + (this.session.busy ? `<div class="chat-waiting"><i></i>${esc(this.session.activity)}</div>` : '');
+    const html = content;
     const last = thread.messages.at(-1);
     const newRequest = last?.role === 'user' && last.status === 'pending' && last.id !== this.renderedLastMessage;
     if (html !== this.renderedMessages || switched) {
       const nearBottom = this.messages.scrollHeight - this.messages.scrollTop - this.messages.clientHeight < 60;
+      const focused = this.messages.contains(document.activeElement) ? document.activeElement?.closest<HTMLElement>('[data-progress]')?.dataset.progress : undefined;
       this.messages.innerHTML = html;
+      if(focused)[...this.messages.querySelectorAll<HTMLElement>('[data-progress]')].find(details=>details.dataset.progress===focused)?.querySelector<HTMLElement>('summary')?.focus({preventScroll:true});
       if (switched || nearBottom || newRequest) this.messages.scrollTop = thread.messages.length ? this.messages.scrollHeight : 0;
       this.renderedMessages = html; this.renderedThread = thread.id;
     }

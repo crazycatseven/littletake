@@ -10,6 +10,8 @@ export interface StructuredRequest {
   signal?: AbortSignal;
   reasoningEffort?: 'low' | 'medium' | 'high';
   maxOutputTokens?: number;
+  webSearch?: boolean;
+  onResponse?(response: unknown): void;
   onOutput?(text: string): void;
 }
 export interface AIProvider {
@@ -17,6 +19,7 @@ export interface AIProvider {
   readonly model: string;
   generateObject(request: StructuredRequest): Promise<unknown>;
   generateToolTurn?(request: ToolRequest): Promise<ToolResponse>;
+  generateImage?(request: { prompt: string; references?: AIContent[]; signal?: AbortSignal; onResponse?(response: unknown): void }): Promise<{ image: string; model: string }>;
   segmentMedia?(media:Extract<AIContent,{type:'image'|'video'}>,concept:string,signal?:AbortSignal):Promise<SegmentedFrame[]>;
 }
 export interface SegmentedFrame {index:number;regions:{id:string;box:[number,number,number,number];confidence:number}[]}

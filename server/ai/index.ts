@@ -16,5 +16,5 @@ export function aiConnection(env: AIEnvironment) {
 export function createAIProvider(env: AIEnvironment, transport: typeof fetch = fetch): AIProvider {
   const connection = aiConnection(env);
   if (!connection.available) throw new AIError('not_configured', 'AI analysis is not configured on this server. You can keep editing your scene.', 503);
-  return new MetaProvider({ apiKey: env.MODEL_API_KEY!.trim(), model: connection.model }, transport);
+  return new MetaProvider({ apiKey: env.MODEL_API_KEY!.trim(), model: connection.model, imageModel: env.MUSE_IMAGE_MODEL }, transport);
 }

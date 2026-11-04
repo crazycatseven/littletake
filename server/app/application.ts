@@ -32,7 +32,21 @@ export async function createApplication(input: Record<string, string | undefined
       try { projects.consumeCall(request.headers.get('x-littletake-project')!, request.headers.get('x-littletake-edit-lease')!, request.headers.get('x-littletake-run-id') ?? crypto.randomUUID(), 72, request.headers.get('x-littletake-edit-page') ?? undefined); }
       catch (error) { if (error instanceof ProjectRoomError) throw new AIError(error.code, error.message, error.status); throw error; }
     }),
-    '/api/scene-edit': createSceneEditHandler(env, undefined, depth),
+    '/api/scene-edit': createSceneEditHandler(env, undefined, depth,request=>({save:async design=>{
+      const code=request.headers.get('x-littletake-project')!,lease=request.headers.get('x-littletake-edit-lease')!,page=request.headers.get('x-littletake-edit-page')??undefined;
+      if(design.concept){const [prefix,base64]=design.concept.image.split(',',2),mime=prefix.slice(5,prefix.indexOf(';')) as 'image/png'|'image/jpeg'|'image/webp';
+        const previous=projects.get(code).outputs.find(output=>output.id===design.concept!.id);
+        projects.saveOutput(code,lease,{id:design.concept.id,kind:'scene-design',sceneId:design.sceneId,shotId:'',name:'Scene concept · '+design.sceneId,mime},Buffer.from(base64,'base64'),page,previous?.updatedAt??0);}
+      const previous=projects.get(code).outputs.find(output=>output.id===design.id);
+      projects.saveOutput(code,lease,{id:design.id,kind:'scene-design',sceneId:design.sceneId,shotId:'',name:'Scene design · '+design.sceneId,mime:'application/json'},Buffer.from(JSON.stringify(design)),page,previous?.updatedAt??0);
+      return {imageOutputId:design.concept?.id};
+    },load:async(sceneId,intent)=>{
+      const code=request.headers.get('x-littletake-project')!,room=projects.get(code);
+      for(const output of room.outputs.filter(item=>item.kind==='scene-design'&&item.mime==='application/json').sort((a,b)=>b.updatedAt-a.updatedAt)){
+        const design=JSON.parse(Buffer.from(projects.readOutput(code,output.id).data).toString('utf8'));
+        if(design.status==='ready'&&design.originalRequest===intent&&(design.sceneId===sceneId||!room.project.scenes.some(scene=>scene.id===design.sceneId)))return {...design,sceneId};
+      }
+    }})),
     '/api/spatial': createSpatialHandler(), '/api/segmentation': createSegmentationHandler(env), '/api/depth': createDepthHandler(depth),
     '/api/assets': createAssetsHandler(new AssetLibrary(env.LITTLETAKE_ASSET_DIR), () => createAIProvider(env)),
     '/api/look': createLookHandler(env), '/api/brief': createBriefHandler(env),
