@@ -7,10 +7,23 @@ import { DEFAULT_SCENE_LOOK } from '../scene-edit/look';
 import type { SceneDocument, Transform } from '../types';
 import {renderCameraFrame} from '../scene-snapshot';
 
+/** Assets face +Z. Remove rotation, not scale, when describing which side the shot sees. */
+export function objectCameraView(root: THREE.Object3D, cameraPosition: THREE.Vector3) {
+  root.updateWorldMatrix(true, true);
+  const bounds = new THREE.Box3().setFromObject(root);
+  if (bounds.isEmpty()) return undefined;
+  const center = bounds.getCenter(new THREE.Vector3());
+  const local = cameraPosition.clone().sub(root.getWorldPosition(new THREE.Vector3())).applyQuaternion(root.getWorldQuaternion(new THREE.Quaternion()).invert());
+  const azimuth = THREE.MathUtils.radToDeg(Math.atan2(local.x, local.z));
+  const elevation = THREE.MathUtils.radToDeg(Math.atan2(cameraPosition.y - center.y, Math.hypot(cameraPosition.x - center.x, cameraPosition.z - center.z)));
+  return { azimuth, elevation };
+}
+
 /** An export owns its geometry, materials, camera and poses; the live editor keeps running independently. */
 export class ShotRenderer {
   readonly document: SceneDocument;
   readonly canvas: HTMLCanvasElement;
+  readonly sourceState: string;
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
@@ -24,6 +37,9 @@ export class ShotRenderer {
   constructor(doc: SceneDocument, private cameraId: string, nodes: THREE.Object3D[], background: THREE.Scene['background'], fog: THREE.Scene['fog'], assets: AssetDefinition[] = []) {
     this.document = structuredClone(doc);
     this.assets = structuredClone(assets);
+    // Persist render inputs, not GPU output bytes, when checking whether an illustrated sheet is current.
+    this.sourceState = JSON.stringify({ cameraId, objects: doc.objects, cameras: doc.cameras, paths: doc.paths ?? [], look: doc.look ?? DEFAULT_SCENE_LOOK,
+      assets: this.assets.filter(asset => doc.objects.some(object => object.asset?.id === asset.id)) });
     const camera = doc.cameras.find(item => item.id === cameraId);
     if (!camera) throw new Error('Choose a camera before exporting.');
     this.camera = new THREE.PerspectiveCamera(camera.fov, 16 / 9, .05, 500);
@@ -124,6 +140,11 @@ export class ShotRenderer {
       boxes.set(id, [clamp(left), clamp(top), clamp(right), clamp(bottom)]);
     }
     return boxes;
+  }
+  /** Subject-relative viewing side and camera elevation at the last rendered pose. */
+  subjectView(id: string) {
+    const root = this.roots.get(id);
+    return root?.visible ? objectCameraView(root, this.camera.getWorldPosition(new THREE.Vector3())) : undefined;
   }
   dispose(): void {
     if (this.disposed) return;

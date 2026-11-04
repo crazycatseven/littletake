@@ -50,13 +50,14 @@ const bytesOf = (dataURL: string) => Uint8Array.from(atob(dataURL.slice(dataURL.
 const extensionOf = (dataURL: string) => ({ 'image/webp': 'webp', 'image/png': 'png', 'image/jpeg': 'jpg' } as Record<string, string>)[dataURL.slice(5, dataURL.indexOf(';'))] ?? 'bin';
 
 /** One folder per shot: first frame, chronological storyboards, original stills, exact prompt and timing manifest. */
-export async function videoPackage(doc: SceneDocument, shot: Shot, brief: VideoBrief, direction: string, frames: StoryboardFrame[], storyboards: StoryboardPage[] = [], references: { image: string; role: 'style' | 'character' | 'scene'; label: string }[] = [], appearance: AppearanceImage[] = []): Promise<Blob> {
+export async function videoPackage(doc: SceneDocument, shot: Shot, brief: VideoBrief, direction: string, frames: StoryboardFrame[], storyboards: StoryboardPage[] = [], references: { image: string; role: 'style' | 'character' | 'scene'; label: string }[] = [], appearance: AppearanceImage[] = [], storyboardStyle: 'proxy' | 'ai' = 'proxy'): Promise<Blob> {
+  if (storyboardStyle === 'ai' && (!frames.length || frames.some(frame => !frame.look))) throw new Error('Generate every selected panel before exporting the AI storyboard.');
   const folder = (shot.name.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'shot') + '-video-package';
-  const files: { name: string; data: Uint8Array }[] = [], listed: { file: string; at: number; kind: 'look' | 'previs' }[] = [];
+  const files: { name: string; data: Uint8Array }[] = [], listed: { file: string; at: number; kind: 'look' | 'previs'; note?: string }[] = [];
   frames.forEach((frame, index) => {
     const label = `${String(index + 1).padStart(2, '0')}-${frame.at.toFixed(2)}s`;
     for (const [kind, image] of [['look', frame.look], ['previs', frame.previs]] as const) if (image) {
-      const file = `${index === 0 && kind === 'previs' ? 'first-frame' : `${kind}-${label}`}.${extensionOf(image)}`; files.push({ name: `${folder}/${file}`, data: bytesOf(image) }); listed.push({ file, at: frame.at, kind });
+      const file = `${index === 0 && kind === (storyboardStyle === 'ai' ? 'look' : 'previs') ? 'first-frame' : `${kind}-${label}`}.${extensionOf(image)}`; files.push({ name: `${folder}/${file}`, data: bytesOf(image) }); listed.push({ file, at: frame.at, kind, ...(kind === 'look' && frame.note ? { note: frame.note } : {}) });
     }
   });
   const referenceFiles = [...references.map((reference, index) => {
@@ -80,9 +81,9 @@ export async function videoPackage(doc: SceneDocument, shot: Shot, brief: VideoB
     // Once edited as a complete prompt, don't publish older structured instructions alongside it.
     brief: { ...(brief.promptText === undefined ? { prompt: brief.prompt, camera: brief.camera, beats: brief.beats, negative: brief.negative }
       : { prompt: brief.promptText, camera: '', beats: [], negative: '' }), promptText: videoPrompt(shot, brief, direction) },
-    frames: listed, firstFrame: listed.find(frame => frame.kind === 'previs')?.file, storyboards: pages, references: referenceFiles, previs: null,
+    frames: listed, firstFrame: listed.find(frame => frame.kind === (storyboardStyle === 'ai' ? 'look' : 'previs'))?.file, storyboards: pages, storyboardStyle, references: referenceFiles, previs: null,
     models: { brief: brief.model, look: listed.some(item => item.kind === 'look') ? 'muse-image-1.0' : null },
-    usage: 'Copy the exact full prompt from brief.md. Attach first-frame and every storyboard page in numeric order, plus the appearance reference images listed in appearance-references.md if present. Their bindings identify which subject each image depicts, and which image is primary. Read storyboards left to right, then top to bottom; tile numbers and shot-relative seconds specify chronology. Source stills are also available if more detail is needed. Optional style images guide the overall look. Do not send a video as input or reproduce the grid, labels or a slideshow.',
+    usage: 'Copy the exact full prompt from brief.md. Attach first-frame and every storyboard page in numeric order, plus the appearance reference images listed in appearance-references.md if present. Their bindings identify which subject each image depicts, and which image is primary. Read storyboards left to right, then top to bottom; the manifest maps each panel to shot-relative seconds. Source stills are also available. AI panels are native-resolution crops of the original sheet, without enhancement. Optional style images guide the overall look. Do not send a video as input or reproduce the grid, labels or a slideshow.',
   });
   files.unshift({ name: `${folder}/brief.md`, data: new TextEncoder().encode(briefMarkdown(shot, brief, direction)) }, { name: `${folder}/manifest.json`, data: new TextEncoder().encode(JSON.stringify(manifest, null, 2)) });
   return new Blob([zipFiles(files) as Uint8Array<ArrayBuffer>], { type: 'application/zip' });

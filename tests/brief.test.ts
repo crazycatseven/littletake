@@ -122,7 +122,7 @@ test('a shot brief retains intermediate camera motion, and creator edits are ide
   const generated:VideoBrief = await writeVideoBrief(input,fake(brief(),seen));
   assert.equal(seen.length,1,'one bounded model call per Generate prompt');
   const copied = videoPrompt(shot,generated,input.direction);
-  for (const part of ['3.00-second','Camera:','Action timing','1.00 s','Avoid:','numbered reference images']) assert.ok(copied.includes(part));
+  for (const part of ['3.00-second','Camera:','Action timing','1.00 s','Avoid:','Read storyboard panels']) assert.ok(copied.includes(part));
   generated.promptText = 'Create a realistic hotel shot. Hold the bellboy still for the first second.\nThen follow his approach, keeping the sculpture on the right. No cuts.';
   const packageBlob = await videoPackage(doc,shot,generated,input.direction,[{at:0,previs:png}]);
   const {manifest,files} = await readVideoPackage(packageBlob);

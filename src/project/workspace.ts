@@ -12,6 +12,8 @@ import { loadProjectCovers, retryProjectCover } from './gallery';
 import { coverDue, projectCoverFrame, coverVisual, validateCover, type CoverAttachment } from './cover';
 import { ProjectCollaboration } from './collaboration';
 import { uploadOutput, type OutputTransfer } from './output-upload';
+import { legacyStoryboardDraftSchema, storyboardDraftSchema } from '../look/ai-storyboard';
+import { downloadStoryboardImage, renderStoryboards } from '../look/storyboard';
 
 /** Finished projects a newcomer can open as their own copy. Files live in public/examples. */
 const EXAMPLES = [
@@ -566,10 +568,10 @@ export class Workspace {
     if (!this.room) return;
     const dialog = document.createElement('dialog'); dialog.className = 'project-results-dialog'; dialog.setAttribute('aria-label', 'Renders');
     const outputs = [...this.room.outputs].filter(output => !['style-reference', 'appearance-reference', 'reference-media', 'diagnostic', 'asset-draft'].includes(output.kind)).sort((a,b) => b.updatedAt-a.updatedAt);
-    const renders = outputs.filter(output => ['shot-render', 'look-frame', 'final-video'].includes(output.kind));
+    const renders = outputs.filter(output => ['shot-render', 'look-frame', 'storyboard', 'final-video'].includes(output.kind));
     const notes = outputs.filter(output => !renders.includes(output));
     const cards = (items: ProjectOutput[]) => items.map(output => {
-      const label = output.kind === 'shot-render' ? (output.mime.startsWith('video/') ? 'Video' : 'Still image') : output.kind === 'look-frame' ? 'Film still' : output.kind === 'final-video' ? 'Finished video' : output.kind === 'video-brief' ? 'Video brief' : 'Reference analysis';
+      const label = output.kind === 'shot-render' ? (output.mime.startsWith('video/') ? 'Video' : 'Still image') : output.kind === 'storyboard' ? 'AI storyboard' : output.kind === 'look-frame' ? 'Film still' : output.kind === 'final-video' ? 'Finished video' : output.kind === 'video-brief' ? 'Video brief' : 'Reference analysis';
       return `<button data-output="${output.id}"><span>${output.mime.startsWith('video/') ? `${icon('play')}` : renders.includes(output) ? `${icon('image')}` : `${icon('file')}`}</span><div><strong>${escape(output.name)}</strong><small>${label} · ${new Date(output.updatedAt).toLocaleString()}</small></div><span>${icon('external')}</span></button>`;
     }).join('');
     dialog.innerHTML = `<header><div><small>RENDERS</small><h2>${escape(this.options.project().name)}</h2></div><button data-close aria-label="Close renders">${icon('close')}</button></header><p>Your rendered videos and stills, saved with this project.</p><div class="project-results-list">${cards(renders) || '<div class="projects-empty">No renders yet. Use Render to create a video or still image from your shot.</div>'}</div>${notes.length ? `<details class="project-render-notes"><summary>Briefs & reference analyses <span>${notes.length}</span></summary><div class="project-results-list">${cards(notes)}</div></details>` : ''}<div class="project-result-preview" hidden></div><p class="projects-error" hidden role="alert"></p>`;
@@ -590,7 +592,35 @@ export class Workspace {
           preview.append(media, link); return;
         }
         const value = JSON.parse(await data.text());
-        if (output.kind === 'look-frame') { const image = new Image(); image.src = value.image; image.alt = output.name; preview.append(image); const link = document.createElement('a'); link.href = value.image; link.download = output.name + '.png'; link.textContent = 'Download image'; preview.append(link); }
+        if (output.kind === 'storyboard') {
+          if (value.version === 2) {
+            const draft = storyboardDraftSchema.parse(value), caption = document.createElement('p');
+            caption.textContent = draft.result ? `2 × 2 storyboard · ${draft.result.panels.map(panel => panel.at.toFixed(2) + ' s').join(' · ')}` : 'No image generated yet. Open Render → Storyboards → AI storyboard to continue.';
+            preview.append(caption);
+            if (draft.result) {
+              const image = new Image(); image.src = draft.result.image; image.alt = 'Generated 2 by 2 storyboard';
+              const link = document.createElement('a'); link.href = image.src; link.download = `${output.name}.${image.src.slice(11, image.src.indexOf(';')).replace('jpeg', 'jpg')}`; link.textContent = 'Download original image';
+              link.onclick = event => { event.preventDefault(); downloadStoryboardImage(image.src, link.download); }; preview.append(image, link);
+            }
+            return;
+          }
+          const draft = legacyStoryboardDraftSchema.parse(value), frames = [];
+          for (const panel of draft.panels) {
+            if (!panel.frameId) continue;
+            const frame = JSON.parse(await (await this.output(panel.frameId)).text());
+            // A changed timestamp or instruction must not relabel an older generation.
+            if (Math.abs(frame.time - draft.shot.start - panel.at) > .00001 || (frame.note ?? '') !== panel.note.trim()) continue;
+            frames.push({ at: panel.at, previs: frame.previs as string, look: frame.image as string });
+          }
+          const caption = document.createElement('p'); caption.textContent = `${frames.length} / ${draft.panels.length} saved panels. Open Render → Storyboards → AI storyboard to continue editing.`; preview.append(caption);
+          if (frames.length) for (const [index, page] of (await renderStoryboards(draft.shot, frames, new AbortController().signal, 'ai')).entries()) {
+            if (!dialog.open) return;
+            const image = new Image(); image.src = page.image; image.alt = `AI storyboard page ${index + 1}`;
+            const link = document.createElement('a'); link.href = page.image; link.download = `${output.name}-${index + 1}.jpg`; link.textContent = 'Download storyboard page'; link.onclick = event => { event.preventDefault(); downloadStoryboardImage(page.image, link.download); }; preview.append(image, link);
+          }
+          return;
+        }
+        if (output.kind === 'look-frame') { const image = new Image(); image.src = value.image; image.alt = output.name; preview.append(image); const link = document.createElement('a'); link.href = value.image; link.download = output.name + '.' + value.image.slice(11, value.image.indexOf(';')).replace('jpeg', 'jpg'); link.textContent = 'Download image'; link.onclick = event => { event.preventDefault(); downloadStoryboardImage(value.image, link.download); }; preview.append(link); }
         else { const text = document.createElement('p'); text.textContent = value.brief.promptText ?? value.brief.prompt; text.style.whiteSpace = 'pre-wrap'; preview.append(text); }
       } catch (error) { const message = dialog.querySelector<HTMLElement>('.projects-error')!; message.hidden = false; message.textContent = (error as Error).message; }
     });
