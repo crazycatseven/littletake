@@ -6,7 +6,7 @@ import type { ShotRenderer } from '../shot-export/renderer';
 import type { Shot } from '../types';
 import { briefInput, videoPackage, type BriefFrame, type VideoBrief } from './brief';
 import { BRIEF_LIMITS, downloadStoryboardImage, referenceJPEG, renderStoryboards, storyboardTimes, type StoryboardPage } from './storyboard';
-import { framedObjects } from './subjects';
+import { framedObjects, inPicture } from './subjects';
 import type { Workspace } from '../project/workspace';
 import { copyText } from '../clipboard';
 import { museInstruction, videoPrompt } from './handoff';
@@ -73,7 +73,7 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
   const capturePanel = (at: number): CapturedPanel => {
     renderer.resize(1280, 720); const canvas = renderer.render(shot.start + at), previs = referenceJPEG(canvas, 1280, 720, 1280), boxes = renderer.screenBoxes();
     const pose = worldTransform(doc, camera.id, shot.start + at);
-    return { previs, input: previs, visible: new Set(boxes.keys()), camera: { position: pose.position, rotation: pose.rotation, fov: evaluateFov(camera, shot.start + at) }, subjects: framedObjects(doc, shot.cameraId, shot.start + at).filter(({ object }) => boxes.has(object.id)).slice(0, 40).map(({ object, position, depth }) => ({
+    return { previs, input: previs, visible: new Set(boxes.keys()), camera: { position: pose.position, rotation: pose.rotation, fov: evaluateFov(camera, shot.start + at) }, subjects: framedObjects(doc, shot.cameraId, shot.start + at).filter(({ object }) => inPicture(boxes.get(object.id))).slice(0, 40).map(({ object, position, depth }) => ({
       id: object.id, name: object.name.trim().slice(0, 80), position, depth, box: boxes.get(object.id),
       ...(object.asset || object.kind === 'human' ? { view: renderer.subjectView(object.id) } : {}),
     })) };
