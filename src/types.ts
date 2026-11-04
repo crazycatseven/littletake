@@ -25,6 +25,9 @@ export interface StageOptions {
   onPathChange?(id: string, index: number, phase: import('./motion-paths/editor').PathGesture): void;
   onFrame?(time: number): void;
   canEnterXR?(): boolean;
+  xrHandheldState?(): import('./xr/handheld').HandheldState;
+  onXRHandheldAction?(action: import('./xr/handheld').HandheldAction): boolean;
+  onXRHandheldPose?(pose: Transform): void;
   onXRChange?(active: boolean): void;
   xrTimelineState?(): import('./xr/timeline').XRTimelineState;
   onXRSeek?(time: number): void;
