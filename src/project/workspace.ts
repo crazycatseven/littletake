@@ -5,12 +5,15 @@ import { createProject, parseProject, serializeProject, type ProjectDocument } f
 import { EDIT_HEARTBEAT_MS, type ProjectRoom, type ProjectOutput, type WorkspaceInfo, type ProjectSummary, type ProjectCoverFrame, type ProjectCover } from './room';
 import { retireBrowserProjects } from './cache';
 import { projectRequestContext } from './client';
-import { projectArchive, readProjectArchive } from './archive';
+import { projectArchive, readProjectArchive, validateAppearanceAttachments } from './archive';
 import { copyText } from '../clipboard';
 import { handoffPath, type HandoffReceipt } from '../look/handoff';
 import { loadProjectCovers, retryProjectCover } from './gallery';
 import { coverDue, projectCoverFrame, coverVisual, validateCover, type CoverAttachment } from './cover';
 import { ProjectCollaboration } from './collaboration';
+import { uploadOutput, type OutputTransfer } from './output-upload';
+import { legacyStoryboardDraftSchema, storyboardDraftSchema } from '../look/ai-storyboard';
+import { downloadStoryboardImage, renderStoryboards } from '../look/storyboard';
 
 /** Finished projects a newcomer can open as their own copy. Files live in public/examples. */
 const EXAMPLES = [
@@ -65,7 +68,7 @@ export class Workspace {
   private homeGeneration = 0;
   private workspace: WorkspaceInfo = { mode: 'cloud', cloudAvailable: false };
   private migrationError = '';
-  private readonly pendingOutputs = new Map<string, { room: ProjectRoom; output: ProjectOutput; data: Blob; base: number }>();
+  private readonly pendingOutputs = new Map<string, { room: ProjectRoom; output: ProjectOutput; data: Blob; base: number; transfer?: OutputTransfer; progress?: (state: OutputTransfer) => void }>();
   private readonly outputWrites = new Map<string, Promise<void>>();
   private browserRecoveryId?: string;
   private uploading = false;
@@ -184,6 +187,7 @@ export class Workspace {
     await this.activate(room);
   }
   async create(project: ProjectDocument = createProject(null), sourceCode?: string) {
+    if (!sourceCode) validateAppearanceAttachments(project, []);
     if (!sourceCode && project.lookSettings) for (const settings of Object.values(project.lookSettings)) { settings.anchorId = null; settings.styleId = null; }
     if (this.room && !await this.leave()) throw new Error('Finish saving the current project before switching.');
     if (this.creation && serializeProject(this.creation.project) !== serializeProject(project)) throw new Error('Recover the pending project before creating another one.');
@@ -231,7 +235,7 @@ export class Workspace {
     })().finally(() => { this.saving = null; this.notify(); });
     this.notify(); return this.saving;
   }
-  async retry() {
+  async retry(retryFailedOutputs = true) {
     if (!this.room) return;
     try {
       if (!this.collaboration && (this.failed || this.conflict)) {
@@ -244,7 +248,7 @@ export class Workspace {
         room.leaseExpiresAt = next.leaseExpiresAt; this.conflict = false; this.lastHeartbeat = Date.now();
       }
       await this.flush();
-      if (this.autosave) await this.flushOutputs(this.room);
+      if (this.autosave) await this.flushOutputs(this.room, retryFailedOutputs);
       this.failed = false; this.notify();
     }
     catch (error) { this.failed = true; this.notify(); this.error((error as Error).message); }
@@ -254,7 +258,7 @@ export class Workspace {
     try {
       await this.ensureSession(room);
       if (this.conflict) return;
-      if (this.autosave && (this.failed || [...this.pendingOutputs.values()].some(entry => entry.room.id === room.id))) { await this.retry(); return; }
+      if (this.autosave && (this.failed || [...this.pendingOutputs.values()].some(entry => entry.room.id === room.id))) { await this.retry(false); return; }
     } catch { if (this.room === room) this.failed = true; }
     finally { this.refreshing = false; this.notify(); }
     void this.updateCover();
@@ -448,13 +452,21 @@ export class Workspace {
       } else this.transferDialog('Upload could not finish', (error as Error).message, [{ label: 'Try again', run: async () => { this.cloudDialog.close(); await this.uploadToCloud(); } }]);
     } finally { this.uploading = false; this.notify(); }
   }
-  async putOutput(output: Omit<ProjectOutput, 'updatedAt'>, data: Blob, target = this.room): Promise<ProjectOutput> {
+  async putOutput(output: Omit<ProjectOutput, 'updatedAt'>, data: Blob, target = this.room, progress?: (state: OutputTransfer) => void): Promise<ProjectOutput> {
     if (!target || (!this.autosave && target !== this.room) || (target === this.room && !this.canEdit)) throw new Error('Open a project before saving a result.');
     const stored = { ...output, updatedAt: Date.now() }, key = `${target.code}:${output.id}`;
     const base = this.pendingOutputs.get(key)?.base ?? target.outputs.find(item => item.id === output.id)?.updatedAt ?? 0;
-    this.pendingOutputs.set(key, { room: target, output: stored, data, base });
+    this.pendingOutputs.set(key, { room: target, output: stored, data, base, progress });
     target.outputs = [stored, ...target.outputs.filter(item => item.id !== output.id)]; this.notify();
-    if (this.autosave) await this.writeOutput(key); return target.outputs.find(item => item.id === output.id)!;
+    try { if (this.autosave) await this.writeOutput(key); }
+    finally { const pending = this.pendingOutputs.get(key); if (pending?.progress === progress && pending) pending.progress = undefined; }
+    return target.outputs.find(item => item.id === output.id)!;
+  }
+  outputTransfer(id: string, room = this.room): OutputTransfer | undefined { return room ? this.pendingOutputs.get(`${room.code}:${id}`)?.transfer : undefined; }
+  async retryOutput(id: string): Promise<void> {
+    if (!this.room || !this.canEdit) return;
+    await this.writeOutput(`${this.room.code}:${id}`);
+    await this.retry(false);
   }
   private async writeOutput(key: string): Promise<void> {
     if (this.conflict) throw new Error('A newer version is saved. Download your changes or save a new project.');
@@ -464,18 +476,20 @@ export class Workspace {
       try {
         while ((current = this.pendingOutputs.get(key))) {
           const { room, data, base, output: { updatedAt: _at, ...metadata } } = current;
+          const entry = current, update = (transfer: OutputTransfer) => { entry.transfer = transfer; entry.progress?.(transfer); this.notify(); };
+          update({ phase: 'uploading', loaded: 0, total: data.size });
           await this.ensureSession(room);
-          const response = await fetch(`/api/projects?code=${encodeURIComponent(room.code)}&output=1`, { method: 'POST', headers: { 'x-littletake-edit-lease': this.lease, 'x-littletake-edit-page': this.page, 'x-littletake-output': encodeURIComponent(JSON.stringify(metadata)), 'x-littletake-output-version': String(base) }, body: data });
-          const value = await response.json(); if (!response.ok) throw Object.assign(new Error(value.error?.message ?? 'The result has not reached the workspace. Keep this page open and retry.'), { code: value.error?.code });
+          const value = await uploadOutput(`/api/projects?code=${encodeURIComponent(room.code)}&output=1`, { 'x-littletake-edit-lease': this.lease, 'x-littletake-edit-page': this.page, 'x-littletake-output': encodeURIComponent(JSON.stringify(metadata)), 'x-littletake-output-version': String(base) }, data, update);
+          if (value.id !== metadata.id) throw new Error('The server did not confirm this file was saved. Retry the upload.');
           if (this.pendingOutputs.get(key) === current) { this.pendingOutputs.delete(key); room.outputs = [value, ...room.outputs.filter(item => item.id !== value.id)]; }
           else { const queued = this.pendingOutputs.get(key); if (queued) queued.base = value.updatedAt; }
         }
-      } catch (error) { this.failed = true; if ((error as { code?: string }).code === 'output_conflict') { this.conflict = true; this.options.stop(); } throw error; }
+      } catch (error) { if (current) { current.transfer = { phase: 'failed', loaded: current.transfer?.loaded ?? 0, total: current.data.size, error: (error as Error).message }; current.progress?.(current.transfer); } this.failed = true; if ((error as { code?: string }).code === 'output_conflict') { this.conflict = true; this.options.stop(); } throw error; }
     })().finally(() => { this.outputWrites.delete(key); this.notify(); });
     this.outputWrites.set(key, promise); return promise;
   }
-  private async flushOutputs(room: ProjectRoom) {
-    for (const [key, entry] of this.pendingOutputs) if (entry.room.id === room.id) await this.writeOutput(key);
+  private async flushOutputs(room: ProjectRoom, retryFailed = true) {
+    for (const [key, entry] of this.pendingOutputs) if (entry.room.id === room.id && (retryFailed || entry.transfer?.phase !== 'failed')) await this.writeOutput(key);
   }
   async output(id: string, room = this.room): Promise<Blob> {
     if (!room) throw new Error('Open a project first.');
@@ -553,11 +567,11 @@ export class Workspace {
   async showResults() {
     if (!this.room) return;
     const dialog = document.createElement('dialog'); dialog.className = 'project-results-dialog'; dialog.setAttribute('aria-label', 'Renders');
-    const outputs = [...this.room.outputs].filter(output => !['style-reference', 'reference-media', 'diagnostic', 'asset-draft'].includes(output.kind)).sort((a,b) => b.updatedAt-a.updatedAt);
-    const renders = outputs.filter(output => ['shot-render', 'look-frame', 'final-video'].includes(output.kind));
+    const outputs = [...this.room.outputs].filter(output => !['style-reference', 'appearance-reference', 'reference-media', 'diagnostic', 'asset-draft'].includes(output.kind)).sort((a,b) => b.updatedAt-a.updatedAt);
+    const renders = outputs.filter(output => ['shot-render', 'look-frame', 'storyboard', 'final-video'].includes(output.kind));
     const notes = outputs.filter(output => !renders.includes(output));
     const cards = (items: ProjectOutput[]) => items.map(output => {
-      const label = output.kind === 'shot-render' ? (output.mime.startsWith('video/') ? 'Video' : 'Still image') : output.kind === 'look-frame' ? 'Film still' : output.kind === 'final-video' ? 'Finished video' : output.kind === 'video-brief' ? 'Video brief' : 'Reference analysis';
+      const label = output.kind === 'shot-render' ? (output.mime.startsWith('video/') ? 'Video' : 'Still image') : output.kind === 'storyboard' ? 'AI storyboard' : output.kind === 'look-frame' ? 'Film still' : output.kind === 'final-video' ? 'Finished video' : output.kind === 'video-brief' ? 'Video brief' : 'Reference analysis';
       return `<button data-output="${output.id}"><span>${output.mime.startsWith('video/') ? `${icon('play')}` : renders.includes(output) ? `${icon('image')}` : `${icon('file')}`}</span><div><strong>${escape(output.name)}</strong><small>${label} · ${new Date(output.updatedAt).toLocaleString()}</small></div><span>${icon('external')}</span></button>`;
     }).join('');
     dialog.innerHTML = `<header><div><small>RENDERS</small><h2>${escape(this.options.project().name)}</h2></div><button data-close aria-label="Close renders">${icon('close')}</button></header><p>Your rendered videos and stills, saved with this project.</p><div class="project-results-list">${cards(renders) || '<div class="projects-empty">No renders yet. Use Render to create a video or still image from your shot.</div>'}</div>${notes.length ? `<details class="project-render-notes"><summary>Briefs & reference analyses <span>${notes.length}</span></summary><div class="project-results-list">${cards(notes)}</div></details>` : ''}<div class="project-result-preview" hidden></div><p class="projects-error" hidden role="alert"></p>`;
@@ -578,8 +592,36 @@ export class Workspace {
           preview.append(media, link); return;
         }
         const value = JSON.parse(await data.text());
-        if (output.kind === 'look-frame') { const image = new Image(); image.src = value.image; image.alt = output.name; preview.append(image); const link = document.createElement('a'); link.href = value.image; link.download = output.name + '.png'; link.textContent = 'Download image'; preview.append(link); }
-        else { const text = document.createElement('p'); text.textContent = value.brief.prompt; preview.append(text); }
+        if (output.kind === 'storyboard') {
+          if (value.version === 2) {
+            const draft = storyboardDraftSchema.parse(value), caption = document.createElement('p');
+            caption.textContent = draft.result ? `2 × 2 storyboard · ${draft.result.panels.map(panel => panel.at.toFixed(2) + ' s').join(' · ')}` : 'No image generated yet. Open Render → Storyboards → AI storyboard to continue.';
+            preview.append(caption);
+            if (draft.result) {
+              const image = new Image(); image.src = draft.result.image; image.alt = 'Generated 2 by 2 storyboard';
+              const link = document.createElement('a'); link.href = image.src; link.download = `${output.name}.${image.src.slice(11, image.src.indexOf(';')).replace('jpeg', 'jpg')}`; link.textContent = 'Download original image';
+              link.onclick = event => { event.preventDefault(); downloadStoryboardImage(image.src, link.download); }; preview.append(image, link);
+            }
+            return;
+          }
+          const draft = legacyStoryboardDraftSchema.parse(value), frames = [];
+          for (const panel of draft.panels) {
+            if (!panel.frameId) continue;
+            const frame = JSON.parse(await (await this.output(panel.frameId)).text());
+            // A changed timestamp or instruction must not relabel an older generation.
+            if (Math.abs(frame.time - draft.shot.start - panel.at) > .00001 || (frame.note ?? '') !== panel.note.trim()) continue;
+            frames.push({ at: panel.at, previs: frame.previs as string, look: frame.image as string });
+          }
+          const caption = document.createElement('p'); caption.textContent = `${frames.length} / ${draft.panels.length} saved panels. Open Render → Storyboards → AI storyboard to continue editing.`; preview.append(caption);
+          if (frames.length) for (const [index, page] of (await renderStoryboards(draft.shot, frames, new AbortController().signal, 'ai')).entries()) {
+            if (!dialog.open) return;
+            const image = new Image(); image.src = page.image; image.alt = `AI storyboard page ${index + 1}`;
+            const link = document.createElement('a'); link.href = page.image; link.download = `${output.name}-${index + 1}.jpg`; link.textContent = 'Download storyboard page'; link.onclick = event => { event.preventDefault(); downloadStoryboardImage(page.image, link.download); }; preview.append(image, link);
+          }
+          return;
+        }
+        if (output.kind === 'look-frame') { const image = new Image(); image.src = value.image; image.alt = output.name; preview.append(image); const link = document.createElement('a'); link.href = value.image; link.download = output.name + '.' + value.image.slice(11, value.image.indexOf(';')).replace('jpeg', 'jpg'); link.textContent = 'Download image'; link.onclick = event => { event.preventDefault(); downloadStoryboardImage(value.image, link.download); }; preview.append(link); }
+        else { const text = document.createElement('p'); text.textContent = value.brief.promptText ?? value.brief.prompt; text.style.whiteSpace = 'pre-wrap'; preview.append(text); }
       } catch (error) { const message = dialog.querySelector<HTMLElement>('.projects-error')!; message.hidden = false; message.textContent = (error as Error).message; }
     });
     document.body.append(dialog); dialog.showModal();

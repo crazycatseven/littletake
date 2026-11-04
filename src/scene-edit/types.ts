@@ -2,6 +2,8 @@ import type { ProjectContent } from '../types';
 import type { EditPlan, SceneSnapshot, SceneView } from './operations';
 import type { ConversationHistory } from './conversations';
 import type { ReferenceContext, ReferenceProgress } from '../reference/observations';
+import type { PerformanceRequest, PerformanceCandidate } from '../performance/refinement';
+import type { AppearanceImage } from '../appearance/model';
 
 export interface SceneEditInput {
   project: ProjectContent; sceneId: string | null; shotId: string | null; prompt: string; selectedId: string | null; time: number;
@@ -9,8 +11,11 @@ export interface SceneEditInput {
   snapshots: SceneSnapshot[];
   history?: ConversationHistory;
   reference?: ReferenceContext;
+  performance?: PerformanceRequest;
+  appearance?: AppearanceImage[];
 }
 export type SceneEditResponse = (
   | { status: 'needs_reference_frames'; requestedTimes: number[]; summary: string; provider: string; model: string }
   | { status: 'needs_views'; requestedViews: SceneView[]; summary: string; provider: string; model: string }
+  | { status: 'needs_motion_review'; candidate: PerformanceCandidate; provider: string; model: string }
   | { status: 'ready'; plan: EditPlan; provider: string; model: string }) & { reference?: ReferenceProgress };

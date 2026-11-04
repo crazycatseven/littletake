@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateLookFrame, lookPrompt, parseLookInput } from '../server/look/generate.ts';
 import { createLookHandler } from '../server/look-api.ts';
-import { frameSubjects, framedObjects, lookSubjects } from '../src/look/subjects.ts';
+import { framedObjects, inPicture, lookSubjects } from '../src/look/subjects.ts';
 import type { SceneDocument } from '../src/types.ts';
 
 const png = Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010806000000', 'hex');
@@ -23,12 +23,13 @@ test('look prompt locks composition and numbers references in send order', () =>
   assert.match(lookPrompt(parseLookInput(input({ style: url(png) }))), /Use @Image2 only/);
 });
 
-test('layout boxes become exact fractions in the prompt and bad boxes are rejected', () => {
+test('layout boxes preserve staging without locking articulated limbs, and bad boxes are rejected', () => {
   const prompt = lookPrompt(parseLookInput(input({ subjects: [{ name: 'Zero', position: 'left', depth: 'foreground', box: [0.31, 0.4, 0.352, 0.62] }, { name: 'Desk', position: 'right', depth: 'midground' }] })));
-  assert.match(prompt, /Exact layout, as fractions of the frame/);
+  assert.match(prompt, /Blocking layout, as fractions of the frame/);
+  assert.match(prompt, /allowing articulated limbs to move/);
   assert.match(prompt, /Zero: x 31%–35%, y 40%–62%/);
   assert.doesNotMatch(prompt, /Desk: x/);
-  assert.doesNotMatch(lookPrompt(parseLookInput(input())), /Exact layout/);
+  assert.doesNotMatch(lookPrompt(parseLookInput(input())), /Blocking layout/);
   assert.throws(() => parseLookInput(input({ subjects: [{ name: 'Zero', position: 'left', depth: 'foreground', box: [0.5, 0.4, 0.3, 0.6] }] })), { code: 'invalid_input' });
   assert.throws(() => parseLookInput(input({ subjects: [{ name: 'Zero', position: 'left', depth: 'foreground', box: [0, 0, 1.2, 1] }] })), { code: 'invalid_input' });
 });
@@ -118,9 +119,9 @@ test('look frames leave out objects that are not really in the picture', () => {
   // Boxes seen live: Muse switched the fire off by shrinking it to the minimum scale, so its box has no width,
   // and the dragon sits just above the frame edge, so its box rounds to no height.
   const boxes = new Map<string, [number, number, number, number]>([['knight', [0.317, 0.378, 0.374, 0.54]], ['fire', [0.486, 0.464, 0.486, 0.465]], ['dragon', [0.582, 0, 0.833, 0]]]);
-  const subjects = frameSubjects(framed, boxes);
+  const subjects = framed.filter(({ object }) => inPicture(boxes.get(object.id))).map(({ object, position, depth }) => ({ name: object.name, position, depth, box: boxes.get(object.id) }));
   assert.deepEqual(subjects, [{ name: 'Silver Knight', position: 'center', depth: 'midground', box: [0.317, 0.378, 0.374, 0.54] }]);
-  // What is sent now always passes the server's check.
+  // What is sent now always passes the server's check, while the slivers on their own would be rejected.
   assert.doesNotThrow(() => parseLookInput(input({ subjects })));
   assert.throws(() => parseLookInput(input({ subjects: [{ name: 'Red Dragon', position: 'right', depth: 'background', box: [0.582, 0, 0.833, 0] }] })), { code: 'invalid_input' });
 });

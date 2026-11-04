@@ -8,7 +8,7 @@ import type { Workspace } from '../project/workspace.ts';
 export interface DiagnosticIdentity { turnId: string; conversationId: string; messageId: string }
 export interface RequestDiagnostic<T = SceneEditInput> extends DiagnosticIdentity {
   id: string; startedAt: string; finishedAt?: string; input: T;
-  status: 'pending' | 'ready' | 'needs_views' | 'needs_reference_frames' | 'failed' | 'cancelled';
+  status: 'pending' | 'ready' | 'needs_views' | 'needs_reference_frames' | 'needs_motion_review' | 'failed' | 'cancelled';
   server?: SceneEditDiagnostic; result?: unknown; error?: string; unreadableResponse?: string;
 }
 const targets = new Map<string, { workspace: Workspace; room: ProjectRoom }>();
