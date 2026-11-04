@@ -6,6 +6,7 @@ import { DEFAULT_SCENE_LOOK } from '../scene-edit/look';
 
 import type { SceneDocument, Transform } from '../types';
 import {renderCameraFrame} from '../scene-snapshot';
+import {cameraFarForBounds} from '../spatial/geometry';
 
 /** Assets face +Z. Remove rotation, not scale, when describing which side the shot sees. */
 export function objectCameraView(root: THREE.Object3D, cameraPosition: THREE.Vector3) {
@@ -103,7 +104,9 @@ export class ShotRenderer {
     const camera = this.document.cameras.find(item => item.id === this.cameraId)!;
     pose(this.camera, matrixTransform(world.get(camera.id)!), false);
     const fov = evaluateFov(camera, time);
-    if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
+    const bounds=new THREE.Box3();for(const root of this.roots.values())if(root.visible)bounds.expandByObject(root);
+    const far=cameraFarForBounds(this.camera.position,bounds);
+    if (this.camera.fov !== fov||this.camera.far!==far) { this.camera.fov = fov;this.camera.far=far; this.camera.updateProjectionMatrix(); }
     renderCameraFrame(this.renderer,this.scene,this.camera,camera.frameBounds);
     return this.canvas;
   }

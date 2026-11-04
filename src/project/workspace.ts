@@ -567,11 +567,11 @@ export class Workspace {
   async showResults() {
     if (!this.room) return;
     const dialog = document.createElement('dialog'); dialog.className = 'project-results-dialog'; dialog.setAttribute('aria-label', 'Renders');
-    const outputs = [...this.room.outputs].filter(output => !['style-reference', 'appearance-reference', 'reference-media', 'diagnostic', 'asset-draft'].includes(output.kind)).sort((a,b) => b.updatedAt-a.updatedAt);
-    const renders = outputs.filter(output => ['shot-render', 'look-frame', 'storyboard', 'final-video'].includes(output.kind));
+    const outputs = [...this.room.outputs].filter(output => !['style-reference', 'appearance-reference', 'reference-media', 'diagnostic', 'asset-draft'].includes(output.kind) && !(output.kind === 'scene-design' && output.mime === 'application/json')).sort((a,b) => b.updatedAt-a.updatedAt);
+    const renders = outputs.filter(output => ['shot-render', 'look-frame', 'storyboard', 'final-video', 'scene-design'].includes(output.kind));
     const notes = outputs.filter(output => !renders.includes(output));
     const cards = (items: ProjectOutput[]) => items.map(output => {
-      const label = output.kind === 'shot-render' ? (output.mime.startsWith('video/') ? 'Video' : 'Still image') : output.kind === 'storyboard' ? 'AI storyboard' : output.kind === 'look-frame' ? 'Film still' : output.kind === 'final-video' ? 'Finished video' : output.kind === 'video-brief' ? 'Video brief' : 'Reference analysis';
+      const label = output.kind === 'shot-render' ? (output.mime.startsWith('video/') ? 'Video' : 'Still image') : output.kind === 'storyboard' ? 'AI storyboard' : output.kind === 'scene-design' ? 'Scene concept' : output.kind === 'look-frame' ? 'Film still' : output.kind === 'final-video' ? 'Finished video' : output.kind === 'video-brief' ? 'Video brief' : 'Reference analysis';
       return `<button data-output="${output.id}"><span>${output.mime.startsWith('video/') ? `${icon('play')}` : renders.includes(output) ? `${icon('image')}` : `${icon('file')}`}</span><div><strong>${escape(output.name)}</strong><small>${label} · ${new Date(output.updatedAt).toLocaleString()}</small></div><span>${icon('external')}</span></button>`;
     }).join('');
     dialog.innerHTML = `<header><div><small>RENDERS</small><h2>${escape(this.options.project().name)}</h2></div><button data-close aria-label="Close renders">${icon('close')}</button></header><p>Your rendered videos and stills, saved with this project.</p><div class="project-results-list">${cards(renders) || '<div class="projects-empty">No renders yet. Use Render to create a video or still image from your shot.</div>'}</div>${notes.length ? `<details class="project-render-notes"><summary>Briefs & reference analyses <span>${notes.length}</span></summary><div class="project-results-list">${cards(notes)}</div></details>` : ''}<div class="project-result-preview" hidden></div><p class="projects-error" hidden role="alert"></p>`;
@@ -584,7 +584,7 @@ export class Workspace {
         const output = outputs.find(value => value.id === id)!, data = await this.output(id);
         if (output.kind === 'reference-analysis') { dialog.close(); this.options.result?.(output, data); return; }
         const preview = dialog.querySelector<HTMLElement>('.project-result-preview')!; preview.hidden = false; preview.replaceChildren();
-        if (output.kind === 'shot-render' || output.kind === 'final-video') {
+        if (output.kind === 'shot-render' || output.kind === 'final-video' || (output.kind === 'scene-design' && output.mime.startsWith('image/'))) {
           const url = URL.createObjectURL(data); urls.push(url);
           const media = document.createElement(output.mime.startsWith('video/') ? 'video' : 'img'); media.src = url;
           if (media instanceof HTMLVideoElement) { media.controls = true; media.preload = 'metadata'; } else media.alt = output.name;

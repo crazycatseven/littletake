@@ -8,6 +8,7 @@ import type { SceneEditInput, SceneEditResponse } from './types.ts';
 import type { ReferenceContext, ReferenceProgress } from '../reference/observations.ts';
 import { performanceSelection, performanceFrames, performanceOperations, type PerformanceTarget } from '../performance/refinement.ts';
 import type { AppearanceImage } from '../appearance/model.ts';
+import type { AgentProgress, ProgressListener } from './progress.ts';
 
 export interface EditorContext { project: ProjectContent; sceneId: string | null; shotId: string | null; revision: number; time: number; selectedId: string | null; selectedIds?: string[] }
 export interface SessionOptions {
@@ -23,7 +24,7 @@ export interface SessionOptions {
   appearance?(context: EditorContext): Promise<AppearanceImage[]>;
   saveReferenceObservations?(progress: ReferenceProgress): Promise<void>;
   requestReferenceFrames?(threadId: string, sourceId: string, times: number[], signal: AbortSignal): Promise<ReferenceContext>;
-  request?(input: SceneEditInput, signal: AbortSignal): Promise<SceneEditResponse>;
+  request?(input: SceneEditInput, signal: AbortSignal, onProgress?: ProgressListener): Promise<SceneEditResponse>;
 }
 interface Run { id: string; threadId: string; message: UserMessage; controller: AbortController; base: string; revision: number }
 
@@ -102,6 +103,7 @@ export class ConversationSession {
     const run = this.run;
     if (!run) return;
     this.run = null; run.controller.abort(); run.message.status = 'stopped'; run.message.detail = detail;
+    (run.message.progress ??= []).push(this.progressEvent('error', 'Stopped. No changes applied.'));
     this.activity = ''; this.evidence = []; this.emit();
   }
   contextChanged() { this.cancel('The active scene or shot changed. Retry in the intended scene.'); this.clearPreview(); this.evidence = []; this.emit(); }
@@ -176,7 +178,8 @@ export class ConversationSession {
     const performance = retryId ? message.context?.performance : thread.performance;
     message.context = { sceneId: context.sceneId, shotId: context.shotId, selectedId: context.selectedId, selectedIds, time: context.time, ...(performance ? { performance: structuredClone(performance) } : {}) };
     const run: Run = { id: newId(), threadId: thread.id, message, controller: new AbortController(), base: serializeContent(project), revision: context.revision };
-    this.run = run; this.evidence = []; this.evidenceMessageId = message.id; this.activity = 'Muse is thinking…'; this.emit();
+    this.run = run; this.evidence = []; this.evidenceMessageId = message.id; this.activity = 'Reading your scene request…';
+    (message.progress ??= []).push(this.progressEvent('running', this.activity)); this.emit();
     if (this.run !== run) return;
     const current = () => {
       if (this.run !== run || this.book.activeId !== run.threadId) return false;
@@ -196,8 +199,13 @@ export class ConversationSession {
       const reference = !performance && this.options.reference ? await this.options.reference(thread.id) : undefined;
       if (!current()) return;
       if (reference) input.reference = reference;
-      const request = this.options.request ?? ((input: SceneEditInput, signal: AbortSignal) => requestSceneEdit(input, signal,
-        { turnId: run.id, conversationId: thread.id, messageId: message.id }));
+      const progress: ProgressListener = event => {
+        if (!current()) return;
+        const last = message.progress?.at(-1); if (last?.message === event.message && last.status === event.status) return;
+        (message.progress ??= []).push(event); this.activity = event.message; this.emit();
+      };
+      const request = this.options.request ?? ((input: SceneEditInput, signal: AbortSignal, onProgress?: ProgressListener) => requestSceneEdit(input, signal,
+        { turnId: run.id, conversationId: thread.id, messageId: message.id }, onProgress));
       let response: SceneEditResponse;
       if (performance) {
         performanceSelection(project, performance);
@@ -208,7 +216,7 @@ export class ConversationSession {
           const snapshots: SceneSnapshot[] = [];
           for (const [index, frame] of frames.entries()) {
             if (!current()) throw new Error('Recording review stopped.');
-            this.activity = `Rendering ${variant === 'before' ? 'recorded' : 'refined'} performance · ${index + 1}/${frames.length}…`; this.emit();
+            progress(this.progressEvent('running', `Rendering ${variant === 'before' ? 'recorded' : 'refined'} performance · ${index + 1}/${frames.length}…`));
             // Yield between small offscreen renders so Stop and the rest of the editor stay responsive.
             await new Promise(resolve => setTimeout(resolve, 0));
             if (!current()) throw new Error('Recording review stopped.');
@@ -217,8 +225,8 @@ export class ConversationSession {
           return snapshots;
         };
         input.snapshots = await capture(project, 'before'); this.evidence = input.snapshots;
-        this.activity = 'Muse is reading the performance and its images…'; this.emit();
-        response = await request(input, run.controller.signal);
+        progress(this.progressEvent('running', 'Muse is reading the performance and its images…'));
+        response = await request(input, run.controller.signal, progress);
         if (!current()) return;
         let reviewedOperations: unknown;
         if (response.status === 'needs_motion_review') {
@@ -228,14 +236,14 @@ export class ConversationSession {
           reviewedOperations = operations;
           const after = await capture(proposed, 'after');
           input.performance = { targets: performance, candidate }; input.snapshots = [...input.snapshots, ...after]; this.evidence = input.snapshots;
-          this.activity = 'Muse is comparing the original and refined images…'; this.emit();
-          response = await request(input, run.controller.signal);
+          progress(this.progressEvent('running', 'Muse is comparing the original and refined images…'));
+          response = await request(input, run.controller.signal, progress);
           if (!current()) return;
         }
         if (response.status !== 'ready') throw new Error('The recording review did not finish. The original recording is unchanged.');
         if (response.plan.operations.length && JSON.stringify(response.plan.operations) !== JSON.stringify(reviewedOperations))
           throw new Error('The final proposal differs from the rendered candidate. No changes were applied.');
-      } else response = await request(input, run.controller.signal);
+      } else response = await request(input, run.controller.signal, progress);
       let frameFollowup = false, viewFollowup = false;
       for (let step = 0; step < 3; step++) {
         if (!current()) return;
@@ -246,7 +254,7 @@ export class ConversationSession {
         if (response.status === 'needs_motion_review') throw new Error('Choose a recording before asking for a performance review.');
         if (response.status === 'needs_reference_frames') {
           if (frameFollowup || !input.reference || !this.options.requestReferenceFrames) throw new Error('Additional reference frames are unavailable for this turn. Use the current candidates or attach the reference again.');
-          frameFollowup = true; this.activity = `Reading original reference at ${response.requestedTimes.map(time => time.toFixed(2) + 's').join(' and ')}…`; this.emit();
+          frameFollowup = true; progress(this.progressEvent('running', `Reading original reference frames at ${response.requestedTimes.map(time => time.toFixed(2) + 's').join(', ')}…`));
           const previous = input.reference;
           const updated = await this.options.requestReferenceFrames(thread.id, previous.source.id, response.requestedTimes, run.controller.signal);
           if (!current()) return;
@@ -254,11 +262,11 @@ export class ConversationSession {
           input.reference = { ...updated, callsUsed: previous.callsUsed, framesRequested: true };
         } else if (response.status === 'needs_views') {
           if (viewFollowup) throw new Error('Muse requested more rendered views than this turn supports.');
-          viewFollowup = true; this.activity = `Checking ${response.requestedViews.map(view => view === 'top_down' ? 'the top view' : 'the shot view').join(' and ')}…`;
+          viewFollowup = true; progress(this.progressEvent('running', `Capturing ${response.requestedViews.map(view => view === 'top_down' ? 'top view' : 'shot view').join(' and ')}…`));
           input.snapshots = response.requestedViews.map(view => this.options.capture(project, context.sceneId, context.shotId, context.time, view));
           this.evidence = input.snapshots; this.emit();
         }
-        response = await request(input, run.controller.signal);
+        response = await request(input, run.controller.signal, progress);
       }
       if (response.status !== 'ready' || response.plan.requestedViews.length)
         throw new Error('Muse requested more views than this turn supports. Try a more specific message.');
@@ -268,6 +276,7 @@ export class ConversationSession {
         reply.edit = { operations: response.plan.operations, time: context.time, revision: run.revision, sceneId: context.sceneId, shotId: context.shotId, status: 'pending' };
       }
       message.status = 'answered'; thread.messages.push(reply); this.evidenceMessageId = reply.id;
+      progress(this.progressEvent('done', reply.edit ? 'Proposal ready for review.' : 'Completed.'));
       this.run = null; this.activity = '';
       if (reply.edit) this.review(reply.id); else this.emit();
     } catch (error) {
@@ -279,7 +288,11 @@ export class ConversationSession {
         if (!current()) return;
       }
       message.status = 'failed'; message.detail = error instanceof Error ? error.message.slice(0, 500) : 'Muse could not respond. Try again.';
+      (message.progress ??= []).push(this.progressEvent('error', 'This request did not finish. Expand the work history for details. No changes applied.'));
       this.run = null; this.activity = ''; this.emit();
     }
+  }
+  private progressEvent(status: AgentProgress['status'], message: string): AgentProgress {
+    return { id: newId(), at: new Date().toISOString(), status, message };
   }
 }

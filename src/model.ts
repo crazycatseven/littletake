@@ -18,6 +18,7 @@ const KINDS: readonly PrimitiveKind[] = ['cube', 'sphere', 'cylinder', 'cone', '
 const COLORS = ['#f0a06d', '#80aaa0', '#9b99c8', '#d9bb72', '#9fb9cf', '#b98e97'];
 const MAX_JSON_LENGTH = 20_000_000;
 export const MAX_CAMERAS = 128;
+export const MAX_SCENE_OBJECTS = 4096;
 /** Normalized visible image rectangle; black source mattes do not change lens projection. */
 export const frameBoundsSchema = z.tuple([z.number().min(0).max(1),z.number().min(0).max(1),z.number().min(0).max(1),z.number().min(0).max(1)]).refine(bounds=>bounds[2]-bounds[0]>=.5&&bounds[3]-bounds[1]>=.5);
 const copyTransform = (t: Transform): Transform => ({ position: [...t.position], rotation: [...t.rotation], scale: [...t.scale] });
@@ -185,7 +186,7 @@ function validateLegacy(value: unknown) {
   if (doc.format !== 'LittleTake.scene' || doc.version !== 1) fail('scene', 'unsupported format or version');
   const name = text(doc.name, 120, 'scene.name');
   const duration = number(doc.duration, 1, 60, 'scene.duration');
-  const values = list(doc.objects, 100, 'scene.objects');
+  const values = list(doc.objects, MAX_SCENE_OBJECTS, 'scene.objects');
   const ids = new Set<string>(['camera']);
   const objects: SceneObject[] = values.map((value: unknown, i: number) => {
     const path = `scene.objects[${i}]`;
@@ -268,7 +269,7 @@ export function validateDocument(value: unknown): SceneDocument {
     if (unique) ids.add(id);
     return id;
   };
-  const objects: SceneObject[] = list(doc.objects, 100, 'scene.objects').map((value, index) => {
+  const objects: SceneObject[] = list(doc.objects, MAX_SCENE_OBJECTS, 'scene.objects').map((value, index) => {
     const path = 'scene.objects[' + index + ']';
     const item = record(value, ['id', 'name', 'kind', 'color', 'transform', 'track'], path, ['parentId', 'animation', 'asset', 'jointAngles', 'components', 'hidden']);
     if (item.hidden !== undefined && typeof item.hidden !== 'boolean') fail(path + '.hidden', 'expected a boolean');

@@ -32,7 +32,7 @@ import { prepareScripts } from './scripts/runtime';
 import { openScriptEditor } from './scripts/editor';
 import { scriptOnlyChange } from './scripts/operations';
 import { trackPoses, transformSchema } from './performance/motion';
-import { createObject, cloneDocument, evaluateComponents, evaluateFov, evaluateJointAngles, evaluateTransform, animationFor, ensureAnimation, parseDocument, serializeDocument, History, createEmptyScene, createCamera, createShot, addIndependentShot, shotCamera, MAX_CAMERAS, sceneEntity, validateDocument } from './model';
+import { createObject, cloneDocument, evaluateComponents, evaluateFov, evaluateJointAngles, evaluateTransform, animationFor, ensureAnimation, parseDocument, serializeDocument, History, createEmptyScene, createCamera, createShot, addIndependentShot, shotCamera, MAX_CAMERAS,MAX_SCENE_OBJECTS, sceneEntity, validateDocument } from './model';
 import { emptyAnimation, evaluateProperty, frameAtTime, isJointProperty, jointProperty, keepRecordedTake, movePropertyKeys, duplicatePropertyKeys, propertyPaths, putKey, putTransformKeys, putVectorKeys, removePropertyKeys, retimeTake, setKeyInterpolation, timeAtFrame, type PropertyPath, type VectorProperty } from './animation/model';
 import { groupPaths, keyButton, keyState, propertyGroup, renderPropertyRows, scalarGroup, type PropertyGroup, type SelectedPropertyKey } from './animation/panel';
 import './animation/panel.css';
@@ -735,7 +735,7 @@ function nextObjectId(){return `object-${newId()}`;}
 function insertAsset(asset:AssetDefinition,pose:Transform){
   if(!workspace?.canEdit)return;
   if(editPreview||performanceSession||storageError)return;
-  ensureScene();if(doc.objects.length>=100){status('This scene supports up to 100 objects');return;}
+  ensureScene();if(doc.objects.length>=MAX_SCENE_OBJECTS){status('Scene object capacity reached');return;}
   pause();flushFieldEdit();
   let item:SceneObject;try{item=instantiateAsset(asset,nextObjectId(),pose.position,doc.duration);}catch(error){status((error as Error).message);return;}
   project.assets??=[];project.assets=[...project.assets.filter(a=>a.id!==asset.id),structuredClone(asset)];item.transform=copyPose(pose);
@@ -1122,7 +1122,7 @@ app.addEventListener('click',event=>{
   if(target.dataset.visibilityId){const item=doc.objects.find(item=>item.id===target.dataset.visibilityId);if(item){const ids=selection.ids.includes(item.id)?selection.ids:[item.id];if(effectivelyHidden(doc,item.id))showHierarchy(ids);else setHidden(ids,true);}return;}
   if(target.dataset.tool){chooseTool(target.dataset.tool as ToolMode);return;}
   if(target.dataset.axis){chooseAxis(axis===target.dataset.axis?null:target.dataset.axis as Axis);return;}
-  if(target.dataset.add){ensureScene();if(doc.objects.length>=100){status('This scene supports up to 100 objects');return;}pause();const item=createObject(target.dataset.add as Exclude<PrimitiveKind,'asset'>,nextObjectIndex());item.id=nextObjectId();doc.objects.push(item);selection.active=item.id;time=0;setLibraryTab('objects');changed(`${item.name} added`);return;}
+  if(target.dataset.add){ensureScene();if(doc.objects.length>=MAX_SCENE_OBJECTS){status('Scene object capacity reached');return;}pause();const item=createObject(target.dataset.add as Exclude<PrimitiveKind,'asset'>,nextObjectIndex());item.id=nextObjectId();doc.objects.push(item);selection.active=item.id;time=0;setLibraryTab('objects');changed(`${item.name} added`);return;}
   if(target.dataset.color){const item=entity();if(item && 'color' in item){item.color=target.dataset.color;changed();}return;}
   switch(target.dataset.action){
     case 'create-motion-path':drawMotionRoute();break;

@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { readFile } from 'node:fs/promises';
 import { timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
@@ -37,7 +38,8 @@ export async function startApplication(options: { env?: Record<string, string | 
           else { const bytes = await readFile(target); response = new Response(req.method === 'HEAD' ? null : bytes, { headers: { 'Content-Type': mime[path.extname(target)] ?? 'application/octet-stream', 'Cache-Control': pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache', 'X-Content-Type-Options': 'nosniff' } }); }
         }
       }
-      res.statusCode = response.status; response.headers.forEach((value, key) => res.setHeader(key, value)); res.end(Buffer.from(await response.arrayBuffer()));
+      res.statusCode = response.status; response.headers.forEach((value, key) => res.setHeader(key, value));
+      if (response.body) { res.flushHeaders(); await pipeline(Readable.fromWeb(response.body as import('node:stream/web').ReadableStream), res); } else res.end();
     } catch (error) { if (!res.headersSent) { res.statusCode = (error as NodeJS.ErrnoException).code === 'ENOENT' ? 404 : 500; res.setHeader('Content-Type', 'application/json'); } res.end(JSON.stringify({ error: { message: 'The server could not finish this request.' } })); }
   });
   try { await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(options.port ?? Number(env.PORT ?? 4176), host, resolve); }); }

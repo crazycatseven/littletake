@@ -1,4 +1,5 @@
 import { newId } from "../id.ts";
+import type { AgentProgress } from './progress.ts';
 /** Request data and model output only. Never include HTTP headers or provider configuration. */
 export interface SceneEditDiagnostic {
   format: 'LittleTake.scene-edit-diagnostic' | 'LittleTake.reference-diagnostic'; version: 1; id: string; startedAt: string;
@@ -13,6 +14,11 @@ export interface SceneEditDiagnostic {
   measurements?:{model:string;concept:string;media:string;frames:unknown}[];
   media?:{ref:string;dataUrl:string}[];
   derivations?:unknown[];
+  progress?: AgentProgress[];
+  sceneReviews?: SceneEditDiagnostic['attempts'];
+  sceneObservations?:SceneEditDiagnostic['attempts'];
+  sceneDesigns?: unknown[];
+  assetHandles?:Record<string,string>;
   referenceCalls?: unknown[];
 }
 

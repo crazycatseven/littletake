@@ -1,7 +1,8 @@
 import { newId } from "../id.ts";
 import { z } from 'zod';
-import { operationSchema, legacyShotOperationSchema } from './operations.ts';
+import { MAX_EDIT_OPERATIONS, operationSchema, legacyShotOperationSchema } from './operations.ts';
 import { savedPerformanceSchema } from '../performance/refinement.ts';
+import { progressHistorySchema } from './progress.ts';
 
 export const MAX_HISTORY_MESSAGES = 200;
 export const MAX_HISTORY_CHARACTERS = 120_000;
@@ -14,12 +15,13 @@ const identifier = z.string().min(1).max(64);
 const userMessageSchema = z.strictObject({
   id: identifier, role: z.literal('user'), text: z.string().min(1).max(2000),
   status: z.enum(['pending', 'answered', 'failed', 'stopped']), detail: z.string().max(500).optional(),
+  progress: progressHistorySchema.optional(),
   context: z.strictObject({ sceneId: identifier.nullable(), shotId: identifier.nullable(), selectedId: identifier.nullable().optional(), selectedIds: z.array(identifier).optional(), time: z.number().min(0).max(60).optional(), performance: savedPerformanceSchema.optional() }).optional(),
 });
 const assistantMessageSchema = z.strictObject({
   id: identifier, role: z.literal('assistant'), text: z.string().min(1).max(4000), model: z.string().max(160),
   edit: z.strictObject({
-    operations: z.array(z.union([operationSchema, legacyShotOperationSchema])).min(1).max(64), time: z.number().min(0).max(60),
+    operations: z.array(z.union([operationSchema, legacyShotOperationSchema])).min(1).max(MAX_EDIT_OPERATIONS), time: z.number().min(0).max(60),
     sceneId: identifier.nullable(), shotId: identifier.nullable(),
     revision: z.number().int().nonnegative(), status: z.enum(['pending', 'applied', 'discarded', 'stale']),
   }).optional(),
