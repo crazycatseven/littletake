@@ -407,6 +407,7 @@ dialog::backdrop { background: var(--backdrop); backdrop-filter: none; }
 .getting-started.folded .getting-started-toggle svg { transform: rotate(-90deg); }
 .getting-started.folded ol { display: none; }
 .getting-started ol { margin: 0; padding-left: 16px; display: grid; gap: 5px; }
+.getting-started li::marker { color: var(--muted); }
 .getting-started b { color: var(--ink); font-weight: 500; }
 .getting-started li > button { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; margin-right: 2px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--field); font-size: var(--font-small); color: var(--ink); vertical-align: baseline; box-shadow: 0 1px 0 #cfc8b8; }
 .getting-started li > button svg { width: 11px; height: 11px; }
