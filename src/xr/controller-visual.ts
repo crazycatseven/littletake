@@ -1,3 +1,4 @@
+import { XR_PANEL } from './palette';
 import * as THREE from 'three';
 import { icon } from '../icons';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -6,13 +7,13 @@ import { MenuTexture } from './texture';
 import { menuButtonBinding, type XRButtonComponent, type XRMenuBinding } from './buttons';
 
 export function xrControllerIconSvg(action: 'undo' | 'play' | 'menu', playing = false, feedback: 'ready' | 'disabled' | 'pressed' = 'ready'): string {
-  const ink = feedback === 'pressed' ? '#10231e' : '#f6f3e9';
+  const ink = feedback === 'pressed' ? XR_PANEL.primaryInk : XR_PANEL.ink;
   const symbol=action==='play'?(playing?'pause':'play'):action;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320"><circle cx="160" cy="160" r="156" fill="${feedback === 'pressed' ? '#ffbd66' : '#182b26'}"/><circle cx="160" cy="160" r="143" fill="none" stroke="${feedback === 'pressed' ? ink : feedback === 'ready' ? '#c9f86b' : '#789084'}" stroke-width="12"/>${icon(symbol,{x:72,y:72,width:176,height:176,color:ink,...(action==='play'?{fill:ink}:{})})}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320"><circle cx="160" cy="160" r="156" fill="${feedback === 'pressed' ? XR_PANEL.warning : XR_PANEL.paper}"/><circle cx="160" cy="160" r="143" fill="none" stroke="${feedback === 'pressed' ? ink : feedback === 'ready' ? XR_PANEL.accent : XR_PANEL.muted}" stroke-width="12"/>${icon(symbol,{x:72,y:72,width:176,height:176,color:ink,...(action==='play'?{fill:ink}:{})})}</svg>`;
 }
 
 export function xrLeftHintsSvg(): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="240" viewBox="0 0 640 240"><rect x="4" y="4" width="632" height="232" rx="24" fill="#182b26" stroke="#c9f86b" stroke-width="5"/><g font-family="Segoe UI, Arial, sans-serif" fill="#f6f3e9" font-size="38" font-weight="600"><text x="32" y="66">X  Undo</text><text x="300" y="66">Y  Play / Pause</text><text x="32" y="137" fill="#c9f86b">Press left stick · Menu</text><text x="32" y="203" font-size="30" fill="#c7d6ce">Trigger / Grip: grab</text></g></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="240" viewBox="0 0 640 240"><rect x="4" y="4" width="632" height="232" rx="24" fill="${XR_PANEL.paper}" stroke="${XR_PANEL.accent}" stroke-width="5"/><g font-family="Segoe UI, Arial, sans-serif" fill="${XR_PANEL.ink}" font-size="38" font-weight="600"><text x="32" y="66">X  Undo</text><text x="300" y="66">Y  Play / Pause</text><text x="32" y="137" fill="${XR_PANEL.accent}">Press left stick · Menu</text><text x="32" y="203" font-size="30" fill="${XR_PANEL.secondary}">Trigger / Grip: grab</text></g></svg>`;
 }
 
 type ButtonKey = 'x' | 'y' | 'menu';
@@ -40,8 +41,8 @@ export class XRControllerVisual {
 
   constructor(grip: THREE.Group, factory?: XRControllerModelFactory) {
     this.root.name = 'XR controller'; this.root.visible = false; grip.add(this.root);
-    const shell = new THREE.MeshStandardMaterial({ color: '#354d46', roughness: .65 });
-    const accent = new THREE.MeshStandardMaterial({ color: '#d7e9b2', roughness: .7 });
+    const shell = new THREE.MeshStandardMaterial({ color: XR_PANEL.raised, roughness: .65 });
+    const accent = new THREE.MeshStandardMaterial({ color: XR_PANEL.selectionInk, roughness: .7 });
     const add = (geometry: THREE.BufferGeometry, material: THREE.Material, position: THREE.Vector3) => {
       const mesh = new THREE.Mesh(geometry, material); mesh.frustumCulled = false;
       mesh.position.copy(position); this.fallback.add(mesh); return mesh;

@@ -1,8 +1,9 @@
 import * as THREE from 'three';
+import { XR_PANEL } from './palette';
 
 export const XR_ACTIVE_RAY_RADIUS = .0024;
 
-export const XR_FEEDBACK = { idle: '#def3ef', ready: '#c9f86b', held: '#ffbd66', selected: '#62dded', disabled: '#789084', dark: '#10231e' };
+export const XR_FEEDBACK = { idle: XR_PANEL.ink, ready: XR_PANEL.accent, held: XR_PANEL.warning, selected: XR_PANEL.selectionInk, disabled: XR_PANEL.muted, dark: XR_PANEL.primaryInk };
 
 /** Thick corner brackets use real geometry: WebGL line widths are usually one pixel. */
 export class XRObjectOutline {
