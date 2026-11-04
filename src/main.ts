@@ -16,7 +16,7 @@ import { bindShotPreview } from './shot-preview/panel';
 import { AssetPanel } from './assets/panel';
 import { AssetEditor } from './assets/editor';
 import { updateAssetInstances } from './assets/edit';
-import { instantiateAsset, saveObjectAsset, linkObjectAsset } from './assets/library';
+import { availableAssets, instantiateAsset, saveObjectAsset, linkObjectAsset } from './assets/library';
 import { createPrefabDialog } from './assets/dialog';
 import { SCENE_OBJECT_DRAG } from './assets/folders';
 import { bindHierarchyAssets, type HierarchyAssetSource } from './assets/hierarchy';
@@ -734,6 +734,9 @@ function duplicate() {
 
 function nextObjectIndex(){let index=doc.objects.length+1;while(doc.objects.some(item=>item.name.endsWith(' '+index)))index++;return index;}
 function nextObjectId(){return `object-${newId()}`;}
+function xrAssets(){ return assetsPanel?.available() ?? availableAssets(project.assets); }
+function canEditXRAssets(){return !!workspace?.canEdit&&!storageError&&!editPreview&&!performanceSession&&!assetEditor&&!xrRecording&&!playing&&!unkeyed.size;}
+function canDeleteXRAsset(){return canEditXRAssets()&&selection.ids.length===1&&doc.objects.some(item=>item.id===selection.active&&!effectivelyHidden(doc,item.id));}
 function insertAsset(asset:AssetDefinition,pose:Transform){
   if(!workspace?.canEdit)return;
   if(editPreview||performanceSession||storageError)return;
@@ -1001,6 +1004,10 @@ try {
   $('.stage-panel').insertAdjacentHTML('beforeend','<div id="hiddenCount" class="hidden-count" hidden></div>');
   $('.shot-heading h2').insertAdjacentHTML('afterend','<button class="shot-export-button" data-action="export-shot" title="Render video, still images or prepare references for Muse">'+icon('camera')+'Render</button>');
   stage=new Stage({viewport:$('#viewport'),preview:$('#preview'),onSelect:selectIds,onStatus:message=>$('#viewHint').textContent=message,onTransform:editSelection,onPathOpen:id=>openMotionPath(id),onPathSelect:(index,part)=>{selectedPathPoint=index;selectedPathPart=part;renderInspector();syncStage();},onPathChange:(_id,index,phase)=>changePathPoint(index,phase),
+    xrAssetState:()=>({items:xrAssets().map(({id,name})=>({id,name})),canPlace:canEditXRAssets()&&doc.objects.length<100,canDelete:canDeleteXRAsset(),selectionName:entity()?.name}),
+    onXRPreviewAsset:(id,position)=>stage.previewXRAsset(id&&canEditXRAssets()?xrAssets().find(item=>item.id===id)??null:null,position),
+    onXRPlaceAsset:(id,position)=>{if(!canEditXRAssets()||position.some(value=>!Number.isFinite(value)||Math.abs(value)>990))return;const asset=xrAssets().find(item=>item.id===id);if(asset)insertAsset(asset,stage.placementAt(asset,new Vector3(...position)));},
+    onXRDeleteAsset:()=>{if(canDeleteXRAsset()){flushFieldEdit();remove();}},
     onFrame:tick,
     canEnterXR:()=>!assetEditor&&!editPreview&&!performanceSession&&!storageError&&!unkeyed.size&&!document.querySelector('dialog[open]'),
     onXRChange:active=>{

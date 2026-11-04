@@ -1,3 +1,4 @@
+import { XR_PANEL } from './palette';
 import * as THREE from 'three';
 import { MenuTexture } from './texture';
 
@@ -17,7 +18,7 @@ export function viewfinderSvg(state: HandheldState): string {
   const hint = recording ? 'Trigger or release Grip to stop' : state.mode === 'review' ? 'Timeline: Preview / Apply / Discard' : 'Hold Grip to frame · Trigger to record';
   const elapsed = Math.max(0, (state.time ?? 0) - (state.start ?? 0)).toFixed(1);
   const duration = Math.max(0, (state.end ?? 0) - (state.start ?? 0)).toFixed(1);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="160"><rect width="960" height="160" rx="16" fill="#182b26"/><circle cx="32" cy="42" r="10" fill="${recording ? '#ff837a' : '#c9f86b'}"/><g font-family="Segoe UI, Arial, sans-serif" fill="#f6f3e9"><text x="56" y="54" font-size="34">${label}</text><text x="930" y="54" text-anchor="end" font-size="32">${elapsed} / ${duration} s</text><text x="480" y="120" text-anchor="middle" font-size="32">${hint}</text></g></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="160"><rect width="960" height="160" rx="16" fill="${XR_PANEL.paper}"/><circle cx="32" cy="42" r="10" fill="${recording ? XR_PANEL.record : XR_PANEL.accent}"/><g font-family="Segoe UI, Arial, sans-serif" fill="${XR_PANEL.ink}"><text x="56" y="54" font-size="34">${label}</text><text x="930" y="54" text-anchor="end" font-size="32">${elapsed} / ${duration} s</text><text x="480" y="120" text-anchor="middle" font-size="32">${hint}</text></g></svg>`;
 }
 
 /** A camera-mounted monitor. Only layer 0 is rendered into it, excluding XR helpers. */

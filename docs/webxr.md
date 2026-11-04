@@ -85,3 +85,9 @@ Left **Menu** toggles the menu and recalls it in front of your current head posi
 While holding an object or handheld camera, Menu, Timeline and keyframe paths and nodes are temporarily hidden and cannot intercept rays. The camera monitor stays visible. Releasing, finishing a recording or losing tracking restores the panels without changing their placement or menu expansion state.
 
 Timeline spatial previews now show only a cyan path connecting keyframe positions and small opaque nodes; no copies of object or camera models are rendered. Trigger selects a node and seeks to its time. Selected nodes are lime, the current node is cyan. The path is a keyframe-position polyline; rotation-only keys can share the same position and remain individually selectable on the timeline.
+
+### Assets in VR
+
+Browsing assets shows a translucent, actual-size placement preview on the ground ahead. Switching assets updates it without changing the scene. **+** places the asset at the preview position and leaves the asset browser; closing/hiding the menu or leaving VR clears the preview. Opening Assets switches camera-follow back to free view.
+
+Open the menu and select the cube icon to switch between Assets and mode controls. Previous / Next browses the available desktop asset library; the label shows the current asset and index. Select **+** with Trigger to place an independent instance on the ground in front of you, then grab it to adjust its pose. Select a scene object and press **Trash** to delete it (including its children); the library asset is retained. Left **X** undoes placement or deletion. Placement and deletion are disabled during playback, recording/review and read-only access; placement also respects the 100-object scene limit.

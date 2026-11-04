@@ -20,6 +20,7 @@ const categories:Record<string,{label:string;tags:string[]}>= {
 const categoryLabel=(tag:string|undefined)=>tag==='saved'||tag==='我的资产'?'My Assets':Object.values(categories).find(c=>c.tags.includes(tag??''))?.label??tag??'Asset';
 interface ProjectScenes { list(): SceneDocument[]; active(): string | null; open(id: string): void; create(): void; remove(id: string): void }
 export class AssetPanel {
+  available(): readonly AssetDefinition[] { return this.assets; }
   private filter='all';
   private folder='';
   private catalog:AssetCatalog=emptyCatalog();

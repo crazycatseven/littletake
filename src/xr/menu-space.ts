@@ -6,7 +6,7 @@ const OPEN_DISTANCE = .9;
 
 /** World placement and angular sizing, independent of the tracked camera parent. */
 export class XRMenuSpace {
-  private drag: { localPoint: THREE.Vector3; offset: THREE.Vector3 } | null = null;
+  private drag: { localPoint: THREE.Vector3; offset: THREE.Vector3; gripRotation?: THREE.Quaternion; panelRotation: THREE.Quaternion } | null = null;
   constructor(private root: THREE.Group) {}
 
   place(head: THREE.Matrix4, rigScale: number): void {
@@ -26,13 +26,20 @@ export class XRMenuSpace {
     this.root.updateMatrixWorld(true);
   }
 
-  begin(point: THREE.Vector3, grip: THREE.Vector3): void {
-    this.drag = { localPoint: this.root.worldToLocal(point.clone()), offset: point.clone().sub(grip) };
+  begin(point: THREE.Vector3, grip: THREE.Vector3, rotation?: THREE.Quaternion): void {
+    this.drag = { localPoint: this.root.worldToLocal(point.clone()), offset: point.clone().sub(grip),
+      gripRotation: rotation?.clone(), panelRotation: this.root.quaternion.clone() };
   }
 
-  move(grip: THREE.Vector3, head: THREE.Matrix4, rigScale: number): void {
+  move(grip: THREE.Vector3, head: THREE.Matrix4, rigScale: number, rotation?: THREE.Quaternion): void {
     if (!this.drag) return;
-    const target = grip.clone().add(this.drag.offset);
+    const offset = this.drag.offset.clone();
+    if (rotation && this.drag.gripRotation) {
+      const delta = rotation.clone().multiply(this.drag.gripRotation.clone().invert());
+      this.root.quaternion.copy(delta).multiply(this.drag.panelRotation);
+      offset.applyQuaternion(delta);
+    }
+    const target = grip.clone().add(offset);
     const a = target.clone().sub(new THREE.Vector3().setFromMatrixPosition(head));
     const b = this.drag.localPoint.clone().applyQuaternion(this.root.quaternion);
     // Solve scale = distance(head, target - b * scale) / SIZE_DISTANCE.

@@ -44,7 +44,7 @@ test('XR pointer distinguishes hits and active gestures, survives scaling and di
     controller.updateMatrixWorld(true);
     assert.equal(cursor.visible, true); assert.ok(beam.scale.x > idleWidth);
     assert.ok(Math.abs(cursor.getWorldPosition(new THREE.Vector3()).z / scale + 2) < 1e-6);
-    assert.equal((beam.material as THREE.MeshBasicMaterial).color.getHexString(), 'ffbd66');
+    assert.equal((beam.material as THREE.MeshBasicMaterial).color.getHexString(), XR_FEEDBACK.held.slice(1));
   }
   pointer.update(false, 2, false, XR_FEEDBACK.idle); assert.equal(pointer.root.visible, false);
   let disposed = 0;

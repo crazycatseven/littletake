@@ -4,8 +4,44 @@ import * as THREE from 'three';
 import { XRControls, translatedGrab, rotatedGrab } from './controls';
 import { XRMenu, XR_MENU_TOGGLE, XR_MENU_DRAG, XR_TIMELINE_DRAG, XR_ADD_KEY, XR_DELETE_KEY, xrMenuSvg, xrMenuHandleSvg } from './menu';
 import type { Transform } from '../types';
+import { XR_ASSETS, XR_ASSET_PREVIOUS, XR_ASSET_NEXT, XR_ASSET_PLACE, XR_ASSET_DELETE } from './assets';
 
 const pose: Transform = { position: [0, 0, -2], rotation: [20, 30, 40], scale: [2, 1, 3] };
+
+test('XR asset browser cycles, places ahead and gates deletion and insertion while locked', () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  Object.defineProperty(globalThis, 'document', { configurable:true, value:{createElement:()=>({getContext:()=>({})})} });
+  const controllers=[new THREE.Group(),new THREE.Group()],grips=[new THREE.Group(),new THREE.Group()];
+  const renderer={xr:{getController:(i:number)=>controllers[i],getControllerGrip:(i:number)=>grips[i],getReferenceSpace:()=>new EventTarget()}} as unknown as THREE.WebGLRenderer;
+  let editable=true,canDelete=false,deleted=0,mode:'idle'|'armed'='idle';
+  const placed:{id:string;position:number[]}[]=[];
+  const previews:{id:string|null;position?:number[]}[]=[];
+  const items=[{id:'a',name:'Chair'},{id:'b',name:'Desk'}];
+  const controls=new XRControls(renderer,{targets:()=>[],editable:()=>editable,select:()=>{},pose:()=>pose,transform:()=>true,action:()=>{},
+    assetState:()=>({items,canPlace:true,canDelete}),placeAsset:(id,position)=>placed.push({id,position}),deleteAsset:()=>{deleted++;},
+    previewAsset:(id,position)=>previews.push({id,position}),
+    timelineState:()=>({time:0,duration:5,fps:24,recording:{mode}})});
+  const click=(action:number)=>{aimMenu(controls,controllers[0],action);controllers[0].dispatchEvent({type:'selectstart'} as never);};
+  try {
+    controls.start(Object.assign(new EventTarget(),{visibilityState:'visible'}) as unknown as XRSession,new THREE.Vector3(0,0,-3));
+    click(XR_ASSETS);assert.equal(previews.at(-1)?.id,'a');click(XR_ASSET_NEXT);assert.equal(previews.at(-1)?.id,'b');
+    const previewPosition=previews.at(-1)?.position;click(XR_ASSET_PLACE);
+    assert.equal(placed[0].id,'b');assert.deepEqual(placed[0].position,[0,0,-1.5]);
+    assert.deepEqual(placed[0].position,previewPosition);assert.equal(previews.at(-1)?.id,null);
+    click(XR_ASSETS);click(XR_ASSET_NEXT);click(XR_ASSET_PREVIOUS);click(XR_ASSET_PLACE);assert.equal(placed[1].id,'b');
+    click(XR_ASSETS);
+    click(XR_ASSET_DELETE);assert.equal(deleted,0);
+    canDelete=true;controls.update();click(XR_ASSET_DELETE);assert.equal(deleted,1);
+    editable=false;controls.update();click(XR_ASSET_PLACE);click(XR_ASSET_DELETE);assert.equal(placed.length,2);assert.equal(deleted,1);
+    assert.equal(previews.at(-1)?.id,null);
+    editable=true;mode='armed';controls.update();click(XR_ASSET_PLACE);click(XR_ASSET_DELETE);assert.equal(placed.length,2);assert.equal(deleted,1);
+    mode='idle';items.length=0;controls.update();click(XR_ASSET_NEXT);click(XR_ASSET_PLACE);assert.equal(placed.length,2);
+    click(XR_ASSETS);assert.ok(controls.menuRoot.children.some(child=>child.userData.xrAction===5));
+    assert.equal(previews.at(-1)?.id,null);
+    controls.stop();assert.equal(previews.at(-1)?.id,null);
+    assert.match(xrMenuSvg({playing:false,canUndo:false,following:false,hasCamera:false,scale:1,assetsOpen:true,assetLabel:'A < B & C'}),/A &lt; B &amp; C/);
+  } finally {controls.dispose();if(previous)Object.defineProperty(globalThis,'document',previous);else Reflect.deleteProperty(globalThis,'document');}
+});
 
 test('sphere grab rotates around the grip with no initial snap and preserves scale', () => {
   const start: Transform = { position: [1, 0, 0], rotation: [0, 0, 0], scale: [2, 1, 3] };
@@ -68,10 +104,16 @@ test('timeline header drags independently and add-key is gated by selection, loc
     assert.ok(controls.timelineRoot.position.distanceTo(before) > .1);
     assert.deepEqual(controls.menuRoot.position, menuPosition);
     assert.ok(Math.abs(controls.timelineRoot.rotation.x) < 1e-8); assert.ok(Math.abs(controls.timelineRoot.rotation.z) < 1e-8);
+    const initialRotation = controls.timelineRoot.quaternion.clone();
+    grips[0].quaternion.setFromEuler(new THREE.Euler(.15, .1, .1));
+    controls.updateView(frame);
+    assert.ok(controls.timelineRoot.quaternion.angleTo(grips[0].quaternion.clone().multiply(initialRotation)) < 1e-6);
     aim(XR_ADD_KEY); fire('selectstart'); assert.equal(added, 0);
     aim(XR_DELETE_KEY); fire('selectstart'); assert.equal(deleted, 0);
-    fire('squeezeend'); const placed = controls.timelineRoot.position.clone();
+    fire('squeezeend'); const placed = controls.timelineRoot.position.clone(), placedRotation = controls.timelineRoot.quaternion.clone();
+    grips[0].quaternion.identity();
     grips[0].position.x += .4; controls.updateView(frame); assert.deepEqual(controls.timelineRoot.position, placed);
+    assert.ok(controls.timelineRoot.quaternion.angleTo(placedRotation) < 1e-6);
     aim(XR_ADD_KEY); fire('selectstart'); assert.equal(added, 1);
     selected = false; fire('selectstart'); assert.equal(added, 1);
     selected = true; editable = false; fire('selectstart'); assert.equal(added, 1);
@@ -801,7 +843,7 @@ test('left Menu toggles modes UI without hiding timeline; thumbstick fallback an
   const source = { handedness: 'left', profiles: ['oculus-touch-v3'], gripSpace: {}, gamepad: { mapping: 'xr-standard', buttons } };
   let recording: 'idle'|'armed'|'recording'|'review'='idle';
   const controls = new XRControls(renderer, { targets: () => [], editable: () => true, select: () => {}, pose: () => pose, transform: () => true, action: () => {}, timelineState: () => ({ time: 1, duration: 5, fps: 24, recording: {mode:recording} }) });
-  const expanded = () => controls.menuRoot.children.filter(child => child.visible).length > 1;
+  const expanded = () => controls.menuRoot.visible && controls.menuRoot.children.filter(child => child.visible).length > 1;
   const fire = (type: string, data?: unknown) => controllers[0].dispatchEvent({ type, data } as never);
   const release = (index: number) => { buttons[index].pressed = false; controls.update(); };
   const press = (index: number) => { buttons[index].pressed = true; controls.update(); };
@@ -812,6 +854,7 @@ test('left Menu toggles modes UI without hiding timeline; thumbstick fallback an
     press(6); assert.equal(expanded(), true); release(6); // Thumb-rest is never Menu.
     // A reported Menu slot may never generate input: stick click remains available.
     press(3); assert.equal(expanded(),false); controls.update();assert.equal(expanded(),false);
+    assert.equal(controls.menuRoot.visible,false); // Hide the handle as well as the mode icons.
     release(3);press(3);assert.equal(expanded(),true);release(3);
 
     press(7); controls.update(); assert.equal(expanded(), false); assert.equal(controls.timelineRoot.visible, true);

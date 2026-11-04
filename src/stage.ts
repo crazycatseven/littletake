@@ -69,6 +69,7 @@ export class Stage {
   }
   private controlled: { id: string; pose: Transform; joints?:Record<string,number> } | null = null;
   private ghost: THREE.Group | null = null;
+  private xrAssetPreview: { asset: AssetDefinition; pose: Transform } | null = null;
   private readonly forwardArrow = new THREE.ArrowHelper(new THREE.Vector3(0,0,1),new THREE.Vector3(),1.2,0x669bb1,.22,.13);
   private readonly options: StageOptions;
   private readonly scene = new THREE.Scene();
@@ -252,8 +253,12 @@ export class Stage {
       session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'] });
       if (this.disposed || this.options.canEnterXR?.() === false) throw new Error('The editor changed while entering VR. Try again.');
       this.xrControls ??= new XRControls(this.renderer, {
-        targets: () => [...this.views.values()].filter(view => view.root.visible).map(view => view.root).concat(this.cameraIcon.visible ? [this.cameraIcon] : []),
-        selected: () => this.selectedIds.map(id => this.rootFor(id)).filter((root): root is THREE.Object3D => !!root && root.visible),
+        assetState: this.options.xrAssetState,
+        placeAsset: this.options.onXRPlaceAsset,
+        previewAsset: this.options.onXRPreviewAsset,
+        deleteAsset: this.options.onXRDeleteAsset,
+        targets: () => [...this.views.values()].filter(view => view.root.visible).map(view => view.root).concat(this.cameraIcon.visible && !this.previewingXR() ? [this.cameraIcon] : []),
+        selected: () => this.selectedIds.map(id => this.rootFor(id)).filter((root): root is THREE.Object3D => !!root && root.visible && (root !== this.cameraIcon || !this.previewingXR())),
         editable: () => !this.playing && !this.controlled && this.options.canEnterXR?.() !== false,
         select: id => this.options.onSelect([id], 'replace'),
         pose: id => { const root = this.rootFor(id); return root ? this.readPose(root) : undefined; },
@@ -500,10 +505,26 @@ export class Stage {
     const surface=this.raycaster.intersectObjects([...this.views.values()].filter(v=>v.root.visible).map(v=>v.root),true).find(hit=>hit.face && hit.face.normal.clone().transformDirection(hit.object.matrixWorld).y>.65);
     if(surface && (!point || surface.distance < point.distanceTo(this.raycaster.ray.origin)))point=surface.point;
     if(!point || point.toArray().some(v=>Math.abs(v)>990))return null;
+    return this.placementAt(asset, point);
+  }
+  placementAt(asset: AssetDefinition, point: THREE.Vector3): Transform {
     const pose:Transform=structuredClone(asset.template?.transform??{position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]});
     pose.position=[0,0,0];const root=createAssetGroup(asset);this.applyPose(root,pose);root.updateMatrixWorld(true);
     const minY=new THREE.Box3().setFromObject(root).min.y;disposeAssetGroup(root);
     pose.position=[point.x,point.y-minY,point.z];return pose;
+  }
+  previewXRAsset(asset: AssetDefinition | null, position?: Vec3): void {
+    if (!asset || !position) {
+      if (this.xrAssetPreview) this.previewAsset(null);
+      this.xrAssetPreview = null; return;
+    }
+    if (this.xrAssetPreview?.asset !== asset) {
+      this.previewAsset(null);
+      this.xrAssetPreview = { asset, pose: this.placementAt(asset, new THREE.Vector3()) };
+    }
+    const pose = this.xrAssetPreview.pose;
+    this.previewAsset(asset, { ...pose, position: [position[0], position[1] + pose.position[1], position[2]] });
+    this.ghost!.traverse(node => { node.layers.set(3); node.frustumCulled = false; });
   }
   previewAsset(asset:AssetDefinition|null,pose?:Transform):void {
     if(!asset){if(this.ghost){this.scene.remove(this.ghost);disposeAssetGroup(this.ghost);this.ghost=null;}return;}
@@ -757,6 +778,8 @@ export class Stage {
   private boundCorners(box: THREE.Box3): THREE.Vector3[] {
     return [box.min.x, box.max.x].flatMap(x => [box.min.y, box.max.y].flatMap(y => [box.min.z, box.max.z].map(z => new THREE.Vector3(x, y, z))));
   }
+
+  private previewingXR(): boolean { return this.presentingXR && (this.playing || !!this.options.xrTimelineState?.().recording?.previewing); }
 
   private rootFor(id: string): THREE.Object3D | undefined { return id === this.iconCameraId ? this.cameraIcon : this.views.get(id)?.root; }
 
@@ -1314,7 +1337,11 @@ export class Stage {
       if(source&&root){this.applyPose(this.handheldCamera,this.readPose(root),false);this.handheldCamera.fov=evaluateFov(source,this.currentTime);}
       this.xrViewfinder?.render(this.renderer,this.scene,this.handheldCamera,handheld,time,this.xrControls.rig.scale.x,
         [this.xrControls.rig,this.xrControls.menuRoot,this.xrControls.timelineRoot,this.xrControls.keyframeGhosts.root,this.xrControls.nearSelection.root,this.xrControls.feedbackRoot]);
-      this.renderer.render(this.scene, this.xrControls.camera);
+      // Hide only the editor camera model; keep its pose available to trajectory previews.
+      const cameraVisible = this.cameraIcon.visible;
+      if (this.previewingXR()) this.cameraIcon.visible = false;
+      try { this.renderer.render(this.scene, this.xrControls.camera); }
+      finally { this.cameraIcon.visible = cameraVisible; }
       return;
     }
     if (this.resizePending && !this.presentingXR) this.applyResize();
