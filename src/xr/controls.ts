@@ -1,5 +1,6 @@
 import type { HandheldAction, HandheldState } from './handheld';
 import * as THREE from 'three';
+import { XR_ASSETS, XR_ASSET_ACTIONS, XR_ASSET_PREVIOUS, XR_ASSET_NEXT, XR_ASSET_PLACE, XR_ASSET_DELETE, type XRAssetState } from './assets';
 import { XRMenu, XR_MENU_TOGGLE, XR_MENU_DRAG, XR_TIMELINE_DRAG, XR_ADD_KEY, XR_DELETE_KEY, XR_RECORD, XR_RECORD_PREVIEW, XR_RECORD_APPLY, XR_RECORD_DISCARD, XR_HANDHELD } from './menu';
 import type { XRRecordAction } from './recording';
 import { XRMenuSpace } from './menu-space';
@@ -31,6 +32,10 @@ export function rotatedGrab(start: Transform, origin: THREE.Vector3, current: TH
 }
 
 interface Options {
+  assetState?(): XRAssetState;
+  placeAsset?(id: string, position: Transform['position']): void;
+  previewAsset?(id: string | null, position?: Transform['position']): void;
+  deleteAsset?(): void;
   handheldState?(): HandheldState;
   handheldAction?(action: HandheldAction): boolean;
   handheldPose?(pose: Transform): void;
@@ -98,6 +103,8 @@ export class XRControls {
   private viewerLocal = new THREE.Matrix4();
   private menuNeedsPlacement = true;
   private menuHidden = false;
+  private assetsOpen = false;
+  private assetIndex = 0;
   private cleanups: (() => void)[] = [];
   private grab: { index: number; input: 'grip' | 'trigger'; id: string; start: Transform; origin: THREE.Vector3; orientation: THREE.Quaternion; latest: Transform; near: boolean } | null = null;
   private heldCamera: { index: number; start: Transform; origin: THREE.Vector3; orientation: THREE.Quaternion } | null = null;
@@ -185,6 +192,8 @@ export class XRControls {
     this.reference?.addEventListener('reset', this.reset);
   }
   stop(): void {
+    this.assetsOpen = false;
+    this.options.previewAsset?.(null);
     this.setTimeline(false);
     this.finish(true);
     this.leaveCamera();
@@ -350,10 +359,24 @@ export class XRControls {
     this.timelineRoot.visible=!!this.session&&this.timeline&&!holding;
     this.keyframeGhosts.root.visible=!!this.session&&this.timeline&&!holding;
   }
+  private assetPlacement(): Transform['position'] {
+    const head = this.menuHead(), forward = new THREE.Vector3(0, 0, -1).transformDirection(head);
+    forward.y = 0;
+    if (forward.lengthSq() < 1e-6) forward.set(0, 0, -1);
+    const position = new THREE.Vector3().setFromMatrixPosition(head).addScaledVector(forward.normalize(), 1.5 * this.rig.scale.x);
+    position.y = 0;
+    return position.toArray();
+  }
   private syncMenu(): void {
+    const assets = this.options.assetState?.();
+    this.assetIndex = Math.min(this.assetIndex, Math.max(0, (assets?.items.length ?? 0) - 1));
+    const preview = this.session?.visibilityState === 'visible' && this.assetsOpen && !this.menuHidden && this.menu.expanded &&
+      !this.grab && !this.heldCamera && !this.locomotion && this.recordingMode() === 'idle' && this.options.editable() && assets?.canPlace
+      ? assets.items[this.assetIndex] : undefined;
+    this.options.previewAsset?.(preview?.id ?? null, preview ? this.assetPlacement() : undefined);
     this.syncPanelVisibility();
     const playback = this.options.menuState?.() ?? { playing: false, canUndo: false };
-    this.menu.setState({ ...playback, handheld:!!this.options.handheldState?.().id, canHandheld:!!this.options.handheldState?.().available, following: this.following, hasCamera: !!this.options.followCamera?.(), scale: this.following ? 1 : 1 / this.rig.scale.x, timeline: this.timeline, dragging: this.menuDrag !== null && !this.draggingTimeline, timelineDragging: this.menuDrag !== null && this.draggingTimeline });
+    this.menu.setState({ assetsOpen:this.assetsOpen, assetLabel:assets?.items.length ? (this.assetIndex+1)+'/'+assets.items.length+' '+assets.items[this.assetIndex].name : 'No assets available', assetCount:assets?.items.length, canPlaceAsset:!!assets?.canPlace&&!!assets.items.length&&this.options.editable()&&this.recordingMode()==='idle', canDeleteAsset:!!assets?.canDelete&&this.options.editable()&&this.recordingMode()==='idle', deleteLabel:assets?.canDelete?'Delete '+assets.selectionName:undefined, ...playback, handheld:!!this.options.handheldState?.().id, canHandheld:!!this.options.handheldState?.().available, following: this.following, hasCamera: !!this.options.followCamera?.(), scale: this.following ? 1 : 1 / this.rig.scale.x, timeline: this.timeline, dragging: this.menuDrag !== null && !this.draggingTimeline, timelineDragging: this.menuDrag !== null && this.draggingTimeline });
     const idle = !this.keyDrag && !this.grab && !this.locomotion && this.menuDrag === null && this.recordingMode()==='idle';
     this.controllerVisuals.forEach(visual => visual.setState({ playing: playback.playing, canUndo: idle && playback.canUndo, canPlay: idle, canMenu: true }));
   }
@@ -430,6 +453,18 @@ export class XRControls {
       if(hit.object.userData.xrTimeline){this.keySelection.clear();this.syncTimeline(this.options.timelineState!());return;}
       this.syncMenu();
       if (!this.menu.enabled(action)) return;
+      if (action === XR_ASSETS) { this.assetsOpen = !this.assetsOpen; if (this.assetsOpen) this.leaveCamera(); this.syncMenu(); return; }
+      if (XR_ASSET_ACTIONS.includes(action)) {
+        const assets = this.options.assetState?.();
+        if (!assets || this.recordingMode() !== 'idle' || this.grab || this.locomotion || this.menuDrag !== null) return;
+        if ((action === XR_ASSET_PREVIOUS || action === XR_ASSET_NEXT) && assets.items.length) {
+          this.assetIndex = (this.assetIndex + (action === XR_ASSET_NEXT ? 1 : -1) + assets.items.length) % assets.items.length;
+        } else if (action === XR_ASSET_PLACE && assets.canPlace && this.options.editable()) {
+          const item = assets.items[this.assetIndex];
+          if (item) { this.options.placeAsset?.(item.id, this.assetPlacement()); this.assetsOpen = false; }
+        } else if (action === XR_ASSET_DELETE && assets.canDelete && this.options.editable()) this.options.deleteAsset?.();
+        this.syncMenu(); return;
+      }
       if(action>=XR_RECORD&&action<=XR_RECORD_DISCARD){
         const actions:XRRecordAction[]=['record','preview','apply','discard'];
         this.options.recordAction?.(actions[action-XR_RECORD]);this.resetTimelineInput();this.syncTimeline(this.options.timelineState!());return;

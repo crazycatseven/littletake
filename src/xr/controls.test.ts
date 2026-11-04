@@ -4,8 +4,44 @@ import * as THREE from 'three';
 import { XRControls, translatedGrab, rotatedGrab } from './controls';
 import { XRMenu, XR_MENU_TOGGLE, XR_MENU_DRAG, XR_TIMELINE_DRAG, XR_ADD_KEY, XR_DELETE_KEY, xrMenuSvg, xrMenuHandleSvg } from './menu';
 import type { Transform } from '../types';
+import { XR_ASSETS, XR_ASSET_PREVIOUS, XR_ASSET_NEXT, XR_ASSET_PLACE, XR_ASSET_DELETE } from './assets';
 
 const pose: Transform = { position: [0, 0, -2], rotation: [20, 30, 40], scale: [2, 1, 3] };
+
+test('XR asset browser cycles, places ahead and gates deletion and insertion while locked', () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  Object.defineProperty(globalThis, 'document', { configurable:true, value:{createElement:()=>({getContext:()=>({})})} });
+  const controllers=[new THREE.Group(),new THREE.Group()],grips=[new THREE.Group(),new THREE.Group()];
+  const renderer={xr:{getController:(i:number)=>controllers[i],getControllerGrip:(i:number)=>grips[i],getReferenceSpace:()=>new EventTarget()}} as unknown as THREE.WebGLRenderer;
+  let editable=true,canDelete=false,deleted=0,mode:'idle'|'armed'='idle';
+  const placed:{id:string;position:number[]}[]=[];
+  const previews:{id:string|null;position?:number[]}[]=[];
+  const items=[{id:'a',name:'Chair'},{id:'b',name:'Desk'}];
+  const controls=new XRControls(renderer,{targets:()=>[],editable:()=>editable,select:()=>{},pose:()=>pose,transform:()=>true,action:()=>{},
+    assetState:()=>({items,canPlace:true,canDelete}),placeAsset:(id,position)=>placed.push({id,position}),deleteAsset:()=>{deleted++;},
+    previewAsset:(id,position)=>previews.push({id,position}),
+    timelineState:()=>({time:0,duration:5,fps:24,recording:{mode}})});
+  const click=(action:number)=>{aimMenu(controls,controllers[0],action);controllers[0].dispatchEvent({type:'selectstart'} as never);};
+  try {
+    controls.start(Object.assign(new EventTarget(),{visibilityState:'visible'}) as unknown as XRSession,new THREE.Vector3(0,0,-3));
+    click(XR_ASSETS);assert.equal(previews.at(-1)?.id,'a');click(XR_ASSET_NEXT);assert.equal(previews.at(-1)?.id,'b');
+    const previewPosition=previews.at(-1)?.position;click(XR_ASSET_PLACE);
+    assert.equal(placed[0].id,'b');assert.deepEqual(placed[0].position,[0,0,-1.5]);
+    assert.deepEqual(placed[0].position,previewPosition);assert.equal(previews.at(-1)?.id,null);
+    click(XR_ASSETS);click(XR_ASSET_NEXT);click(XR_ASSET_PREVIOUS);click(XR_ASSET_PLACE);assert.equal(placed[1].id,'b');
+    click(XR_ASSETS);
+    click(XR_ASSET_DELETE);assert.equal(deleted,0);
+    canDelete=true;controls.update();click(XR_ASSET_DELETE);assert.equal(deleted,1);
+    editable=false;controls.update();click(XR_ASSET_PLACE);click(XR_ASSET_DELETE);assert.equal(placed.length,2);assert.equal(deleted,1);
+    assert.equal(previews.at(-1)?.id,null);
+    editable=true;mode='armed';controls.update();click(XR_ASSET_PLACE);click(XR_ASSET_DELETE);assert.equal(placed.length,2);assert.equal(deleted,1);
+    mode='idle';items.length=0;controls.update();click(XR_ASSET_NEXT);click(XR_ASSET_PLACE);assert.equal(placed.length,2);
+    click(XR_ASSETS);assert.ok(controls.menuRoot.children.some(child=>child.userData.xrAction===5));
+    assert.equal(previews.at(-1)?.id,null);
+    controls.stop();assert.equal(previews.at(-1)?.id,null);
+    assert.match(xrMenuSvg({playing:false,canUndo:false,following:false,hasCamera:false,scale:1,assetsOpen:true,assetLabel:'A < B & C'}),/A &lt; B &amp; C/);
+  } finally {controls.dispose();if(previous)Object.defineProperty(globalThis,'document',previous);else Reflect.deleteProperty(globalThis,'document');}
+});
 
 test('sphere grab rotates around the grip with no initial snap and preserves scale', () => {
   const start: Transform = { position: [1, 0, 0], rotation: [0, 0, 0], scale: [2, 1, 3] };

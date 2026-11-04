@@ -20,6 +20,10 @@ export type SceneEntity = SceneObject | SceneCamera;
 export interface SceneDocument { format: 'LittleTake.scene'; version: 3; id: string; name: string; duration: number; fps?: 24 | 30; objects: SceneObject[]; cameras: SceneCamera[]; shots: Shot[]; paths?: import('./motion-paths/model').MotionPath[]; look?:SceneLook }
 export interface ProjectContent { name: string; scenes: SceneDocument[]; assets?: AssetDefinition[]; scripts?: import('./scripts/model').ScriptDefinition[] }
 export interface StageOptions {
+  xrAssetState?(): import('./xr/assets').XRAssetState;
+  onXRPlaceAsset?(id: string, position: Vec3): void;
+  onXRPreviewAsset?(id: string | null, position?: Vec3): void;
+  onXRDeleteAsset?(): void;
   onPathOpen?(id: string): void;
   onPathSelect?(index: number, part: import('./motion-paths/model').PathPart): void;
   onPathChange?(id: string, index: number, phase: import('./motion-paths/editor').PathGesture): void;
