@@ -11,8 +11,8 @@ export function xrControllerIconSvg(action: 'undo' | 'play' | 'menu', playing = 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320"><circle cx="160" cy="160" r="156" fill="${feedback === 'pressed' ? '#ffbd66' : '#182b26'}"/><circle cx="160" cy="160" r="143" fill="none" stroke="${feedback === 'pressed' ? ink : feedback === 'ready' ? '#c9f86b' : '#789084'}" stroke-width="12"/>${icon(symbol,{x:72,y:72,width:176,height:176,color:ink,...(action==='play'?{fill:ink}:{})})}</svg>`;
 }
 
-export function xrLeftHintsSvg(fallback: boolean): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="240" viewBox="0 0 640 240"><rect x="4" y="4" width="632" height="232" rx="24" fill="#182b26" stroke="#c9f86b" stroke-width="5"/><g font-family="Segoe UI, Arial, sans-serif" fill="#f6f3e9" font-size="38" font-weight="600"><text x="32" y="66">X  Undo</text><text x="300" y="66">Y  Play / Pause</text><text x="32" y="137" fill="#c9f86b">${fallback ? 'Stick press' : 'Menu key'}  ·  Modes</text><text x="32" y="203" font-size="30" fill="#c7d6ce">Trigger / Grip: grab</text></g></svg>`;
+export function xrLeftHintsSvg(): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="240" viewBox="0 0 640 240"><rect x="4" y="4" width="632" height="232" rx="24" fill="#182b26" stroke="#c9f86b" stroke-width="5"/><g font-family="Segoe UI, Arial, sans-serif" fill="#f6f3e9" font-size="38" font-weight="600"><text x="32" y="66">X  Undo</text><text x="300" y="66">Y  Play / Pause</text><text x="32" y="137" fill="#c9f86b">Press left stick · Menu</text><text x="32" y="203" font-size="30" fill="#c7d6ce">Trigger / Grip: grab</text></g></svg>`;
 }
 
 type ButtonKey = 'x' | 'y' | 'menu';
@@ -79,7 +79,7 @@ export class XRControllerVisual {
       // Attach icons to the profile's actual face buttons, including animated model parts.
       const motion = this.model.motionController as { components?: Record<string, XRButtonComponent> } | null;
       for (const key of ['x', 'y', 'menu'] as const) {
-        const component = key === 'menu' ? (this.source && this.menuBinding(this.source)?.fallback ? motion?.components?.['xr-standard-thumbstick'] : motion?.components?.menu ?? motion?.components?.['menu-button']) : motion?.components?.[`${key}-button`];
+        const component = key === 'menu' ? motion?.components?.['xr-standard-thumbstick'] : motion?.components?.[`${key}-button`];
         const name = component?.rootNodeName;
         const button = name ? scene.getObjectByName(name) : undefined;
         if (button && this.left) this.positionHint(key, button);
@@ -90,7 +90,7 @@ export class XRControllerVisual {
     this.model = factory.createControllerModel(this.input); this.root.add(this.model);
   }
 
-  private positionHint(key: ButtonKey, button: THREE.Object3D = key === 'x' ? this.fallbackX : key === 'y' ? this.fallbackY : this.source && this.menuBinding(this.source)?.fallback ? this.fallbackStick : this.fallbackMenu): void {
+  private positionHint(key: ButtonKey, button: THREE.Object3D = key === 'x' ? this.fallbackX : key === 'y' ? this.fallbackY : this.fallbackStick): void {
     let hint = this.hints.get(key);
     if (!hint) {
       const texture = new MenuTexture(320, 320);
@@ -134,7 +134,7 @@ export class XRControllerVisual {
       hint.texture.draw(xrControllerIconSvg(key === 'x' ? 'undo' : key === 'y' ? 'play' : 'menu', state.playing, pressed ? 'pressed' : enabled ? 'ready' : 'disabled'));
       hint.mesh.material.opacity = pressed || enabled ? 1 : .6;
     }
-    if (this.legend && this.source) this.legend.texture.draw(xrLeftHintsSvg(this.menuBinding(this.source)?.fallback !== false));
+    if (this.legend && this.source) this.legend.texture.draw(xrLeftHintsSvg());
   }
 
   acknowledge(action: 'undo' | 'play' | 'menu'): void {

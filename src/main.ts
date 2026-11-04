@@ -1,3 +1,4 @@
+import type { HandheldAction, HandheldState } from './xr/handheld';
 import { icon } from './icons';
 import { bindParentingTree } from './placement/tree';
 import { Box3, Vector3 } from 'three';
@@ -156,6 +157,7 @@ let assetEditor: AssetEditor | null = null;
 let performanceSession: PerformanceSession | null = null;
 let recordingClock:RecordingClock='realtime';
 let xrRecording: XRRecording | null = null;
+let xrHandheld: { id: string; end: number } | null = null;
 let storageAvailable = true;
 const bottomPanelCollapsedHeight = 36;
 const defaultBottomPanelHeight = () => window.innerHeight <= 720 ? 220 : 280;
@@ -480,7 +482,13 @@ function keyTransform(item:SceneEntity):void {
 const xrKeyframes = new XRKeyframeReader();
 function syncStage() { const visibleDoc=sceneWithDrafts(visibleScene()),session=performanceSession;
   stage?.setMotionPath(selectedMotionPath()??null,selectedPathPoint,!!workspace?.canEdit&&!editPreview&&!performanceSession&&!playing,selectedPathPart);
-  if(xrRecording && xrRecording.mode!=='armed')visibleDoc.objects=visibleDoc.objects.map(object=>object.id===xrRecording!.before.id?{...object,track:null,animation:undefined,transform:xrRecording!.preview(time)}:object);
+  if(xrRecording && (xrHandheld || xrRecording.mode!=='armed')){
+    const recording=xrRecording;
+    const overlay=<T extends SceneEntity>(item:T):T=>item.id===recording.before.id
+      ? {...item,track:null,animation:undefined,transform:recording.preview(time),...('fov' in item?{fov:evaluateFov(item,time)}:{})}:item;
+    visibleDoc.objects=visibleDoc.objects.map(overlay);
+    visibleDoc.cameras=visibleDoc.cameras.map(overlay);
+  }
   stage?.setCameraPilot(session?.isCamera?session.before.id:null,session?.mode==='review');
   const component=inputController(session?.components);stage?.setControlled(session?{id:session.before.id,pose:session.preview(time),joints:session.previewJoints(time),world:component?.type==='movement'&&component.space==='world'}:null);
   stage?.update(visibleDoc,Math.min(time,visibleDoc.duration),selection.ids,Boolean(editPreview) || !!session || playing, editPreview ? previewShotId : project.activeShotId,(editPreview??project).assets??[]); }
@@ -872,22 +880,63 @@ const referenceDialog = new ReferenceDialog(draft => {
   void assetsPanel?.refresh();
 },(scene,time,shotId,assets,measureVisible,view='shot',frameBounds)=>stage.captureSnapshot(scene,time,view,shotId,assets,measureVisible,frameBounds),()=>workspace,async(file,video,cuts)=>{await sceneEditor?.attachReference(file,video,cuts);});
 
+function xrHandheldState():HandheldState {
+  const shot=activeShot();
+  return {available:!!workspace?.canEdit&&!!shot&&!xrRecording&&!playing&&!transformEdit&&!unkeyed.size&&!storageError,
+    ...(xrHandheld&&xrRecording?{id:xrHandheld.id,mode:xrRecording.mode as 'armed'|'recording'|'review',time:xrRecording.time,start:xrRecording.start,end:xrHandheld.end}:{})};
+}
+function xrHandheldAction(action:HandheldAction):boolean {
+  try {
+    if(action==='enter'){
+      if(!xrHandheldState().available)return false;
+      const shot=activeShot()!,camera=doc.cameras.find(item=>item.id===shot.cameraId);
+      if(!camera||effectivelyHidden(doc,camera.id))return false;
+      flushFieldEdit();pause();select(camera.id);
+      const end=Math.min(doc.duration,shot.start+shot.duration);
+      if(time<shot.start||time>end-.1)time=shot.start;
+      xrRecording=new XRRecording(camera,time,doc.duration,end);xrHandheld={id:camera.id,end};
+    }else{
+      if(!xrHandheld||!xrRecording)return false;
+      if(action==='exit'){
+        if(xrRecording.mode!=='armed')return false;
+        time=xrRecording.start;xrRecording=null;xrHandheld=null;
+      }else if(action==='start'){
+        if(!workspace?.canEdit||xrRecording.mode!=='armed')return false;
+        xrRecording.begin(performance.now());
+      }else if(action==='stop')xrRecording.stop();
+      else xrRecording.cancelGrip();
+    }
+    if(xrRecording)time=xrRecording.time;renderTime();syncStage();return true;
+  }catch(error){status((error as Error).message);return false;}
+}
+function xrHandheldPose(pose:Transform):void {
+  if(!xrHandheld||!xrRecording)return;
+  if(!workspace?.canEdit){xrHandheldAction('cancel');return;}
+  try{
+    const now=performance.now(),at=xrRecording.mode==='recording'?xrRecording.sampleTime(now):xrRecording.start;
+    const local=localTransform(doc,xrHandheld.id,pose,at);
+    if(xrRecording.mode==='armed')xrRecording.prepare(local);
+    else if(xrRecording.mode==='recording')xrRecording.sample(local,now);
+    time=xrRecording.time;renderTime();syncStage();
+  }catch(error){xrHandheldAction('cancel');status((error as Error).message);}
+}
+
 function xrRecordAction(action:XRRecordAction):void {
   if(!workspace?.canEdit)return;
   try {
     if(action==='record'){
       const item=entity();
-      if(xrRecording||!item||!('kind' in item)||effectivelyHidden(doc,item.id)||playing||transformEdit||editPreview||performanceSession||storageError||unkeyed.size)return;
+      if(xrRecording||!item||effectivelyHidden(doc,item.id)||playing||transformEdit||editPreview||performanceSession||storageError||unkeyed.size)return;
       flushFieldEdit();pause();xrRecording=new XRRecording(item,time,doc.duration);
-      status('Recording armed · Hold trigger or grip on the selected object, move it, then release to review');
+      status('Recording armed · Hold trigger or grip on the selected object or camera, move it, then release to review');
     }else if(action==='discard'){
-      if(!xrRecording)return;time=xrRecording.start;xrRecording=null;status('Recording discarded · Original animation kept');
+      if(!xrRecording)return;time=xrRecording.start;xrRecording=null;xrHandheld=null;status('Recording discarded · Original animation kept');
     }else if(action==='preview')xrRecording?.togglePreview();
     else if(action==='apply'){
       if(!xrRecording||xrRecording.mode!=='review')return;
       const item=entity(xrRecording.before.id);
-      if(!item||JSON.stringify(item)!==JSON.stringify(xrRecording.before))throw new Error('The object changed. Discard this take and record again.');
-      const next=xrRecording.apply();Object.assign(item,next);xrRecording=null;
+      if(!item||JSON.stringify(item)!==JSON.stringify(xrRecording.before))throw new Error('The recording target changed. Discard this take and record again.');
+      const next=xrRecording.apply();Object.assign(item,next);xrRecording=null;xrHandheld=null;
       selectedPropertyKey=null;changed('XR recording applied · Smoothed motion keys · Undo available');return;
     }
     if(xrRecording)time=xrRecording.time;renderTime();syncStage();
@@ -953,7 +1002,7 @@ try {
     onFrame:tick,
     canEnterXR:()=>!assetEditor&&!editPreview&&!performanceSession&&!storageError&&!unkeyed.size&&!document.querySelector('dialog[open]'),
     onXRChange:active=>{
-      if(!active && xrRecording){time=xrRecording.start;xrRecording=null;renderAll();}
+      if(!active && xrRecording){time=xrRecording.start;xrRecording=null;xrHandheld=null;renderAll();}
       pause();flushFieldEdit();lastFrame=performance.now();
       if(active)sceneEditor?.session.cancel('VR opened. Retry after returning to the desktop editor.');
       app.classList.toggle('xr-presenting',active);
@@ -961,20 +1010,31 @@ try {
       persist();
     },
     onXRAction:action=>{if(xrRecording)return;if(action==='play')togglePlay();else if(workspace?.canEdit){flushFieldEdit();restore(history.undo());}},
-    xrTimelineState:()=>({time,duration:visibleScene().duration,fps:fps(),selection:(()=>{const current=visibleScene(),item=xrRecording?.keyframeEntity()??sceneEntity(current,selection.active),scene=xrRecording&&item?{...current,objects:current.objects.map(object=>object.id===item.id?item as SceneObject:object)}:current,keys=item&&!effectivelyHidden(scene,item.id)?xrKeyframes.read(item,scene.duration):undefined;return keys?{...keys,frames:keys.frames.map(frame=>({...frame,transform:worldTransform(scene,keys.id,frame.time)}))}:undefined;})(),recording:xrRecording?.state()??{mode:'idle',canRecord:!!workspace?.canEdit&&!!entity()&&'kind' in entity()!&&!effectivelyHidden(doc,entity()!.id)&&!playing&&!transformEdit&&!unkeyed.size&&!storageError&&doc.duration-time>=.1}}),
+    xrTimelineState:()=>{
+      const current=visibleScene(),item=xrRecording?.keyframeEntity()??sceneEntity(current,selection.active);
+      const scene=xrRecording&&item?{...current,
+        objects:current.objects.map(object=>object.id===item.id&&'kind' in item?item:object),
+        cameras:current.cameras.map(camera=>camera.id===item.id&&'fov' in item?item:camera),
+      }:current;
+      const keys=item&&!effectivelyHidden(scene,item.id)?xrKeyframes.read(item,scene.duration):undefined;
+      return {time,duration:scene.duration,fps:fps(),
+        selection:keys?{...keys,frames:keys.frames.map(frame=>({...frame,transform:worldTransform(scene,keys.id,frame.time)}))}:undefined,
+        recording:xrRecording?{...xrRecording.state(),handheld:!!xrHandheld}:{mode:'idle',canRecord:!!workspace?.canEdit&&!!item&&!effectivelyHidden(scene,item.id)&&!playing&&!transformEdit&&!unkeyed.size&&!storageError&&doc.duration-time>=.1}};
+    },
     onXRSeek:value=>{if(xrRecording){if(xrRecording.mode!=='review')return;xrRecording.previewing=false;xrRecording.time=value;}seek(value);},
     onXRTransform:xrTransform,
     onXRRecordAction:xrRecordAction,
+    xrHandheldState, onXRHandheldAction:xrHandheldAction, onXRHandheldPose:xrHandheldPose,
     onXRAddKeyframe:()=>{
       if(xrRecording||!workspace?.canEdit)return;
       const item=entity();
-      if(!item||!('kind' in item)||item.hidden||playing||transformEdit||editPreview||performanceSession||storageError||assetEditor)return;
+      if(!item||effectivelyHidden(doc,item.id)||playing||transformEdit||editPreview||performanceSession||storageError||assetEditor)return;
       try{flushFieldEdit();keyTransform(item);}catch(error){status(error instanceof Error?error.message:'Could not add keyframe');}
     },
     onXRDeleteKeyframe:times=>{
       if(xrRecording||!workspace?.canEdit)return;
       const item=entity();
-      if(!item||!('kind' in item)||item.hidden||playing||transformEdit||editPreview||performanceSession||storageError||assetEditor)return;
+      if(!item||effectivelyHidden(doc,item.id)||playing||transformEdit||editPreview||performanceSession||storageError||assetEditor)return;
       try{
         flushFieldEdit();const next=deleteXRKeyframes(item,times?.length?times:[time]);if(!next)return;
         Object.assign(item,next);selectedPropertyKey=null;changed(times?.length ? `${times.length} keyframes deleted` : 'Keyframe deleted');
