@@ -247,6 +247,30 @@ export class ProjectRoomStore {
       return this.get(code, lease, page);
     });
   }
+  rename(code: string, lease: string, name: string, page?: string): ProjectRoom {
+    return this.transaction(() => {
+      const row = this.row(code); this.requireEditor(row, lease, page);
+      const before = JSON.parse(row.document); before.name = name;
+      const document = this.document(before);
+      if (document === row.document) return this.snapshot(row, lease, page);
+      this.db.prepare('UPDATE projects SET document=?,saved_version=saved_version+1,content_version=content_version+1,updated_at=? WHERE id=?')
+        .run(document, this.now(), row.id);
+      if (this.coverInfo(row.id)?.savedVersion === row.saved_version && coverVisual(JSON.parse(row.document)) === coverVisual(JSON.parse(document)))
+        this.db.prepare('UPDATE project_covers SET saved_version=? WHERE project_id=?').run(row.saved_version + 1, row.id);
+      this.renewSession(row.id, lease, page);
+      return this.get(code, lease, page);
+    });
+  }
+  /** Removes one project only when the supplied name matches the saved name. */
+  remove(code: string, lease: string, name: string, page?: string): void {
+    this.transaction(() => {
+      const row = this.row(code); this.requireEditor(row, lease, page);
+      if (JSON.parse(row.document).name !== name) throw new ProjectRoomError('name_mismatch', 'Type this project’s name exactly to delete it.', 409);
+      for (const table of ['outputs', 'project_covers', 'project_sessions', 'project_edits', 'project_property_writers', 'ai_calls', 'handoffs'])
+        this.db.prepare(`DELETE FROM ${table} WHERE project_id=?`).run(row.id);
+      this.db.prepare('DELETE FROM projects WHERE id=?').run(row.id);
+    });
+  }
   save(code: string, lease: string, version: number, value: unknown, page?: string): ProjectRoom {
     const document = this.document(value);
     return this.transaction(() => {

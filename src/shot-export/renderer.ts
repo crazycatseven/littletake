@@ -81,8 +81,11 @@ export class ShotRenderer {
     this.resize(720, 405);
   }
 
-  resize(width: number, height: number): void { this.renderer.setSize(width, height, false); this.camera.aspect = width / height; this.camera.updateProjectionMatrix(); }
-  render(time: number): HTMLCanvasElement {
+  resize(width: number, height: number): void {
+    if (this.canvas.width === width && this.canvas.height === height) return;
+    this.renderer.setSize(width, height, false); this.camera.aspect = width / height; this.camera.updateProjectionMatrix();
+  }
+  render(time: number, cameraId = this.cameraId): HTMLCanvasElement {
     if (this.disposed || this.renderer.getContext().isContextLost()) throw new Error('The graphics context was lost. Close the export window and try again.');
     const pose = (root: THREE.Object3D, transform: Transform, scale = true) => {
       root.position.fromArray(transform.position);
@@ -101,7 +104,7 @@ export class ShotRenderer {
         }
       }
     }
-    const camera = this.document.cameras.find(item => item.id === this.cameraId)!;
+    const camera = this.document.cameras.find(item => item.id === cameraId)!;
     pose(this.camera, matrixTransform(world.get(camera.id)!), false);
     const fov = evaluateFov(camera, time);
     const bounds=new THREE.Box3();for(const root of this.roots.values())if(root.visible)bounds.expandByObject(root);

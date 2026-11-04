@@ -15,7 +15,7 @@
 .ae-center { position:absolute; inset:0; display:flex; flex-direction:column; }
 .ae-stage { flex:1; }
 .ae-context { position:absolute; z-index:5; top:55px; left:16px; right:16px; display:flex; align-items:center; gap:8px; height:29px; pointer-events:none; color:var(--muted); font-size:11px; }
-.ae-context button { pointer-events:auto; height:26px; padding:4px 6px; background:var(--surface-raised); color:var(--accent); }
+.ae-context button { pointer-events:auto; height:26px; padding:4px 6px; background:var(--surface-raised); color:var(--accent-text); }
 .ae-context strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:50%; color:var(--text-secondary); font-weight:500; }
 .ae-state { font-size:9px; white-space:nowrap; color:var(--text-secondary); }
 .ae-views.shot-panel { top:96px; }

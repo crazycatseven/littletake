@@ -1,34 +1,37 @@
-.scene-switcher { padding: 16px 14px 10px; border-bottom: 1px solid var(--line); }
-.scene-switcher > label, .outliner-heading { font-size: var(--font-small); letter-spacing: .1em; color: var(--text-secondary); font-weight: 650; }
+.scene-switcher { padding: 14px 12px 10px; border-bottom: 1px solid var(--line); }
+.scene-switcher > label, .outliner-heading { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em; color: var(--ink); font-weight: 600; text-transform: uppercase; }
+.scene-switcher > label::before, .outliner-heading::before { width: 4px; height: 4px; background: var(--accent); content: ""; flex: none; }
+.scene-switcher > label::after { flex: 1; height: 1px; background: var(--line); content: ""; }
 .scene-switcher > div, .shot-switcher { display: flex; align-items: center; gap: 6px; margin-top: 7px; }
-.scene-switcher select, .shot-switcher select, .shot-properties select { min-width: 0; width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--field); color: var(--ink); font: inherit; font-size: var(--font-ui); }
-.scene-switcher > input { width: 100%; margin-top: 7px; padding: 4px 2px; border: 0; background: transparent; font: inherit; font-size: var(--font-ui); color: var(--text-secondary); }
+.scene-switcher select, .shot-switcher select, .shot-properties select { min-width: 0; width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--field); color: var(--ink); font: inherit; font-size: var(--font-ui); box-shadow: var(--shadow-card); }
+.scene-switcher input { flex: 1; min-width: 0; padding: 7px 9px; border-color: var(--ink); border-radius: var(--radius-control); font-size: var(--font-ui); }
 .scene-switcher button, .shot-switcher button { flex: none; width: 28px; height: 28px; padding: 0; }
-.scene-switcher > button { width: auto; height: auto; padding: 0; font-size: var(--font-small); color: var(--accent); }
+.scene-switcher > button { width: auto; height: auto; padding: 0; font-size: var(--font-small); color: var(--text-secondary); }
 .shot-switcher { padding: 9px 12px 0; margin: 0; }
-.outliner-heading { display: flex; align-items: center; justify-content: space-between; padding: 15px 8px 5px; }
-.outliner-heading button { padding: 0 5px; font-size: 17px; }
+.outliner-heading { justify-content: space-between; padding: 14px 8px 5px; }
+.outliner-heading > span { display: flex; align-items: center; gap: 6px; }
+.outliner-heading button { margin-left: auto; padding: 0 5px; font-size: 17px; }
 .add-camera-button { margin: 12px; width: calc(100% - 24px); }
 .shot-properties > label { display: grid; gap: 7px; font-size: var(--font-ui); margin-bottom: 12px; }
-.timeline-group { display: flex; align-items: center; gap: 14px; min-height: 22px; padding: 0 16px 0 20px; border-bottom: 1px solid var(--line); color: var(--text-secondary); background: var(--surface-raised); font-size: var(--font-small); letter-spacing: .06em; }
-.timeline-group > span { color: var(--text-secondary); font-size: var(--font-small); letter-spacing: 0; }
+.timeline-group { display: flex; align-items: center; gap: 14px; min-height: 22px; padding: 0 16px 0 20px; border-bottom: 1px solid var(--line); color: var(--ink); background: var(--surface-raised); font-family: var(--font-mono); font-size: 10px; font-weight: 600; letter-spacing: .1em; }
+.timeline-group > span { color: var(--muted); font-family: var(--font-body); font-size: var(--font-small); font-weight: 400; letter-spacing: 0; }
 .timeline-group > button { margin-left: auto; height: 21px; padding: 2px 7px; font-size: var(--font-small); }
 .shot-row .track-label, .shot-row .track-lane { height: 38px; }
 .shot-row .track-label > span { display: grid; text-align: left; gap: 3px; }
-.shot-row small { color: var(--text-secondary); font-size: var(--font-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.shot-row .track-label.selected { background: var(--selection); color: var(--selection-ink); }
-.shot-range { position: absolute; top: 5px; justify-content: flex-start; height: 27px; min-width: 8px; padding: 0 12px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-raised); color: var(--text-secondary); font-size: var(--font-small); cursor: grab; touch-action: none; }
-.shot-range.selected { border-color: var(--focus-ring); background: var(--selection); color: var(--selection-ink); }
+.shot-row small { color: var(--muted); font-family: var(--font-mono); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shot-row .track-label.selected { background: var(--selection); color: var(--selection-ink); box-shadow: inset 3px 0 0 var(--accent); }
+.shot-range { position: absolute; top: 5px; justify-content: flex-start; height: 27px; min-width: 8px; padding: 0 12px; overflow: hidden; border: var(--ink-line); border-left: 3px solid var(--ink); border-radius: 4px; background: var(--field); color: var(--ink); font-size: var(--font-small); font-weight: 550; box-shadow: var(--shadow-card); cursor: grab; touch-action: none; }
+.shot-range.selected { border-color: var(--film-dark); border-left: 3px solid var(--accent); background: var(--film-dark); color: var(--film-ink); }
 .shot-range.dragging { cursor: grabbing; }
 .shot-range > span:not(.clip-edge) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
 .shot-actions, .camera-shot-links { display: flex; align-items: center; gap: 6px; }
 .camera-shot-links { flex-wrap: wrap; margin: 4px 0 16px; }
-.camera-shot-links button { padding: 5px 8px; border: 1px solid var(--line); border-radius: var(--radius-control); color: var(--text-secondary); font-size: var(--font-small); }
-.camera-shot-links button.selected { background: var(--selection); color: var(--selection-ink); border-color: var(--focus-ring); }
+.camera-shot-links button { padding: 5px 8px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--field); color: var(--text-secondary); font-size: var(--font-small); box-shadow: var(--shadow-card); }
+.camera-shot-links button.selected { background: var(--film-dark); color: var(--film-ink); border-color: var(--film-dark); box-shadow: inset 3px 0 0 var(--accent); }
 .camera-shot-links svg { width: 13px; height: 13px; }
 .shot-properties input#shotName { padding: 7px 9px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--field); color: var(--ink); font: inherit; }
-.empty-stage { position: absolute; top: 34%; left: 10%; right: 36%; padding: 22px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--radius-dialog); max-width: 350px; }
-.empty-stage h2 { margin: 0 0 9px; font-size: 23px; font-weight: 520; }
+.empty-stage { position: absolute; top: 34%; left: 10%; right: 36%; padding: 22px; background: linear-gradient(90deg, var(--accent) 0 44px, var(--film-dark) 44px 100%) no-repeat top / 100% 4px, var(--paper); border: var(--ink-line); border-radius: var(--radius-dialog); box-shadow: var(--viewport-shadow); max-width: 350px; }
+.empty-stage h2 { margin: 0 0 9px; font-family: var(--font-display); font-size: 24px; font-weight: 500; }
 .empty-stage p { color: var(--text-secondary); font-size: var(--font-body); line-height: 1.6; }
 .empty-stage button { margin-top: 8px; }
 .scene-context-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

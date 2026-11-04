@@ -1,5 +1,5 @@
 import type { VideoManifest } from '../../src/look/handoff.ts';
-import { handoffPath, museInstruction, videoPrompt } from '../../src/look/handoff.ts';
+import { handoffPath, MUSE_URL, museInstruction, videoPrompt } from '../../src/look/handoff.ts';
 
 const escape = (value: string) => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
 export function handoffPage(manifest: VideoManifest, token: string, createdAt: number, origin: string): string {
@@ -10,7 +10,8 @@ export function handoffPage(manifest: VideoManifest, token: string, createdAt: n
   .storyboards{display:grid;gap:22px}.storyboards img{aspect-ratio:auto;height:auto}.opening{max-width:720px;margin:16px 0 24px}details{margin:24px 0}summary{cursor:pointer;font-size:17px;margin-bottom:16px}
   </style></head><body><main><header><strong>LittleTake</strong><small>READ-ONLY REFERENCES</small></header>
   <h1>${escape(manifest.shot.name)}</h1><p class="muted">${escape(manifest.scene)} · ${manifest.shot.duration.toFixed(2)} seconds · ${manifest.shot.fps} fps</p>
-  <div class="tools"><a class="button" href="https://muse.ai/" target="_blank" rel="noopener noreferrer">Open Muse</a><a class="button secondary" href="${base}package.zip" download>Download all references</a><a class="button secondary" href="${href('manifest.json')}">Manifest JSON</a><a class="button secondary" href="${href('brief.md')}">Brief text</a></div>
+  <p>Render this shot as a video using the prompt below, the storyboard in time order and the linked reference images.</p>
+  <div class="tools"><a class="button" href="${MUSE_URL}" target="_blank" rel="noopener noreferrer">Open Muse</a><a class="button secondary" href="${base}package.zip" download>Download all references</a><a class="button secondary" href="${href('manifest.json')}">Manifest JSON</a><a class="button secondary" href="${href('brief.md')}">Brief text</a></div>
   ${firstFrame ? `<h2>First frame</h2><p class="muted">Attach this image for the opening composition, then attach every storyboard page below.</p><figure class="opening"><a href="${href(firstFrame)}"><img src="${href(firstFrame)}" alt="Opening composition at 0.00 seconds"></a><figcaption><span>0.00 s · First frame</span><a href="${href(firstFrame)}" download>Download first frame</a></figcaption></figure>` : ''}
   ${pages.length ? `<h2>Storyboards · ${pages.length} page${pages.length === 1 ? '' : 's'}</h2><p class="muted">Read left to right, then top to bottom, in page order. Panel times below are seconds from this shot's start. Keep the grid and labels out of the finished video.</p><div class="storyboards">${pages.map((page, index) => `<figure><a href="${href(page.file)}"><img loading="lazy" src="${href(page.file)}" alt="Storyboard page ${index + 1}, frames ${page.frames[0].index} through ${page.frames.at(-1)!.index}"></a><figcaption><span>Page ${index + 1} · ${page.frames.map(frame => `${frame.index}: ${frame.at.toFixed(2)} s`).join(' · ')}</span><a href="${href(page.file)}" download>Download page</a></figcaption></figure>`).join('')}</div><details><summary>Individual source & styled images</summary>` : '<h2>Shot frames in time order</h2>'}
   <p class="muted">Times are relative to this shot. Styled images guide appearance; previs images define composition and blocking.</p>

@@ -5,7 +5,7 @@ export const videoExportIssue = (): string | null => !window.isSecureContext
   ? 'Video export needs HTTPS or localhost. Open this editor on localhost, or use an HTTPS address.'
   : !('VideoEncoder' in window) ? 'This browser does not support video encoding. Use a current Chrome or Edge browser.' : null;
 
-export async function exportPNG(renderer: ShotRenderer, time: number): Promise<Blob> {
+export async function exportPNG(renderer: Pick<ShotRenderer, 'render'>, time: number): Promise<Blob> {
   const canvas = renderer.render(time);
   return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('The image could not be encoded.')), 'image/png'));
 }

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { AIError } from '../ai/provider.ts';
 import { appearanceImagesSchema } from '../../src/appearance/model.ts';
 import { Resvg } from '@resvg/resvg-js';
+import { storyboardStyleIds, storyboardStyles } from '../../src/look/styles.ts';
 
 /** Muse Image keeps the proxy camera/blocking and stages the requested character performance. */
 export const LOOK_LIMITS = { maxImageBytes: 1_400_000, maxBodyBytes: 18_000_000, maxDirection: 600, maxSubjects: 40 } as const;
@@ -28,7 +29,9 @@ const frameInput = z.strictObject({
 const vec3 = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
 const storyboardInput = z.strictObject({
   layout: z.literal('2x2'),
-  direction: z.string().trim().min(1).max(LOOK_LIMITS.maxDirection),
+  direction: z.string().trim().max(LOOK_LIMITS.maxDirection),
+  stylePreset: z.enum(storyboardStyleIds).optional(),
+  performance: z.strictObject({ prompt: z.string().max(4000), beats: z.array(z.strictObject({ at: z.number().min(0).max(60), action: z.string().max(1000) })).max(8) }).optional(),
   panels: z.array(z.strictObject({
     at: z.number().min(0).max(60), frame: dataURL, note: z.string().trim().max(600),
     subjects: z.array(subject).max(LOOK_LIMITS.maxSubjects),
@@ -103,7 +106,9 @@ function storyboardPrompt(input: StoryboardInput): string {
       return `${['TOP LEFT', 'TOP RIGHT', 'BOTTOM LEFT', 'BOTTOM RIGHT'][i]}, ${panel.at.toFixed(2)}s: ${cast || 'Follow the visible proxy scene.'}.${panel.note ? ` Performance: ${panel.note}` : ''}`;
     }),
     'Bounds are measured within each individual panel from its top-left corner. They specify placement and body scale, not rigid limb outlines. Reproduce the visible backgrounds and exact screen relationships; objects hidden behind other objects remain hidden. A 15%-height figure must not become a 50%-height hero. The cast list and projected bounds describe the 3D scene, NOT a checklist of people to make visible. A named subject can be fully behind another person or landmark in a particular quadrant: in that case paint none of that subject, even when its action is described. Keep partially occluded bodies behind the same occluder. Only the visible source pixels determine visibility. Where a whole body and its feet are visible in the source, draw the whole body through the feet with the same ground contact and surrounding margin; do not fade the legs, paint a bust or substitute a closer crop.',
-    `STORY AND STYLE: ${input.direction}`,
+    input.stylePreset ? `Visual treatment: ${storyboardStyles[input.stylePreset].direction}` : '',
+    input.performance && `Shot story: ${input.performance.prompt}\nTimed actions: ${input.performance.beats.map(beat => beat.at.toFixed(2) + ' s: ' + beat.action).join(' | ')}`,
+    input.direction && `Creator's additional direction: ${input.direction}`,
     'PERFORMANCE: replace mannequin anatomy with believable anatomy. Act out the story through bent joints, weight, torso/head motion, gaze and expressions at the existing staging positions and scale. A rigid proxy is not an instruction to freeze. Follow the timed action directions above; maintain cause and effect and prop continuity. Keep explicitly still poses still and rigid props rigid. Do not invent new events when no action is given. Do not change the camera to show a face or action more clearly.',
     'The proxy construction is NOT the anatomy: replace straight cylindrical limbs, block feet and plank-like wings with articulated human/creature bodies, muscles, joints and natural wing membranes in the requested style. Preserve the stage location and the body\'s physical size, not the mannequin pose. In an action scene show the specified anticipation, execution and recovery; no identical neutral stance across all four moments. Keep toy-like construction only if the creator explicitly requests it.',
     input.style ? `@Image${next++} defines only the visual style and palette, not the composition or subjects.` : '',

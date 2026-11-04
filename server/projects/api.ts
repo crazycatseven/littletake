@@ -13,6 +13,8 @@ const inputSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('release') }),
   z.strictObject({ action: z.literal('save'), savedVersion: z.number().int().positive(), project: z.unknown() }),
   z.strictObject({ action: z.literal('edit'), id: z.uuid(), revision: z.number().int().nonnegative(), changes: z.array(changeSchema).min(1).max(50000) }),
+  z.strictObject({ action: z.literal('rename'), name: z.string().trim().min(1).max(120) }),
+  z.strictObject({ action: z.literal('delete'), name: z.string().min(1).max(120) }),
 ]);
 const json = (value: unknown, status = 200) => Response.json(value, { status,
   headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
@@ -107,6 +109,8 @@ export function createProjectRoomsHandler(store: ProjectRoomStore, workspace: Wo
       const input = inputSchema.parse(JSON.parse((await readBytes(request, MAX_PROJECT_SIZE * 2 + 4096)).toString('utf8')));
       if (input.action === 'create') return json(store.create(input.id, lease, input.project, input.sourceCode, [], page), 201);
       if (!code) throw new ProjectRoomError('code_required', 'Enter a project code to join.', 400);
+      if (input.action === 'rename') return json(store.rename(code, lease, input.name, page));
+      if (input.action === 'delete') { store.remove(code, lease, input.name, page); return json({ deleted: true }); }
       if (input.action === 'claim') return json(store.claim(code, lease, page));
       if (input.action === 'heartbeat') return json(store.heartbeat(code, lease, page));
       if (input.action === 'release') return json(store.release(code, lease, page));

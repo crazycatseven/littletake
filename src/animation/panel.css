@@ -1,6 +1,6 @@
 .property-key { width:20px; height:20px; padding:0; color:var(--muted); font-size:14px; line-height:1; }
 .property-key.animated { color:var(--selection-ink); }
-.property-key.on-key { color:var(--accent); background:var(--selection); }
+.property-key.on-key { color:var(--accent-text); background:var(--selection); }
 .property-key:hover:not(:disabled) { background:var(--surface-hover); }
 .property-label-key { display:flex; align-items:center; justify-content:space-between; }
 .transform-key-actions { display:flex; align-items:center; gap:4px; }
@@ -36,5 +36,5 @@
 .animation-take { position:absolute; top:6px; height:18px; border:1px solid var(--line); border-radius:3px; background:var(--surface-raised); color:var(--text-secondary); font-size: var(--font-small); padding:2px 5px; cursor:grab; touch-action:none; overflow:hidden; }
 .animation-take span { position:absolute; top:0; bottom:0; width:7px; background:var(--surface-pressed); cursor:ew-resize; }
 .animation-take [data-take-edge="left"] { left:0; }.animation-take [data-take-edge="right"] { right:0; }
-.take-refine { position:absolute; top:5px; z-index:5; width:22px; height:22px; padding:3px; background:var(--surface-raised); color:var(--accent); border:1px solid var(--line); border-radius:4px; }
-.take-refine:hover,.take-refine:focus-visible { background:var(--surface-pressed); border-color:var(--accent); }
+.take-refine { position:absolute; top:5px; z-index:5; width:22px; height:22px; padding:3px; background:var(--surface-raised); color:var(--accent-text); border:1px solid var(--line); border-radius:4px; }
+.take-refine:hover,.take-refine:focus-visible { background:var(--selection); border-color:var(--ink); }

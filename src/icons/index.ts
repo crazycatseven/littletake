@@ -4,7 +4,7 @@ import {
   CircleHelp, Clock, Clapperboard, CodeXml, Cone, Copy, Cylinder, Diamond,
   Download, Ellipsis, Eye, EyeOff, FileText, Focus, Folder, FolderOpen, GripHorizontal, GripVertical,
   Group, Image, Keyboard, LayoutGrid, Link2, ListTree, LoaderCircle, LogOut,
-  Maximize, Menu, Minus, Move3d, Navigation, Package, PanelBottom, Pause,
+  Maximize, Menu, Minus, Move3d, Navigation, Package, PanelBottom, Pause, Pencil,
   PersonStanding, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Rotate3d,
   RotateCcw, Save, Scaling, Search, Send, Settings2, SkipBack, SkipForward, Sparkles,
   Spline, Square, Timer, Trash2, Undo2, Upload, Video, WandSparkles, X,
@@ -29,7 +29,7 @@ const icons = {
   link: Link2, path: Spline, group: Group, layers: Boxes, tree: ListTree,
   keyboard: Keyboard, send: Send, image: Image, file: FileText, film: Clapperboard,
   loader: LoaderCircle, exit: LogOut, navigate: Navigation, target: CircleDot,
-  clock: Clock, timer: Timer, wand: WandSparkles, search: Search,
+  clock: Clock, timer: Timer, wand: WandSparkles, search: Search, rename: Pencil,
 } satisfies Record<string, IconNode>;
 export type IconName = keyof typeof icons;
 const escape = (value: string | number) => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]!));

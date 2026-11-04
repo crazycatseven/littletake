@@ -287,3 +287,27 @@ test('project archives preserve animated scenes, chats and generated results thr
   store.release(imported.code, viewer, newPage);
   assert.equal(store.claim(imported.code, editor, randomUUID()).editing, 'you', 'every page opens independently');
 });
+
+test('renaming keeps the scenes and deletion removes only the named project', async t => {
+  const store = new ProjectRoomStore(await mkdtemp(path.join(tmpdir(), 'littletake-project-remove-')));
+  t.after(() => store.close());
+  const handle = createProjectRoomsHandler(store), lease = randomUUID();
+  const keep = createProject(); keep.name = 'Keep me';
+  const drop = createProject(); drop.name = 'Remove me';
+  const kept = await room(await handle(request({ action: 'create', id: randomUUID(), project: keep }, undefined, lease)), 201);
+  const doomed = await room(await handle(request({ action: 'create', id: randomUUID(), project: drop }, undefined, lease)), 201);
+  const output = { id: randomUUID(), kind: 'shot-render' as const, sceneId: doomed.project.scenes[0].id, shotId: doomed.project.scenes[0].shots[0].id, name: 'Still', mime: 'image/png' as const };
+  store.saveOutput(doomed.code, lease, output, new Uint8Array([1, 2, 3]));
+  const renamed = await room(await handle(request({ action: 'rename', name: '  Kept project  ' }, kept.code, lease)));
+  assert.equal(renamed.project.name, 'Kept project');
+  assert.equal(renamed.project.scenes[0].id, kept.project.scenes[0].id);
+  assert.equal((await handle(request({ action: 'delete', name: 'Remove' }, doomed.code, lease))).status, 409);
+  assert.equal(store.get(doomed.code).project.scenes[0].id, doomed.project.scenes[0].id);
+  assert.equal(store.readOutput(doomed.code, output.id).data[0], 1);
+  assert.equal((await handle(request({ action: 'delete', name: 'Remove me' }, doomed.code, lease))).status, 200);
+  assert.equal((await handle(request(undefined, doomed.code))).status, 404);
+  assert.throws(() => store.readOutput(doomed.code, output.id));
+  assert.equal(store.get(kept.code).project.name, 'Kept project');
+  assert.equal(store.get(kept.code).project.scenes[0].id, kept.project.scenes[0].id);
+  assert.equal(store.list().some(item => item.id === doomed.id), false);
+});

@@ -74,4 +74,23 @@ test('a protected server keeps projects and results across restart; public shot 
   const revoked = await get(`/api/handoffs?code=${code}&id=${id}&revoke=1`, { method: 'POST', headers }); assert.equal(revoked.status, 200);
   for (const resource of ['', 'manifest.json', manifest.frames[0].file, manifest.storyboards[0].file, 'package.zip']) assert.equal((await get(base + resource)).status, 410, 'withdrawing a link also withdraws its raw media');
   assert.equal((await get(`/api/projects?code=${code}`, { headers })).status, 200, 'withdrawing references does not delete the project');
+
+  const local = await startApplication({ port: 0, env: { ...env, LITTLETAKE_MODE: 'local', LITTLETAKE_PUBLIC_WORKSPACE: '1', LITTLETAKE_CLOUD_URL: server.origin,
+    LITTLETAKE_CLOUD_PASSWORD: 'test-workspace-only', LITTLETAKE_DATA_DIR: await mkdtemp(path.join(tmpdir(), 'littletake-local-share-')) } });
+  t.after(() => local.close());
+  const localRoom = local.projects.openCloud(server.projects.bundle(room.id), server.origin, lease, page);
+  assert.notEqual(localRoom.code, code);
+  const remoteLinkId = randomUUID(), relay = local.origin + '/api/cloud-projects?handoff=1&code=' + localRoom.code;
+  const publishFromLocal = (token: string) => fetch(relay + '&id=' + remoteLinkId, { method: 'POST', headers: { 'Content-Type': 'application/zip', 'x-littletake-edit-lease': token, 'x-littletake-edit-page': page }, body: archive });
+  assert.equal((await publishFromLocal(randomUUID())).status, 403);
+  const linked = await publishFromLocal(lease); assert.equal(linked.status, 201);
+  const shared: HandoffReceipt = await linked.json();
+  assert.deepEqual(await (await publishFromLocal(lease)).json(), shared);
+  const pageUrl = '/s/' + shared.token + '/';
+  assert.equal((await fetch(server.origin + pageUrl + manifest.storyboards[0].file)).status, 200);
+  assert.equal((await fetch(local.origin + pageUrl)).status, 404, 'the published snapshot lives on the cloud server');
+  assert.equal(server.projects.get(code).contentVersion, restored.contentVersion, 'publishing shot references does not overwrite the cloud project');
+  assert.ok((await (await fetch(relay, { headers })).json()).some((r: HandoffReceipt) => r.id === shared.id));
+  const withdrawn = await fetch(relay + '&id=' + remoteLinkId + '&revoke=1', { method: 'POST', headers });
+  assert.equal(withdrawn.status, 200); assert.equal((await fetch(server.origin + pageUrl)).status, 410);
 });

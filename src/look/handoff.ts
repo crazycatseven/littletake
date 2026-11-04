@@ -31,4 +31,19 @@ export function videoPrompt(shot: { duration: number }, brief: VideoManifest['br
 }
 export interface HandoffReceipt { id: string; token: string; sceneId: string; shotId: string; name: string; createdAt: number; revokedAt: number | null }
 export const handoffPath = (token: string) => `/s/${token}/`;
-export const museInstruction = (url: string) => `Open ${url} and read the full prompt. Download and attach the first-frame image, every numbered storyboard page and all object appearance references as actual image inputs. Apply each appearance image only to its named objects; use its primary/detail label and appearance notes. Read each storyboard left to right, then top to bottom, in page order; the reference page and manifest give each panel's time in seconds from this shot's start. They are successive moments of one continuous video. Preserve composition, action timing, character identity and the requested look; do not render the grid, labels, numbers or a slideshow. Only images are supplied, not an input video. If you cannot open the link or attach all the images, ask me to upload the original images directly.`;
+export const MUSE_URL = 'https://muse.ai/';
+export const museInstruction = (url: string) => `Render this shot as a video using the prompt, storyboard and reference images on this page:\n${url}`;
+
+/** Never hand a device-local or private-network address to an external Muse conversation. */
+export function isPublicHandoffUrl(value: string): boolean {
+  const url = new URL(value), host = url.hostname.toLowerCase().replace(/\.$/, '');
+  if (url.protocol !== 'https:' || url.username || url.password) return false;
+  if (host.startsWith('[')) return /^\[[23][0-9a-f]{3}:/.test(host);
+  if (!host.includes('.') || /\.(?:localhost|local|internal|lan|test)$/.test(host)) return false;
+  const ip = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(host);
+  if (!ip) return true;
+  const first = Number(ip[1]), second = Number(ip[2]);
+  return ![0,10,127].includes(first) && first < 224 && !(first === 192 && second === 168)
+    && !(first === 169 && second === 254) && !(first === 172 && second >= 16 && second <= 31)
+    && !(first === 100 && second >= 64 && second <= 127);
+}

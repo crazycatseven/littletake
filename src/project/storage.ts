@@ -4,13 +4,14 @@ import type { SceneDocument, ProjectContent } from '../types.ts';
 import { validateProjectContent } from './model.ts';
 import { conversationsSchema, createConversations, type ConversationBook } from '../scene-edit/conversations.ts';
 import { migrateAssetValue } from '../assets/model.ts';
+import { storyboardStyleIds, type StoryboardStyle } from '../look/styles.ts';
 
 export const PROJECT_STORAGE_KEY = 'littletake.project.v1';
 const LEGACY_SCENE_KEY = 'littletake.scene.v1';
 export const MAX_PROJECT_SIZE = 20_000_000;
 export interface ProjectDocument extends ProjectContent {
   format: 'LittleTake.project'; version: 3; activeSceneId: string | null; activeShotId: string | null; revision: number; conversations: ConversationBook;
-  lookSettings?: Record<string, { direction: string; anchorId: string | null; styleId: string | null }>;
+  lookSettings?: Record<string, { direction: string; anchorId: string | null; styleId: string | null; stylePreset?: StoryboardStyle }>;
 }
 const projectSchema = z.strictObject({
   format: z.literal('LittleTake.project'), version: z.literal(3), name: z.string(), scenes: z.array(z.unknown()),
@@ -18,7 +19,7 @@ const projectSchema = z.strictObject({
   revision: z.number().int().nonnegative(), conversations: conversationsSchema,
   assets: z.array(z.unknown()).max(1000).optional(),
   scripts: z.array(z.unknown()).max(64).optional(),
-  lookSettings: z.record(z.string().max(120), z.strictObject({ direction: z.string().max(600), anchorId: z.uuid().nullable(), styleId: z.uuid().nullable() })).optional(),
+  lookSettings: z.record(z.string().max(120), z.strictObject({ direction: z.string().max(600), anchorId: z.uuid().nullable(), styleId: z.uuid().nullable(), stylePreset: z.enum(storyboardStyleIds).optional() })).optional(),
 });
 export function createProject(scene: SceneDocument | null = createDocument()): ProjectDocument {
   return { format: 'LittleTake.project', version: 3, name: scene?.name ?? 'Untitled project', scenes: scene ? [scene] : [],

@@ -2,26 +2,55 @@
 .shot-export-dialog [hidden] { display:none !important; }
 .shot-export-dialog::backdrop { background:var(--backdrop); backdrop-filter:none; }
 .export-heading { display:flex; align-items:center; justify-content:space-between; }
-.export-heading small { font-size:9px; letter-spacing:.15em; color:var(--muted); }
 .export-heading h2 { font-size:23px; font-weight:500; margin:6px 0; }
 .export-heading button { font-size:16px; }
 .export-subtitle { color:var(--muted); margin:0 0 20px; font-size:12px; }
 .export-layout { display:grid; grid-template-columns:minmax(0,1.65fr) minmax(220px,1fr); gap:24px; }
 .export-preview { aspect-ratio:16/9; border-radius:var(--radius-panel); overflow:hidden; background:var(--field); border:1px solid var(--line); }
 .export-preview canvas,.export-preview img,.export-preview video { display:block; width:100%; height:100%; object-fit:contain; }
-.export-frame-caption { color:var(--muted); font-size:11px; margin-top:9px; }
+.export-monitor { min-width:0; }
+.render-timeline { margin-top:14px; border:1px solid var(--line); border-radius:var(--radius-panel); padding:10px 14px; background:var(--surface-raised); }
+.render-time-header,.render-time-header > div,.render-time-header label,.render-time-footer { display:flex; align-items:center; gap:8px; }
+.render-time-header,.render-time-footer { justify-content:space-between; }
+.render-time-header { min-height:28px; flex-wrap:wrap; margin-bottom:8px; font-size:12px; }
+.render-time-header strong { font-weight:550; }
+.render-time-header label,.render-time-footer { color:var(--muted); font-size:11px; }
+.render-time-header input[type=number] { width:58px; padding:3px 5px; text-align:center; color:var(--ink); background:var(--field); border:1px solid var(--line); border-radius:4px; font:inherit; }
+.render-time-header button { padding:3px 6px; font-size:11px; }
+.render-shot-strip { position:relative; height:24px; background:var(--field); border-radius:4px; overflow:hidden; }
+.render-shot-strip button { position:absolute; height:100%; min-width:0; display:block; border:0; border-right:1px solid var(--line); border-radius:0; background:var(--surface-raised); padding:0 6px; font-size:10px; text-align:left; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
+.render-shot-strip button[aria-pressed=true] { background:var(--selection); color:var(--accent-text); }
+.render-scrub { position:relative; height:25px; }
+.render-ticks { display:flex; justify-content:space-between; color:var(--muted); font-size:10px; font-variant-numeric:tabular-nums; user-select:none; }
+.render-ticks span { position:relative; }
+.render-scrub input { position:absolute; inset:0; width:100%; height:100%; opacity:0; margin:0; cursor:ew-resize; touch-action:none; }
+.render-scrub:focus-within { outline:1px solid var(--accent); outline-offset:2px; }
+.render-scrub::before,.render-scrub::after { content:''; position:absolute; z-index:1; left:var(--render-cursor); pointer-events:none; }
+.render-scrub::before { width:2px; top:20px; height:29px; background:var(--accent); transform:translateX(-1px); }
+.render-scrub::after { top:15px; width:9px; height:8px; background:var(--accent); clip-path:polygon(0 0,100% 0,100% 45%,50% 100%,0 45%); transform:translateX(-50%); }
+.render-trim { position:relative; height:22px; margin:3px 0 9px; border-radius:3px; background:var(--field); touch-action:none; user-select:none; }
+.render-trim-band { position:absolute; inset-block:0; left:var(--trim-start); right:calc(100% - var(--trim-end)); background:var(--selection); border-block:1px solid var(--accent); cursor:grab; }
+.render-trim-band:active { cursor:grabbing; }
+.render-trim button { position:absolute; top:-1px; bottom:-1px; width:12px; padding:0; border:0; border-radius:3px; background:var(--accent); cursor:ew-resize; touch-action:none; }
+.render-trim button::after { content:''; width:2px; height:10px; background:var(--field); border-radius:2px; }
+.render-trim button:hover:not(:disabled) { background:var(--accent); }
+.render-trim [data-part=start] { left:var(--trim-start); transform:translateX(-100%); }
+.render-trim [data-part=end] { left:var(--trim-end); }
+.render-trim button:focus-visible,.render-shot-strip button:focus-visible { outline:2px solid var(--ink); outline-offset:-2px; z-index:1; }
+.render-time-footer { margin-top:6px; font-variant-numeric:tabular-nums; }
+.render-time-footer span:first-child { color:var(--ink); }
 .export-settings { margin:0; padding:0; border:0; min-width:0; }
 .export-tabs { display:flex; gap:4px; border:1px solid var(--line); border-radius:var(--radius-control); padding:4px; margin-bottom:18px; }
 .export-tabs button { flex:1; font-size:12px; }
-.export-tabs [aria-selected=true] { background:var(--selection); color:var(--accent); }
-.export-settings label { display:block; font-size:11px; margin-top:14px; color:var(--muted); }
+.export-tabs [aria-selected=true] { background:var(--selection); color:var(--accent-text); }
+.export-settings label { display:block; font-size:12px; margin-bottom:14px; color:var(--muted); }
 .export-settings label[hidden] { display:none; }
 .export-settings select { display:block; width:100%; margin-top:6px; padding:9px 10px; border:1px solid var(--line); border-radius:var(--radius-control); background:var(--field); color:var(--ink); font:inherit; font-size:12px; }
-.export-range { font-size:11px; margin-top:16px; }
-.export-exclusions { font-size:10px; line-height:1.7; color:var(--muted); padding-top:12px; border-top:1px solid var(--line); }
+.export-range { font-size:11px; color:var(--muted); margin:4px 0; }
 .export-progress { margin-top:14px; font-size:10px; color:var(--muted); }
 .export-progress progress { width:100%; height:6px; accent-color:var(--accent); display:block; margin-bottom:6px; }
-.export-message { font-size:11px; line-height:1.6; color:var(--accent); overflow-wrap:anywhere; min-height:18px; margin-top:16px; }
+.export-message { font-size:11px; line-height:1.6; color:var(--accent-text); overflow-wrap:anywhere; min-height:18px; margin-top:16px; }
+.export-message:empty { display:none; }
 .export-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
 .export-actions a { display:inline-flex; align-items:center; text-decoration:none; font-size:12px; padding:8px 14px; border-radius:var(--radius-control); }
 .export-actions [hidden] { display:none; }

@@ -23,7 +23,7 @@ export interface ProjectRoom {
   cover?: ProjectCover | null;
 }
 
-export interface WorkspaceInfo { mode: 'local' | 'cloud'; cloudAvailable: boolean }
+export interface WorkspaceInfo { mode: 'local' | 'cloud'; cloudAvailable: boolean; publicOrigin?: string }
 
 export const projectOutputSchema = z.strictObject({
   id: z.uuid(), kind: z.enum(['shot-render', 'look-frame', 'storyboard', 'video-brief', 'reference-analysis', 'style-reference', 'appearance-reference', 'reference-media', 'final-video', 'diagnostic', 'asset-draft', 'scene-design']),

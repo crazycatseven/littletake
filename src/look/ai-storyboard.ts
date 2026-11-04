@@ -5,6 +5,7 @@ import type { Workspace } from '../project/workspace';
 import type { Shot } from '../types';
 import type { AppearanceImage } from '../appearance/model';
 import type { LookSubject, StoryboardInput } from '../../server/look/generate';
+import type { StoryboardStyle } from './styles';
 import { matchingLegacyStoryboardSource, splitStoryboardImage, type StoryboardFrame, type StoryboardPage } from './storyboard';
 
 const shotSchema = z.object({ name: z.string(), start: z.number(), duration: z.number() });
@@ -27,7 +28,7 @@ export const legacyStoryboardDraftSchema = z.strictObject({
 export type StoryboardDraft = z.infer<typeof storyboardDraftSchema>;
 export interface CapturedPanel { previs: string; input: string; subjects: LookSubject[]; visible: Set<string>; camera?: StoryboardInput['panels'][number]['camera'] }
 export interface StoryboardPanel { data: StoryboardDraft['panels'][number]; source: CapturedPanel }
-interface BoardReferences { direction: string; style?: string; appearance: AppearanceImage[] }
+interface BoardReferences { direction: string; style?: string; stylePreset?: StoryboardStyle; appearance: AppearanceImage[] }
 
 /** Four moments spanning the shot. Very short shots repeat frames rather than sampling outside it. */
 export function keyPanelTimes(shot: Pick<Shot, 'duration'>, fps: number): number[] {
@@ -49,7 +50,8 @@ export class AIStoryboard {
 
   constructor(readonly shot: Shot, readonly fps: number, private sceneId: string, private workspace: Workspace,
     private capture: (at: number) => CapturedPanel, private references: () => BoardReferences,
-    private changed: () => void, private message: (value: string) => void, private source?: string) {
+    private changed: () => void, private message: (value: string) => void, private source?: string,
+    private preparePerformance?: (signal: AbortSignal) => Promise<NonNullable<StoryboardInput['performance']>>) {
     this.room = workspace.room;
     this.draft = { format: 'LittleTake.storyboard', version: 2, shot: this.shotSnapshot(), panels: [], result: null };
   }
@@ -77,8 +79,9 @@ export class AIStoryboard {
   }
 
   private context() {
-    const { direction, appearance } = this.references(), visible = new Set(this.panels.flatMap(panel => [...panel.source.visible]));
+    const { direction, appearance, stylePreset } = this.references(), visible = new Set(this.panels.flatMap(panel => [...panel.source.visible]));
     return JSON.stringify({ direction: direction.trim(), styleId: this.workspace.lookSettings(this.sceneId).styleId,
+      ...(stylePreset && stylePreset !== 'scene' ? { stylePreset } : {}),
       appearance: appearance.filter(image => image.bindings.some(binding => visible.has(binding.objectId))).map(image => ({ id: image.id, updatedAt: this.room?.outputs.find(output => output.id === image.id)?.updatedAt ?? 0, bindings: image.bindings.filter(binding => visible.has(binding.objectId)) })) });
   }
 
@@ -138,17 +141,18 @@ export class AIStoryboard {
   async generate(signal: AbortSignal) {
     if (this.busy) return;
     signal.throwIfAborted();
-    const { direction, style, appearance } = this.references();
-    if (!direction.trim()) throw new Error('Describe what happens in the shot and the visual style first.');
+    const { direction, style, stylePreset, appearance } = this.references();
     this.busy = true; this.changed();
     try {
       // Capture the submitted settings before yielding; persistence failure never starts a paid call.
       const visible = new Set(this.panels.flatMap(panel => [...panel.source.visible])), context = this.context();
       const panels = this.panels.map(panel => ({ at: panel.data.at, note: panel.data.note.trim(), previs: panel.source.previs }));
-      const input: StoryboardInput = { layout: '2x2', direction: direction.trim(),
+      const input: StoryboardInput = { layout: '2x2', direction: direction.trim(), stylePreset,
         panels: this.panels.map(panel => ({ at: panel.data.at, note: panel.data.note.trim(), frame: panel.source.input, subjects: panel.source.subjects, camera: panel.source.camera })),
         ...(style ? { style } : {}), appearance: appearance.map(image => ({ ...image, bindings: image.bindings.filter(binding => visible.has(binding.objectId)) })).filter(image => image.bindings.length) };
       await this.persist(); signal.throwIfAborted();
+      if (this.preparePerformance) input.performance = await this.preparePerformance(signal);
+      signal.throwIfAborted();
       this.message('Generating all four panels together…');
       const response = await projectFetch('/api/look', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal, body: JSON.stringify(input) });
       const value = await response.json().catch(() => ({}));
@@ -158,7 +162,7 @@ export class AIStoryboard {
       if (!result.success) throw new Error('Muse returned no readable storyboard. Your previous image is kept.');
       this.draft.result = result.data;
       await this.persist();
-      this.message('Storyboard ready. Compare it with the proxy, then download or generate a video prompt.');
+      this.message('Storyboard ready.');
     } finally { this.busy = false; this.changed(); }
   }
 }

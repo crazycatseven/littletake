@@ -25,7 +25,8 @@ export async function createApplication(input: Record<string, string | undefined
   const handoffs = createHandoffsHandler(projects);
   const mode = env.LITTLETAKE_MODE ?? (env.LITTLETAKE_PUBLIC_URL ? 'cloud' : 'local');
   if (mode !== 'local' && mode !== 'cloud') { projects.close(); await depth.close(); throw new Error('LITTLETAKE_MODE must be local or cloud.'); }
-  const workspace = { mode, cloudAvailable: mode === 'local' && Boolean(env.LITTLETAKE_CLOUD_URL) } as const;
+  const workspace = { mode, cloudAvailable: mode === 'local' && Boolean(env.LITTLETAKE_CLOUD_URL),
+    ...(env.LITTLETAKE_PUBLIC_URL ? { publicOrigin: new URL(env.LITTLETAKE_PUBLIC_URL).origin } : {}) } as const;
   const handlers: Record<string, (request: Request) => Promise<Response>> = {
     '/api/reference': createReferenceHandler(env, undefined, request => {
       request.signal.throwIfAborted();

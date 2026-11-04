@@ -134,13 +134,20 @@ test('one-sheet generation persists, preserves prior results on failure/cancel, 
   let direction = 'Cinematic ink illustration. The hero braces, recoils and recovers, in warm sunset light.';
   let captureImage = source, renderState = JSON.stringify(scene);
   const capture = () => ({ previs: captureImage, input: captureImage, subjects: [], visible: new Set<string>() });
-  const open = () => new AIStoryboard(shot, 24, scene.id, workspace, capture, () => ({ direction, appearance: [] }), () => {}, () => {}, renderState);
+  let plans = 0;
+  const open = () => new AIStoryboard(shot, 24, scene.id, workspace, capture, () => ({ direction, stylePreset: 'pencil', appearance: [] }), () => {}, () => {}, renderState, async () => {
+    plans++;
+    return { prompt: 'The hero holds position and tracks the passing dragon.', beats: [{ at: 1, action: 'Turn to track the dragon.' }] };
+  });
   let board = open(); await board.load();
   assert.equal(board.panels.length, 4); assert.equal(requests.length, 0);
   const generate = () => board.generate(new AbortController().signal);
   failSave = true; await assert.rejects(generate(), /Upload interrupted/); assert.equal(requests.length, 0);
   failSave = false; await board.retrySave();
   await Promise.all([generate(), generate()]); assert.equal(requests.length, 1, 'concurrent clicks do not duplicate paid requests');
+  assert.equal(plans, 1, 'persistence failure and concurrent clicks do not trigger extra planning');
+  assert.match(String(requests[0].get('prompt')), /graphite/);
+  assert.match(String(requests[0].get('prompt')), /1\.00 s: Turn to track the dragon/);
   assert.ok(String(requests[0].get('prompt')).includes(direction), 'the editor story survives request validation and reaches Muse');
   assert.equal(board.complete, true); const original = board.result;
   await board.setTime(board.panels[1], .75); await board.setNote(board.panels[1], 'Warm rim light on the hero.');

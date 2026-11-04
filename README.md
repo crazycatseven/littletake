@@ -108,7 +108,7 @@ npm run dev
 
 Vercel deploys `main` to production and creates previews for other branches and pull requests.
 
-`npm run build && npm start` runs the production editor and persistent APIs together. Shot **Render → Prepare for Muse → Create reference link** publishes an immutable read-only reference page for a user to submit in Muse. **Import finished video** saves returned MP4/WebM output with its shot. Public sharing requires an externally reachable HTTPS deployment. See [server setup, migration and verification](server/app/README.md).
+`npm run build && npm start` runs the production editor and persistent APIs together. **Render → Storyboards → Render with Muse** prepares the selected storyboard and video prompt, publishes a fixed reference page, and copies a short request with its link. Open Muse and paste the request to send it. Public links use the hosted workspace or the connected cloud copy of a local project. A local-only workspace creates a local preview. **Renders → Import finished video** saves the returned MP4 or WebM. See [server setup, migration and verification](server/app/README.md).
 
 The studio includes six primitives, transform tools, an independent shot preview, editable property keyframes, local saves, JSON and PNG/WebM export, reference-video import and conversational Muse scene editing. The in-app **Shortcuts** panel lists navigation controls.
 

@@ -66,13 +66,13 @@ app.innerHTML = `
 <div class="storage-warning" id="storageWarning" role="alert" hidden><span></span><button data-action="export-project">Download your changes</button><button data-action="recover-storage" hidden>Download saved data</button><button data-action="open">Open project</button><button data-action="reload">Reload</button></div>
 <main class="workspace">
   <aside class="library-panel">
-    <div class="scene-switcher"><button data-action="open-scenes" title="Open Assets / Scenes">${icon('folder')} Assets / Scenes</button><div><select id="sceneSelect" aria-label="Active scene"></select><button data-action="add-scene" aria-label="New scene" title="New empty scene">${icon('plus')}</button></div><input id="sceneName" aria-label="Scene name" maxlength="120" placeholder="No scene yet"/></div>
+    <div class="scene-switcher"><button data-action="open-scenes" title="Open Assets / Scenes">${icon('folder')} Assets / Scenes</button><div><select id="sceneSelect" aria-label="Active scene"></select><input id="sceneName" aria-label="Scene name" maxlength="120" placeholder="No scene yet" hidden/><button data-action="rename-scene" aria-label="Rename scene" title="Rename scene">${icon('rename')}</button><button data-action="add-scene" aria-label="New scene" title="New empty scene">${icon('plus')}</button></div></div>
     <div class="library-tabs" role="tablist" aria-label="Library"><button id="objectsTab" role="tab" aria-controls="objectsPanel" aria-selected="true" data-library="objects">Objects<span id="objectCount"></span></button><button id="assetsTab" role="tab" aria-controls="assetPanel" aria-selected="false" data-library="assets">${icon('plus')}Add</button></div>
     <div id="objectsPanel" class="library-page" role="tabpanel" aria-labelledby="objectsTab"><input id="hierarchySearch" class="hierarchy-search" type="search" aria-label="Search objects" placeholder="Search objects…"/><div class="hierarchy-tools"><span id="selectionCount">0 selected</span><button data-action="hide-selection" title="Hide selected objects · H" aria-label="Hide selected objects">${icon('hidden')}</button><button data-action="show-selection" title="Show selected objects" aria-label="Show selected objects">${icon('eye')}</button></div><div id="outliner" class="outliner" aria-label="Scene objects"></div><button class="hierarchy-footer" id="visibilitySummary" data-action="show-all">All objects visible</button></div>
   </aside>
   <section class="stage-panel" aria-label="3D stage">
     <div class="viewport-heading"><div class="transform-tools" role="toolbar" aria-label="Transform tools"><button data-tool="translate" aria-label="Move tool" title="Move · G">${icon('move')}<span>Move</span></button><button data-tool="rotate" aria-label="Rotate tool" title="Rotate · R">${icon('rotate')}<span>Rotate</span></button><button data-tool="scale" aria-label="Scale tool" title="Scale · S">${icon('scale')}<span>Scale</span></button></div><div class="view-tools"><button data-action="ground" aria-label="Drop to surface" title="Drop to the floor or surface below · double-click the green Y handle">${icon('ground')}<span>Drop to surface</span></button><button data-action="focus" aria-label="Focus selection" title="Focus selection · F">${icon('focus')}<span>Focus</span></button><button data-action="reset-view" aria-label="Reset scene view" title="Reset view">${icon('retry')}<span>Reset view</span></button></div></div>
-    <div id="viewport" class="viewport"></div><div id="performanceBar" hidden></div><aside id="gettingStarted" class="getting-started" aria-label="Next steps" hidden><header><strong>Next steps</strong><button type="button" data-tips-close aria-label="Hide next steps" title="Hide next steps">${icon('close')}</button></header><ol><li><button type="button" data-tips-play>${icon('play')}Play</button> runs every shot in order. Pick a shot in the preview to look through one camera.</li><li><b>Move something:</b> draw a route with <b>+</b> next to Paths on the left, then give the object <b>Add Component → Follow Path</b>.</li><li><b>Change it in words:</b> tell Muse, for example “make shot 2 circle the hero”.</li><li><b>Render</b> at the top right saves a still or a video of the shot.</li></ol></aside><div id="emptyStage" class="empty-stage" hidden><h2>No scene</h2><p>Add a scene or describe one to Muse.</p><button data-action="build-with-muse" class="primary-button">Build with Muse</button></div>
+    <div id="viewport" class="viewport"></div><div id="performanceBar" hidden></div><aside id="gettingStarted" class="getting-started" aria-label="Next steps" hidden><header><button type="button" class="getting-started-toggle" data-tips-toggle aria-expanded="true" aria-controls="gettingStartedSteps">${icon('chevron-down')}<strong>Next steps</strong></button><button type="button" data-tips-close aria-label="Hide next steps" title="Hide next steps">${icon('close')}</button></header><ol id="gettingStartedSteps"><li><button type="button" data-tips-play>${icon('play')}Play</button> runs every shot in order. Pick a shot in the preview to look through one camera.</li><li><b>Move something:</b> draw a route with <b>+</b> next to Paths on the left, then give the object <b>Add Component → Follow Path</b>.</li><li><b>Change it in words:</b> tell Muse, for example “make shot 2 circle the hero”.</li><li><b>Render</b> at the top right saves a still or a video of the shot.</li></ol></aside><div id="emptyStage" class="empty-stage" hidden><h2>No scene</h2><p>Add a scene or describe one to Muse.</p><button data-action="build-with-muse" class="primary-button">Build with Muse</button></div>
     <section class="shot-panel" id="shotPanel" aria-label="Shot preview"><div class="shot-switcher shot-preview-header" data-preview-header><button class="shot-preview-grip" data-preview-drag aria-label="Move shot preview" title="Drag to move · Arrow keys to nudge · Double-click or Home to reset">${icon('grip')}</button><select id="shotSelect" aria-label="Active shot"></select><button data-action="add-shot" aria-label="New shot" title="New shot">${icon('plus')}</button><button class="shot-preview-collapse" data-preview-collapse aria-label="Collapse shot preview" aria-expanded="true" aria-controls="shotPreviewBody" title="Collapse shot preview"><span aria-hidden="true">${icon('chevron-down')}</span></button></div><div id="shotPreviewBody" class="shot-preview-body"><div class="shot-heading"><h2>${icon('camera')}<span>Shot preview</span></h2><button class="icon-button" data-action="expand-preview" aria-label="Expand shot preview" aria-expanded="false" title="Expand preview">${icon('expand')}</button></div><div id="previewDock"><div class="preview-frame" id="previewFrame"><div id="preview" class="preview"></div></div></div><div class="shot-footer"><span id="shotFrameStatus"><span class="live-dot"></span>Live · 16:9</span><div class="shot-footer-actions"><button data-action="pilot-camera" title="Fly this camera and record a take">${icon('camera')}Pilot</button><button data-action="edit-shot" id="lensLabel">Edit shot</button></div></div></div></section>
     <div class="viewport-caption"><span id="viewHint">Drag to orbit · Scroll to zoom</span></div>
     <div class="ai-preview-badge" id="aiPreviewBadge" role="status" hidden>Previewing Muse changes</div>
@@ -145,6 +145,7 @@ let time = 0;
 let playing = false;
 // First-time guidance in the viewport; hidden for good once closed in this browser.
 let tipsHidden=false;try{tipsHidden=localStorage.getItem('littletake.tips.hidden')==='1';}catch{}
+let tipsFolded=false;try{tipsFolded=localStorage.getItem('littletake.tips.folded')==='1';}catch{}
 let lastFrame = performance.now();
 let statusTimer: ReturnType<typeof setTimeout> | undefined;
 let stage: Stage;
@@ -343,8 +344,9 @@ function renderNavigation(){
   $('#sceneSelect').innerHTML=content.scenes.length?content.scenes.map(item=>'<option value="'+esc(item.id)+'" '+(item.id===scene.id?'selected':'')+'>'+esc(item.name)+'</option>').join(''):'<option value="">No scenes yet</option>';
   if(document.activeElement!==$('#sceneName'))$<HTMLInputElement>('#sceneName').value=scene===emptyView?'':scene.name;
   $<HTMLInputElement>('#sceneName').disabled=scene===emptyView||!!editPreview;
+  $('[data-action="rename-scene"]').toggleAttribute('disabled',scene===emptyView||!!editPreview);
   $('#shotSelect').innerHTML=(!shot?'<option value="">Camera preview</option>':'')+scene.shots.map(item=>'<option value="'+esc(item.id)+'" '+(item.id===shot?.id?'selected':'')+'>'+esc(item.name)+'</option>').join('');
-  $('#lensLabel').textContent=shot?'Edit '+shot.name:'Add a shot';
+  $('#lensLabel').textContent=shot?'Edit shot':'Add a shot';$('#lensLabel').title=shot?'Edit '+shot.name:'Add a shot';
   $('#emptyStage').hidden=content.scenes.length>0||!!editPreview;
   $('#gettingStarted').hidden=tipsHidden||!!editPreview||scene===emptyView||!scene.shots.length;
   $('[data-action="add-scene"]').toggleAttribute('disabled',!!editPreview);
@@ -511,7 +513,7 @@ function renderTime() {
   const doc=visibleScene(), shot=activeShot();
   const camera=shotCamera(doc,shot?.id??null)??doc.cameras.find(item=>item.id===selection.active)??doc.cameras[0];
   $('#shotFrameStatus').textContent=shot?(time<shot.start||time>shot.start+shot.duration?'Outside shot range':camera?.name+' · 16:9'):camera?camera.name+' · Preview':'No camera';
-  document.querySelectorAll<HTMLButtonElement>('[data-action="export-shot"]').forEach(button=>{button.disabled=!shot||!!editPreview||!!performanceSession||[...unkeyed.keys()].some(key=>key.startsWith(`${doc.id}|`));button.title=shot?'Render the current shot as a video or still image':'Add a shot to render';});
+  document.querySelectorAll<HTMLButtonElement>('[data-action="export-shot"]').forEach(button=>{button.disabled=!doc.shots.length||!!editPreview||!!performanceSession||[...unkeyed.keys()].some(key=>key.startsWith(`${doc.id}|`));button.title=doc.shots.length?'Render a frame, video range or storyboard':'Add a shot to render';});
   document.querySelectorAll<HTMLElement>('[data-current-time]').forEach(node=>node.textContent=timecode(time)); document.querySelectorAll<HTMLElement>('[data-end-time]').forEach(node=>node.textContent=timecode(doc.duration));
   const fraction=time/doc.duration*100;
   document.querySelectorAll<HTMLElement>('.lane-playhead').forEach(node=>node.style.left=`${fraction}%`);
@@ -1141,7 +1143,7 @@ app.addEventListener('click',event=>{
     case 'hide-selection':setHidden(selection.ids,true);break;
     case 'show-selection':showHierarchy(selection.ids);break;
     case 'show-all':setHidden(doc.objects.map(item=>item.id),false);break;
-    case 'export-shot':{const shot=activeShot();if(shot&&workspace){pause();flushFieldEdit();try{openShotExport(stage.createShotRenderer(shot.cameraId),shot,time,workspace);}catch(error){status((error as Error).message);}}break;}
+    case 'export-shot':{const shot=activeShot()??shotAtTime(visibleScene(),time)??visibleScene().shots[0];if(shot&&workspace){pause();flushFieldEdit();try{openShotExport(stage.createShotRenderer(shot.cameraId),shot,time,workspace);}catch(error){status((error as Error).message);}}break;}
     case 'edit-asset':{const item=entity();if(item&&'asset' in item&&item.asset){const asset=project.assets?.find(a=>a.id===item.asset!.id);if(asset)openAssetEditor(asset);}break;}
     case 'save-asset':saveSelectionAsset();break;
     case 'record-performance':void beginPerformance(true);break;
@@ -1166,6 +1168,7 @@ app.addEventListener('click',event=>{
     case 'export':downloadProject();break;
     case 'export-scene':exportScene();break;
     case 'add-scene':addScene();break;
+    case 'rename-scene':{const input=$<HTMLInputElement>('#sceneName');$('#sceneSelect').hidden=true;input.hidden=false;input.focus();input.select();break;}
     case 'open-scenes':assetsPanel?.showScenes();setBottomPanelTab('assets');break;
     case 'add-camera':addCamera();break;
     case 'add-shot':addShot();break;
@@ -1198,9 +1201,15 @@ app.addEventListener('click',event=>{
 });
 $<HTMLDialogElement>('#previewDialog').addEventListener('close',()=>{$('#previewDock').appendChild($('#previewFrame'));$('[data-action="expand-preview"]').setAttribute('aria-expanded','false');});
 $('#gettingStarted').querySelector('[data-tips-play]')!.addEventListener('click',()=>$<HTMLButtonElement>('#playButton').click());
+const foldTips=(folded:boolean)=>{tipsFolded=folded;$('#gettingStarted').classList.toggle('folded',folded);$('#gettingStarted').querySelector('[data-tips-toggle]')!.setAttribute('aria-expanded',String(!folded));};
+foldTips(tipsFolded);
+$('#gettingStarted').querySelector('[data-tips-toggle]')!.addEventListener('click',()=>{foldTips(!tipsFolded);try{localStorage.setItem('littletake.tips.folded',tipsFolded?'1':'0');}catch{}});
 $('#gettingStarted').querySelector('[data-tips-close]')!.addEventListener('click',()=>{tipsHidden=true;try{localStorage.setItem('littletake.tips.hidden','1');}catch{}$('#gettingStarted').hidden=true;});
 $('#previewDialog').addEventListener('keydown',event=>{if(event.code==='Space'){event.preventDefault();if(!event.repeat)togglePlay();}});
 $('#hierarchySearch').addEventListener('input',()=>{renderOutliner();renderSelection();});
+const closeSceneRename=()=>{$('#sceneName').hidden=true;$('#sceneSelect').hidden=false;};
+$('#sceneName').addEventListener('blur',closeSceneRename);
+$('#sceneName').addEventListener('keydown',event=>{if(event.key==='Enter'||event.key==='Escape'){event.preventDefault();closeSceneRename();$<HTMLSelectElement>('#sceneSelect').focus();}});
 document.addEventListener('pointerdown',event=>{document.querySelectorAll<HTMLDetailsElement>('details.studio-menu[open]').forEach(menu=>{if(!menu.contains(event.target as Node))menu.open=false;});});
 $('.library-tabs').addEventListener('keydown',event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();setLibraryTab(libraryTab==='objects'?'assets':'objects');$<HTMLButtonElement>(`[data-library="${libraryTab}"]`).focus();}});
 $('.bottom-panel-tabs').addEventListener('keydown',event=>{

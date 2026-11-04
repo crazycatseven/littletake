@@ -9,16 +9,17 @@ import { BRIEF_LIMITS, downloadStoryboardImage, referenceJPEG, renderStoryboards
 import { framedObjects, inPicture } from './subjects';
 import type { Workspace } from '../project/workspace';
 import { copyText } from '../clipboard';
-import { museInstruction, videoPrompt } from './handoff';
-import { MAX_OUTPUT_BYTES } from '../project/room';
+import { MUSE_URL, museInstruction, videoPrompt, type HandoffReceipt } from './handoff';
 import { loadAppearance } from '../appearance/images';
 import { appearanceFile, appearanceInstructions, type AppearanceImage } from '../appearance/model';
-import { AIStoryboard, type CapturedPanel } from './ai-storyboard';
+import { AIStoryboard, keyPanelTimes, type CapturedPanel } from './ai-storyboard';
 import { drawBoardPanel } from './board-panel';
 import { worldTransform } from '../placement/hierarchy';
 import { evaluateFov } from '../model';
 
-interface Frame { time: number; label: string; previs: string; boxes: Map<string, [number, number, number, number]>; result?: string; savedId?: string; message: string; state: 'waiting' | 'running' | 'done' | 'failed' }
+import { storyboardStyleIds, storyboardStyles, type StoryboardStyle } from './styles';
+
+interface Frame { time: number; previs: string; boxes: Map<string, [number, number, number, number]>; result?: string; savedId?: string }
 
 function toJPEG(source: CanvasImageSource, width: number, height: number, max: number): string {
   const scale = Math.min(1, max / Math.max(width, height)), canvas = document.createElement('canvas');
@@ -32,22 +33,53 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
   shot = structuredClone(shot);
   const doc = renderer.document, camera = doc.cameras.find(item => item.id === shot.cameraId)!;
   dialog.className = 'muse-preparation';
-  dialog.innerHTML = `<p class="look-subtitle"></p><div class="board-modes" role="tablist" aria-label="Storyboard style"><button role="tab" data-board-mode="proxy" aria-selected="true">Proxy storyboard</button><button role="tab" data-board-mode="ai" aria-selected="false">${icon('sparkles')} AI storyboard</button></div><div class="look-layout"><div><section data-proxy-board><p class="look-sampling">One frame every 0.5 s + the last frame · 9 frames per page</p><div class="look-storyboards" aria-live="polite"></div><details class="look-source-frames"><summary>First frame & individual images</summary><p>Download the 1920 × 1080 first frame separately for the opening composition.</p><div class="look-frames"></div></details></section><section class="ai-storyboard" hidden aria-label="AI storyboard panels"></section><button data-prepare hidden>Prepare storyboards</button></div>
-    <fieldset class="look-settings"><label>Story, action & style<textarea data-direction rows="5" maxlength="600" aria-describedby="storyboardDirectionHelp" placeholder="What happens in this shot? For example: a knight braces, ducks a dragon's swipe, then raises his sword to counterattack. Hand-painted fantasy, sunset light."></textarea></label><p id="storyboardDirectionHelp" class="look-sampling">Used to generate the storyboard. Describe what the subjects do and feel. The proxy guides camera and placement; Muse adds expressive poses and reactions. Set specific beats in the panel directions.</p>
-    <div data-ai-settings hidden><label>Style reference <span>(optional)</span><input type="file" accept="image/png,image/jpeg,image/webp"></label><p data-style-status class="look-sampling"></p><p class="look-sampling">Object references guide identity across all four panels. The style reference guides the overall visual treatment.</p></div>
-    <details class="look-prompt-section" open><summary>Video prompt <span>(for export)</span></summary><button data-brief>Generate prompt</button><p class="look-sampling">Muse reads the storyboard and motion to write the video prompt you export. To change the storyboard's action, edit Story, action & style above.</p><section class="look-brief"><div class="look-brief-head"><label for="museVideoPrompt">Prompt for Muse</label><button data-copy>Copy full prompt</button></div><textarea id="museVideoPrompt" data-prompt rows="8" maxlength="12000" placeholder="Generate a video prompt from your storyboard, or write your own here. Edit before copying or exporting to Muse."></textarea></section></details>
-    </fieldset></div><footer class="look-footer"><p class="look-message" role="status"></p><div class="look-actions"><button data-cancel hidden>Cancel</button><button data-package class="primary-button">Download storyboards & prompt</button><button data-page hidden>Download page</button><a data-open-muse href="https://muse.ai/" target="_blank" rel="noopener noreferrer">Open Muse ${icon('external')}</a></div><p class="look-upload-help">In Muse, attach the first-frame image, all storyboard pages and the bound appearance images, then paste the prompt. These are image inputs; render a video separately in the Video tab.</p></footer>
-    <details class="look-handoffs"><summary>Share a reference link or import the finished video</summary><p>Publish a fixed page with these images and this prompt. Anyone with the link can view it. Send it to Muse manually; generation does not start here.</p><div data-handoffs></div><textarea data-instruction readonly hidden aria-label="Muse instruction"></textarea><div class="look-handoff-actions"><button data-publish>Create reference link</button><button data-instruction-copy hidden>Copy instruction and link</button><button data-import-video>Import finished video</button><input data-video type="file" accept="video/mp4,video/webm" hidden></div></details>`;
+  dialog.innerHTML = `<div class="board-modes" role="tablist" aria-label="Storyboard type">
+      <button role="tab" data-board-mode="proxy" aria-selected="true">Proxy storyboard</button><button role="tab" data-board-mode="ai" aria-selected="false">${icon('sparkles')} AI storyboard</button></div>
+    <div class="look-layout"><div class="look-monitor"><section data-proxy-board aria-label="Proxy storyboard pages"><div class="look-storyboards"></div></section>
+      <section class="ai-storyboard" hidden aria-label="AI storyboard panels"></section><button data-prepare hidden>Retry preview</button></div>
+    <div class="look-sidebar"><fieldset class="look-settings">
+      <label class="look-field">Visual style<select data-preset>${storyboardStyleIds.map(id => '<option value="' + id + '">' + storyboardStyles[id].label + '</option>').join('')}</select></label>
+      <details class="look-options"><summary>Other requirements</summary>
+        <label class="look-field">Extra direction <textarea data-direction rows="3" maxlength="600" placeholder="Anything Muse should emphasize or avoid?"></textarea></label>
+        <label class="look-field" data-ai-settings hidden>Style reference <input type="file" accept="image/png,image/jpeg,image/webp"><small data-style-status></small></label>
+        <section class="look-appearance" hidden><h3>Object references</h3><div class="look-appearance-images"></div></section>
+      </details>
+      <div class="look-generate"><button data-generate-board hidden>${icon('sparkles')} <span>Generate storyboard</span></button><button data-brief>${icon('sparkles')} <span>Generate prompt</span></button></div>
+      <details class="look-brief" hidden><summary>Video prompt</summary><textarea aria-label="Generated video prompt" data-prompt rows="6" maxlength="12000"></textarea><button data-copy>${icon('duplicate')} Copy prompt</button></details>
+    </fieldset><p class="look-message" role="status"></p><button data-cancel hidden>Cancel</button></div></div>
+    <footer class="look-footer"><div class="look-actions">
+      <button data-package>${icon('download')} Download package</button><button data-page hidden>Download image</button>
+      <button data-publish class="primary-button">${icon('sparkles')} <span>Render with Muse</span></button>
+      <a data-open-muse class="primary-button" target="_blank" rel="noopener noreferrer" hidden><span>Open Muse</span> ${icon('external')}</a></div>
+      <section class="muse-link-result" aria-label="Muse reference link" hidden>
+        <label><span data-link-label>Reference link</span><input type="text" data-link readonly></label><button data-copy-link>${icon('duplicate')} Copy link</button>
+        <p data-link-status role="status"></p>
+      </section>
+      <details class="look-handoffs" hidden><summary>Previous links</summary><div data-handoffs></div></details>
+    </footer>`;
   const find = <T extends HTMLElement = HTMLElement>(selector: string) => dialog.querySelector<T>(selector)!;
-  find('.look-subtitle').textContent = `${shot.name} · ${camera.name} · ${shot.duration.toFixed(2)}s. Export your blocking or turn it into illustrated storyboards.`;
-  const direction = find<HTMLTextAreaElement>('[data-direction]'), prompt = find<HTMLTextAreaElement>('[data-prompt]'); direction.value = workspace.lookSettings(doc.id).direction;
-  let frames: Frame[] = [], pages: StoryboardPage[] = [], style: string | undefined, busy = true, imageAvailable = false, briefAvailable = false, controller: AbortController | null = new AbortController(), brief: VideoBrief | null = null, disposed = false;
+  const direction = find<HTMLTextAreaElement>('[data-direction]'), prompt = find<HTMLTextAreaElement>('[data-prompt]'), preset = find<HTMLSelectElement>('[data-preset]');
+  const settings = workspace.lookSettings(doc.id);
+  direction.value = settings.direction; preset.value = settings.stylePreset ?? 'scene';
+  const stylePreset = () => preset.value as StoryboardStyle;
+  let frames: Frame[] = [], pages: StoryboardPage[] = [], style: string | undefined, busy = true, imageAvailable = false, controller: AbortController | null = new AbortController(), brief: VideoBrief | null = null, disposed = false;
+  let briefAvailable: boolean | undefined;
   let briefId = newId(), saveTimer: ReturnType<typeof setTimeout> | undefined;
   let loading = true, uploading = false, mode: 'proxy' | 'ai' = 'proxy', board: AIStoryboard | undefined;
-  let publication: { id: string; archive: Blob } | null = null;
+  let publication: { id: string; archive: Blob; receipt?: HandoffReceipt } | null = null;
+  let displayedLink: HandoffReceipt | null = null, receipts: HandoffReceipt[] = [], publishing = false;
   const room = workspace.room;
+  let briefContext: string | null = null;
   let appearance: AppearanceImage[] = [], appearanceError = '';
-  find('#storyboardDirectionHelp').insertAdjacentHTML('afterend', '<section class="look-appearance" hidden><h3>Object appearance</h3><p>Bound to the objects in this shot. Included in the prompt and download.</p><div class="look-appearance-images"></div></section>');
+  const moments = () => mode === 'ai' ? board?.panels.map(panel => ({ at: panel.data.at, note: panel.data.note.trim() })) : undefined;
+  const defaultTimes = keyPanelTimes(shot, doc.fps ?? 24);
+  const context = () => {
+    const panels = moments() ?? [];
+    const custom = panels.some((panel, i) => panel.note || panel.at !== defaultTimes[i]);
+    const images = appearance.map(image => [image.id, room?.outputs.find(o => o.id === image.id)?.updatedAt, image.bindings]);
+    return JSON.stringify([shot.name, shot.start, shot.duration, doc.fps, direction.value.trim(), stylePreset(), workspace.lookSettings(doc.id).styleId, images, custom ? panels : []]);
+  };
+  const currentBrief = () => !!brief && !!videoPrompt(shot, brief, direction.value).trim() && briefContext === context();
   const loadReferences = async () => {
     try {
       appearance = await loadAppearance(workspace, doc, new Set([...frames.flatMap(frame => [...frame.boxes.keys()]), ...(board?.panels.flatMap(panel => [...panel.source.visible]) ?? [])]), room);
@@ -61,11 +93,12 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
       }));
     } catch (error) { appearanceError = (error as Error).message; throw error; }
   };
-  const save = (kind: 'look-frame' | 'video-brief', name: string, value: unknown) => workspace.putOutput({ id: kind === 'video-brief' ? briefId : newId(), kind, sceneId: doc.id, shotId: shot.id, name, mime: 'application/json' }, new Blob([JSON.stringify(value)], { type: 'application/json' }), room);
   const message = (text: string) => { if (!disposed) find('.look-message').textContent = text; };
   const savePrompt = async () => {
     clearTimeout(saveTimer); saveTimer = undefined;
-    if (brief && videoPrompt(shot,brief,direction.value).trim()) await save('video-brief', shot.name + ' · video brief', { brief: structuredClone(brief), direction: direction.value, frameIds: frames.flatMap(frame => frame.savedId ? [frame.savedId] : []) });
+    if (!brief || !videoPrompt(shot,brief,direction.value).trim()) return;
+    const data = { brief, direction: direction.value, source: renderer.sourceState, context: briefContext, frameIds: frames.flatMap(frame => frame.savedId ? [frame.savedId] : []) };
+    await workspace.putOutput({ id: briefId, kind: 'video-brief', sceneId: doc.id, shotId: shot.id, name: shot.name + ' · video brief', mime: 'application/json' }, new Blob([JSON.stringify(data)], { type: 'application/json' }), room);
   };
 
   const sourceFrames = async (signal: AbortSignal) => mode === 'ai' ? board!.frames(signal) : frames.map(frame => ({ at: Math.max(0, frame.time - shot.start), look: frame.result, previs: frame.previs }));
@@ -82,7 +115,7 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
   const runBoard = async (operation: (signal: AbortSignal) => Promise<void>) => {
     if (busy || uploading || loading) return;
     busy = true; controller = new AbortController(); update(); drawAI();
-    try { await operation(controller.signal); await loadReferences(); publication = null; }
+    try { await operation(controller.signal); await loadReferences(); clearPublication(); }
     catch (error) { message(controller.signal.aborted ? 'Cancelled. Finished images and previous versions are kept.' : (error as Error).message); }
     finally { busy = false; drawAI(); update(); }
   };
@@ -98,46 +131,32 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
       const width = index === 0 ? 1920 : 1280;
       if (index < 2) renderer.resize(width, width * 9 / 16);
       const previs = toJPEG(renderer.render(time), width, width * 9 / 16, width);
-      captured.push({ time, label: index === 0 ? 'First frame' : index === times.length - 1 ? 'Last frame' : `Frame ${index + 1}`, previs, boxes: renderer.screenBoxes(), message: '', state: 'waiting' });
+      captured.push({ time, previs, boxes: renderer.screenBoxes() });
       message(`Preparing storyboards · ${index + 1} / ${times.length} frames`);
       await new Promise(resolve => setTimeout(resolve, 0));
     }
     const sheets = await renderStoryboards(shot, captured.map(frame => ({ at: Math.max(0, frame.time - shot.start), previs: frame.previs })), signal);
-    signal.throwIfAborted(); frames = captured; pages = sheets; publication = null;
+    signal.throwIfAborted(); frames = captured; pages = sheets; clearPublication();
   };
-  const drawPages = () => {
-    if (disposed) return;
-    find('.look-storyboards').replaceChildren(...pages.map((page, index) => {
-      const figure = document.createElement('figure'); figure.className = 'look-storyboard';
-      const link = document.createElement('a'); link.href = page.image; link.download = `storyboard-${String(index + 1).padStart(2,'0')}.jpg`; link.title = 'Download this storyboard page';
-      link.onclick = event => { event.preventDefault(); downloadStoryboardImage(page.image, link.download); };
-      const image = new Image(); image.src = page.image; image.alt = `Storyboard page ${index + 1}, frames ${page.frames[0].index}–${page.frames.at(-1)!.index}`; image.loading = 'lazy'; link.append(image);
-      const caption = document.createElement('figcaption'); caption.textContent = `Page ${index + 1} / ${pages.length} · ${page.frames[0].at.toFixed(2)}–${page.frames.at(-1)!.at.toFixed(2)} s`;
-      const download = document.createElement('a'); download.href = page.image; download.download = link.download; download.textContent = 'Download page'; download.onclick = event => { event.preventDefault(); downloadStoryboardImage(page.image, download.download); }; caption.append(download);
-      figure.append(link, caption); return figure;
-    }));
-    if (frames.length) {
-      const first = document.createElement('a'); first.href = frames[0].previs; first.download = 'first-frame.jpg'; first.textContent = 'Download first frame · 1920 × 1080'; first.className = 'look-first-frame'; first.onclick = event => { event.preventDefault(); downloadStoryboardImage(frames[0].previs, first.download); }; find('.look-storyboards').prepend(first);
-    }
-  };
-  const draw = () => {
-    if (disposed) return;
-    find('.look-frames').replaceChildren(...frames.map((frame, index) => {
-      const styled = !!frame.result || frame.state === 'running' || frame.state === 'failed';
-      const card = document.createElement('figure'); card.className = `look-card${styled ? ' has-look' : ''}`; card.dataset.state = frame.state;
-      const previs = new Image(); previs.src = frame.previs; previs.alt = `Previs at ${(frame.time-shot.start).toFixed(2)}s`; previs.loading = 'lazy';
-      const result = document.createElement('div'); result.className = 'look-result';
-      if (frame.result) { const image = new Image(); image.src = frame.result; image.alt = `Look frame at ${(frame.time-shot.start).toFixed(2)}s`; result.append(image); }
-      else result.textContent = frame.state === 'running' ? 'Rendering…' : frame.state === 'failed' ? frame.message : 'Not rendered yet';
-      const caption = document.createElement('figcaption'); caption.textContent = `${index + 1}. ${frame.label} · ${(frame.time-shot.start).toFixed(2)}s`;
-      for (const [kind,image] of [['previs',frame.previs],['look',frame.result]] as const) if (image) {
-        const link = document.createElement('a'); link.href = image; link.textContent = kind === 'previs' ? 'Download reference' : 'Download styled image';
-        link.download = `${(shot.name.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'shot')}-${kind}-${index+1}.${image.slice(11, image.indexOf(';')).replace('jpeg', 'jpg')}`;
-        link.onclick = event => { event.preventDefault(); downloadStoryboardImage(image, link.download); };
-        caption.append(link);
-      }
-      card.append(previs); if (styled) card.append(result); card.append(caption); return card;
-    }));
+  const drawPages = (index = 0) => {
+    if (disposed || !pages[index]) return;
+    const page = pages[index], figure = document.createElement('figure'), image = new Image();
+    figure.className = 'look-storyboard'; image.src = page.image;
+    image.alt = `Storyboard page ${index + 1}, frames ${page.frames[0].index}–${page.frames.at(-1)!.index}`; figure.append(image);
+    const caption = document.createElement('figcaption');
+    const pageButton = (offset: number) => {
+      const button = document.createElement('button'); button.type = 'button';
+      button.innerHTML = icon(offset < 0 ? 'arrow-left' : 'arrow-right');
+      button.setAttribute('aria-label', offset < 0 ? 'Previous storyboard page' : 'Next storyboard page');
+      button.disabled = !pages[index + offset]; button.onclick = () => drawPages(index + offset);
+      return button;
+    };
+    if (pages.length > 1) caption.append(pageButton(-1));
+    caption.append(`Page ${index + 1} of ${pages.length} · ${page.frames[0].at.toFixed(2)}–${page.frames.at(-1)!.at.toFixed(2)} s`);
+    if (pages.length > 1) caption.append(pageButton(1));
+    const link = document.createElement('a'); link.href = page.image; link.download = `storyboard-${String(index + 1).padStart(2,'0')}.jpg`;
+    link.textContent = 'Download page'; link.onclick = event => { event.preventDefault(); downloadStoryboardImage(page.image, link.download); };
+    caption.append(link); figure.append(caption); find('.look-storyboards').replaceChildren(figure);
   };
   const update = () => {
     if (disposed) return;
@@ -147,21 +166,30 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
     const ready = mode === 'proxy' ? !!pages.length : !!board?.complete;
     dialog.dataset.boardMode = mode;
     find('[data-page]').hidden = mode !== 'ai'; find<HTMLButtonElement>('[data-page]').disabled = busy || uploading || loading || !ready;
-    find('.look-upload-help').hidden = mode === 'ai';
-    find<HTMLButtonElement>('[data-brief]').disabled = busy || uploading || loading || !!appearanceError || !ready || !briefAvailable || !workspace.canEdit;
-    direction.readOnly = !workspace.canEdit; find<HTMLInputElement>('input[type=file]').disabled = !workspace.canEdit;
+    find('.look-brief').hidden = !brief;
+    find<HTMLButtonElement>('[data-brief]').disabled = busy || uploading || loading || !!appearanceError || !pages.length || !briefAvailable || !workspace.canEdit;
+    preset.disabled = !workspace.canEdit; direction.readOnly = !workspace.canEdit; find<HTMLInputElement>('input[type=file]').disabled = !workspace.canEdit;
     const hasPrompt = !!brief && !!videoPrompt(shot,brief,direction.value).trim();
     prompt.readOnly = busy || uploading || loading || !workspace.canEdit;
     find<HTMLButtonElement>('[data-copy]').disabled = busy || uploading || !hasPrompt;
-    find<HTMLButtonElement>('[data-package]').disabled = busy || uploading || loading || !!appearanceError || !ready;
-    find('[data-package]').textContent = hasPrompt ? 'Download storyboards & prompt' : 'Download storyboard';
-    find<HTMLButtonElement>('[data-publish]').disabled = busy || uploading || loading || !!appearanceError || !ready || !workspace.canEdit;
-    find<HTMLButtonElement>('[data-import-video]').disabled = busy || uploading || !workspace.canEdit;
-    find<HTMLButtonElement>('[data-instruction-copy]').disabled = busy;
+    const canPrepare = currentBrief() || (briefAvailable && workspace.canEdit);
+    const unavailable = busy || uploading || loading || !!appearanceError;
+    find<HTMLButtonElement>('[data-package]').disabled = unavailable || !ready || !canPrepare;
+    const generateBoard = find<HTMLButtonElement>('[data-generate-board]');
+    generateBoard.hidden = mode !== 'ai';
+    generateBoard.disabled = unavailable || !canPrepare || !workspace.canEdit || !imageAvailable || !board?.panels.length || !!board.saveError;
+    find('[data-generate-board] span').textContent = board?.result ? 'Regenerate storyboard' : 'Generate storyboard';
+    find('[data-brief] span').textContent = currentBrief() ? 'Regenerate prompt' : 'Generate prompt';
+    const canPublishBoard = ready || (mode === 'ai' && !generateBoard.disabled);
+    find<HTMLButtonElement>('[data-publish]').disabled = unavailable || !workspace.canEdit || !canPrepare || !canPublishBoard;
+    find('[data-publish]').hidden = displayedLink !== null;
+    find('[data-publish] span').textContent = publishing ? 'Preparing link…' : 'Render with Muse';
+    find('[data-open-muse]').hidden = !displayedLink;
+    find('.muse-link-result').hidden = !displayedLink;
     dialog.querySelectorAll<HTMLButtonElement>('[data-board-mode]').forEach(button => { button.disabled = busy || uploading || loading; button.setAttribute('aria-selected', String(button.dataset.boardMode === mode)); button.tabIndex = button.dataset.boardMode === mode ? 0 : -1; });
     find('[data-proxy-board]').hidden = mode !== 'proxy'; find('.ai-storyboard').hidden = mode !== 'ai'; find('[data-ai-settings]').hidden = mode !== 'ai';
     find('[data-prepare]').hidden = busy || (!!pages.length && !appearanceError);
-    find('[data-prepare]').textContent = appearanceError ? 'Retry reference images' : 'Prepare storyboards';
+    find('[data-prepare]').textContent = appearanceError ? 'Retry reference images' : 'Retry preview';
     find<HTMLButtonElement>('[data-prepare]').disabled = loading || uploading;
     onBusyChange();
   };
@@ -169,33 +197,74 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
     prompt.value = brief ? videoPrompt(shot,brief,direction.value) : '';
   };
   const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => { const image = new Image(); image.onload = () => resolve(image); image.onerror = () => reject(new Error('A frame could not be read.')); image.src = src; });
+  const linkField = find<HTMLInputElement>('[data-link]');
+  const linkStatus = (text: string) => { find('[data-link-status]').textContent = text; };
+  const clearPublication = () => { publication = null; displayedLink = null; linkField.value = ''; linkStatus(''); };
+  const showLink = (receipt: HandoffReceipt) => {
+    displayedLink = receipt;
+    linkField.value = workspace.handoffUrl(receipt);
+    const shared = workspace.canShareWithMuse;
+    find('[data-link-label]').textContent = shared ? 'Reference link' : 'Local preview link';
+    find<HTMLAnchorElement>('[data-open-muse]').href = shared ? MUSE_URL : linkField.value;
+    find('[data-open-muse] span').textContent = shared ? 'Open Muse' : 'Open local preview';
+    update();
+  };
+  const copyRequest = async () => {
+    const link = linkField.value;
+    try {
+      await copyText(museInstruction(link), dialog);
+      if (linkField.value === link) linkStatus('Render request copied. Paste it into Muse and send.');
+    } catch {
+      if (linkField.value === link) linkStatus('Copy the link, then ask Muse to render the shot.');
+    }
+  };
+  linkField.onclick = () => linkField.select();
+  find('[data-copy-link]').onclick = async () => {
+    try { await copyText(linkField.value, dialog); linkStatus('Link copied.'); }
+    catch { linkField.focus(); linkField.select(); linkStatus('Select and copy the link.'); }
+  };
   const shared = () => {
-    const receipts = (room?.handoffs ?? []).filter(value => value.sceneId === doc.id && value.shotId === shot.id);
-    find('[data-handoffs]').replaceChildren(...receipts.map(receipt => {
+    const links = receipts.filter(value => value.sceneId === doc.id && value.shotId === shot.id && !value.revokedAt);
+    find('.look-handoffs').hidden = !links.length;
+    find('[data-handoffs]').replaceChildren(...links.map(receipt => {
       const row = document.createElement('div'); row.className = 'look-handoff-row';
-      if (receipt.revokedAt) { const text = document.createElement('span'); text.textContent = `Withdrawn · ${new Date(receipt.createdAt).toLocaleString()}`; row.append(text); }
-      else {
-        const link = document.createElement('a'); link.href = workspace.handoffUrl(receipt); link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = `Reference page · ${new Date(receipt.createdAt).toLocaleString()}`;
-        const copy = document.createElement('button'); copy.textContent = 'Use link'; copy.onclick = () => { find<HTMLTextAreaElement>('[data-instruction]').value = museInstruction(link.href); find('[data-instruction]').hidden = false; find('[data-instruction-copy]').hidden = false; };
-        const withdraw = document.createElement('button'); withdraw.textContent = 'Withdraw'; withdraw.disabled = !workspace.canEdit;
-        withdraw.onclick = async () => { withdraw.disabled = true; try { await workspace.withdrawHandoff(receipt.id); shared(); message('Reference link withdrawn. Existing copies downloaded by recipients are unaffected.'); } catch (error) { withdraw.disabled = false; message((error as Error).message); } };
-        row.append(link, copy, withdraw);
-      }
-      return row;
+      const link = document.createElement('a'); link.href = workspace.handoffUrl(receipt); link.target = '_blank'; link.rel = 'noopener noreferrer';
+      link.textContent = new Date(receipt.createdAt).toLocaleString();
+      const copy = document.createElement('button'); copy.textContent = 'Copy link';
+      copy.onclick = async () => {
+        try { await copyText(link.href, dialog); message('Reference link copied.'); }
+        catch { link.textContent = link.href; link.focus(); message('Use this reference page’s link to copy its address.'); }
+      };
+      const withdraw = document.createElement('button'); withdraw.textContent = 'Withdraw'; withdraw.disabled = !workspace.canEdit;
+      withdraw.onclick = async () => {
+        withdraw.disabled = true;
+        try {
+          await workspace.withdrawHandoff(receipt.id);
+          receipt.revokedAt = Date.now();
+          if (receipt.id === displayedLink?.id || receipt.id === publication?.id) clearPublication();
+          shared(); update(); message('Reference link withdrawn.');
+        } catch (error) { withdraw.disabled = false; message((error as Error).message); }
+      };
+      row.append(link, copy, withdraw); return row;
     }));
   };
   find('[data-cancel]').onclick = () => { controller?.abort(); message('Cancelling…'); };
-  direction.oninput = () => { workspace.setLookSettings(doc.id, { direction: direction.value }); publication = null; if (brief) message(mode === 'ai' ? 'Story changed. Regenerate the storyboard, then update the exported video prompt if needed.' : 'Direction changed. Generate again or edit the video prompt to include it.'); drawAI(); update(); };
+  find('[data-generate-board]').onclick = () => { if (board) void runBoard(signal => board!.generate(signal)); };
+  const settingsChanged = () => { clearPublication(); message(brief && !currentBrief() ? 'Settings changed. Generate a new prompt to use them.' : ''); drawAI(); update(); };
+  direction.oninput = () => { workspace.setLookSettings(doc.id, { direction: direction.value }); settingsChanged(); };
+  preset.onchange = () => { workspace.setLookSettings(doc.id, { stylePreset: stylePreset() }); settingsChanged(); };
   dialog.querySelectorAll<HTMLButtonElement>('[data-board-mode]').forEach(button => button.onclick = async () => {
-    if (busy || uploading || loading) return;
+    if (busy || uploading || loading || button.dataset.boardMode === mode) return;
     mode = button.dataset.boardMode as typeof mode;
-    find<HTMLDetailsElement>('.look-prompt-section').open = mode === 'proxy';
-    publication = null; update();
+    message('');
+    clearPublication(); update();
     if (mode === 'ai' && !board) await runBoard(async () => {
-      board = new AIStoryboard(shot, doc.fps ?? 24, doc.id, workspace, capturePanel, () => ({ direction: direction.value, style, appearance }), () => { drawAI(); update(); }, message, renderer.sourceState);
+      board = new AIStoryboard(shot, doc.fps ?? 24, doc.id, workspace, capturePanel, () => ({ direction: direction.value, style, stylePreset: stylePreset(), appearance }), () => { drawAI(); update(); }, message, renderer.sourceState, async signal => {
+        const { prompt, beats } = await ensureBrief(signal);
+        return { prompt, beats };
+      });
       try { await board.load(); } catch (error) { board = undefined; throw error; }
     });
-    if (mode === 'ai' && board) message(board.complete ? 'AI storyboard restored. Download the original sheet or prepare a video prompt.' : 'Four moments from this shot. Generate one 2 × 2 storyboard, or adjust the moments first.');
     drawAI(); update();
   });
   find('.board-modes').onkeydown = event => {
@@ -204,84 +273,82 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
   find('[data-prepare]').onclick = async () => {
     if (busy || loading) return;
     busy = true; controller = new AbortController(); update();
-    try { if (!pages.length) { await capture(controller.signal); drawPages(); draw(); } await loadReferences(); message(`${frames.length} frames · ${pages.length} storyboard pages ready.`); }
+    try { if (!pages.length) { await capture(controller.signal); drawPages(); } await loadReferences(); message(`${frames.length} frames · ${pages.length} storyboard pages ready.`); }
     catch (error) { message(controller.signal.aborted ? 'Preparation cancelled. Try again when ready.' : (error as Error).message); }
     finally { busy = false; update(); }
   };
   prompt.oninput = () => {
     brief ??= { prompt: prompt.value.trim().slice(0,4000) || 'Creator prompt', camera: '', beats: [], negative: '', model: 'creator' };
-    brief.promptText = prompt.value; publication = null; clearTimeout(saveTimer);
+    brief.promptText = prompt.value; clearPublication(); clearTimeout(saveTimer);
     saveTimer = setTimeout(() => { void savePrompt().catch(error => message(`Prompt is available here, but could not be saved. ${error.message}`)); }, 600);
     update();
   };
   find('[data-copy]').onclick = () => { if (brief) copyText(videoPrompt(shot,brief,direction.value), dialog).then(() => message('Full prompt copied. Attach the reference images in Muse.'), () => { prompt.select(); message('Select and copy the prompt.'); }); };
+  const ensureBrief = async (signal: AbortSignal, regenerate = false): Promise<VideoBrief> => {
+    if (brief && currentBrief() && !regenerate) return brief;
+    if (!briefAvailable) throw new Error('Muse prompt generation is unavailable. You can download storyboard pages from the preview.');
+    signal.throwIfAborted();
+    message('Muse is reading the shot and writing the actions…');
+    const sent: BriefFrame[] = [];
+    const illustrated = mode === 'ai' && board?.complete;
+    const details = illustrated ? (await board!.frames(signal)).slice(0, 1) :
+      styleFrames().filter(frame => frame === frames[0] || frame.result).map(frame => ({ at: Math.max(0, frame.time - shot.start), look: frame.result, previs: frame.previs }));
+    for (const frame of details) {
+      const image = await loadImage(frame.look ?? frame.previs);
+      sent.push({ at: frame.at, image: referenceJPEG(image, image.naturalWidth, image.naturalHeight, 1280), kind: frame.look ? 'look' : 'previs' });
+    }
+    for (const page of illustrated ? board!.pages() : pages) {
+      const image = await loadImage(page.image);
+      sent.push({ at: page.frames[0].at, image: referenceJPEG(image, image.naturalWidth, image.naturalHeight), kind: 'storyboard', tiles: page.frames });
+    }
+    const body = JSON.stringify({ ...briefInput(doc, shot, direction.value, sent, appearance), stylePreset: stylePreset(), moments: moments() });
+    if (new Blob([body]).size > BRIEF_LIMITS.maxBodyBytes) throw new Error('These references are too large for prompt generation.');
+    signal.throwIfAborted();
+    const response = await projectFetch('/api/brief', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error?.message ?? 'Muse could not write the prompt.');
+    signal.throwIfAborted();
+    brief = data as VideoBrief; briefContext = context(); clearPublication();
+    brief.promptText = [videoPrompt(shot, brief, direction.value), appearanceInstructions(appearance)].filter(Boolean).join('\n\n');
+    showBrief(); update(); await savePrompt();
+    return brief;
+  };
   find('[data-brief]').onclick = async () => {
-    if (busy) return;
-    busy = true; controller = new AbortController(); update(); message('Muse Spark is writing the video brief…');
+    if (busy || loading || uploading) return;
+    busy = true; controller = new AbortController(); update();
     try {
-      const sent: BriefFrame[] = [];
-      // All pages reach the writer; never truncate a long shot to its first few moments.
-      const details = mode === 'ai' ? (await sourceFrames(controller.signal)).slice(0, 1) : styleFrames().filter(frame => frame === frames[0] || frame.result).map(frame => ({ at: Math.max(0, frame.time - shot.start), look: frame.result, previs: frame.previs }));
-      for (const frame of details) {
-        const image = await loadImage(frame.look ?? frame.previs);
-        sent.push({ at: frame.at, image: referenceJPEG(image, image.naturalWidth, image.naturalHeight, 1280), kind: frame.look ? 'look' : 'previs' });
-      }
-      for (const page of activePages()) {
-        const image = await loadImage(page.image);
-        sent.push({ at: page.frames[0].at, image: referenceJPEG(image, image.naturalWidth, image.naturalHeight), kind: 'storyboard', tiles: page.frames });
-      }
-      const body = JSON.stringify(briefInput(doc, shot, direction.value, sent, appearance));
-      if (new Blob([body]).size > BRIEF_LIMITS.maxBodyBytes) throw new Error('These references are too large for prompt generation. You can write the prompt manually and download all images.');
-      controller.signal.throwIfAborted();
-      const response = await projectFetch('/api/brief', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: controller.signal });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error?.message ?? 'The video brief could not be written.');
-      controller.signal.throwIfAborted();
-      brief = data as VideoBrief;
-      brief.promptText = [videoPrompt(shot, brief, direction.value), appearanceInstructions(appearance)].filter(Boolean).join('\n\n');
-      showBrief();
-      publication = null;
-      brief.promptText = videoPrompt(shot,brief,direction.value);
-      await savePrompt();
-      message('Prompt ready. Edit it below, then copy it and attach the reference images in Muse.');
+      await ensureBrief(controller.signal, true);
+      find<HTMLDetailsElement>('.look-brief').open = true;
+      message('Prompt ready.');
     } catch (error) { message(controller.signal.aborted ? 'Cancelled.' : (error as Error).message); }
     finally { busy = false; update(); }
   };
   const makePackage = async () => {
-    const instruction = brief && videoPrompt(shot, brief, direction.value).trim() ? brief : { prompt: '', camera: '', beats: [], negative: '', model: 'creator', promptText: [direction.value.trim() || shot.name, appearanceInstructions(appearance)].filter(Boolean).join('\n\n') };
-    return videoPackage(doc, shot, instruction, direction.value, await sourceFrames(controller!.signal), activePages(),
+    const signal = controller!.signal;
+    const instruction = await ensureBrief(signal);
+    return videoPackage(doc, shot, instruction, direction.value, await sourceFrames(signal), activePages(),
       style ? [{ image: style, role: 'style', label: 'Style reference' }] : [], appearance, mode);
   };
   find('[data-publish]').onclick = async () => {
-    if (busy) return;
-    busy = true; controller = new AbortController(); update(); message('Preparing the reference snapshot…');
+    if (busy || uploading || loading) return;
+    busy = publishing = true; controller = new AbortController();
+    const { signal } = controller;
+    update(); message('Preparing shot references…');
     try {
-      publication ??= { id: newId(), archive: await makePackage() };
-      controller.signal.throwIfAborted();
-      message('Publishing references…');
-      const receipt = await workspace.publishHandoff(publication.archive, publication.id, room);
-      find<HTMLTextAreaElement>('[data-instruction]').value = museInstruction(workspace.handoffUrl(receipt));
-      find('[data-instruction]').hidden = false; find('[data-instruction-copy]').hidden = false;
-      shared(); publication = null;
-      const local = ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
-      message(local ? 'Reference page saved. This is a local link; Muse can open it after the application is deployed at a public HTTPS address.' : 'Reference page published. Copy the instruction and send it in your official Muse conversation.');
-    } catch (error) { message(controller.signal.aborted ? 'Preparation cancelled. No new generation was started.' : (error as Error).message); }
-    finally { busy = false; update(); }
-  };
-  find('[data-instruction-copy]').onclick = () => copyText(find<HTMLTextAreaElement>('[data-instruction]').value, dialog).then(() => message('Instruction and link copied. Paste them in Muse.'), () => { find<HTMLTextAreaElement>('[data-instruction]').select(); message('Select and copy the instruction.'); });
-  find('[data-import-video]').onclick = () => find<HTMLInputElement>('[data-video]').click();
-  find<HTMLInputElement>('[data-video]').onchange = async () => {
-    const file = find<HTMLInputElement>('[data-video]').files?.[0]; if (!file) return;
-    uploading = true; update();
-    try {
-      if (file.size > MAX_OUTPUT_BYTES) throw new Error('Finished videos must be smaller than 64 MB.');
-      const bytes = new Uint8Array(await file.slice(0, 12).arrayBuffer());
-      const mime = bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3 ? 'video/webm' : String.fromCharCode(...bytes.slice(4, 8)) === 'ftyp' ? 'video/mp4' : null;
-      if (!mime) throw new Error('Choose an MP4 or WebM video file.');
-      await workspace.putOutput({ id: newId(), kind: 'final-video', sceneId: doc.id, shotId: shot.id, name: shot.name + ' · ' + file.name.slice(0, 100), mime }, file, room); message('Finished video added to Renders.');
-    }
-    catch (error) { message((error as Error).message); }
-    finally { uploading = false; find<HTMLInputElement>('[data-video]').value = ''; update(); }
+      if (mode === 'ai' && board && !board.complete) await board.generate(signal);
+      if (!publication) publication = { id: newId(), archive: await makePackage() };
+      signal.throwIfAborted();
+      message('Creating the reference link…');
+      const receipt = publication.receipt ?? await workspace.publishHandoff(publication.archive, publication.id, room, signal);
+      signal.throwIfAborted();
+      publication.receipt = receipt;
+      receipts = [receipt, ...receipts.filter(item => item.id !== receipt.id)];
+      showLink(receipt); shared(); message('');
+      if (workspace.canShareWithMuse) await copyRequest();
+      else linkStatus('Only this workspace can open this preview. Use the hosted project for a link Muse can open.');
+    } catch (error) {
+      message(signal.aborted ? 'Cancelled.' : (error as Error).message);
+    } finally { busy = publishing = false; update(); }
   };
   find('[data-package]').onclick = async () => {
     if (busy) return;
@@ -297,12 +364,13 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
     finally { busy = false; update(); }
   };
   find('[data-page]').textContent = 'Download image';
-  find('[data-page]').onclick = () => { void runBoard(async () => {
+  find('[data-page]').onclick = () => {
+    if (busy || !board?.complete) return;
     activePages().forEach((page, index) => downloadStoryboardImage(page.image, `ai-storyboard-${index + 1}.${page.image.slice(11, page.image.indexOf(';')).replace('jpeg', 'jpg')}`));
     message('Original storyboard image downloaded.');
-  }); };
+  };
   find<HTMLInputElement>('.look-settings input[type=file]').onchange = async event => {
-    const file = (event.target as HTMLInputElement).files?.[0]; publication = null;
+    const file = (event.target as HTMLInputElement).files?.[0]; clearPublication();
     if (!file) return;
     uploading = true; update(); message('Saving the style reference…');
     try { const bitmap = await createImageBitmap(file); const nextStyle = toJPEG(bitmap, bitmap.width, bitmap.height, 1024); bitmap.close(); const saved = await workspace.putOutput({ id: newId(), kind: 'style-reference', sceneId: doc.id, shotId: '', name: 'Style reference', mime: 'image/jpeg' }, await (await fetch(nextStyle)).blob(), room); style = nextStyle; workspace.setLookSettings(doc.id, { styleId: saved.id }); find('[data-style-status]').textContent = file.name; message('Style reference saved with this project.'); }
@@ -312,27 +380,40 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
   shared(); update();
   const connection = new AbortController();
   void Promise.allSettled([
+    room && workspace.previousHandoffs(room).then(previous => {
+      if (disposed) return;
+      const known = new Set(receipts.map(receipt => receipt.id));
+      receipts.push(...previous.filter(receipt => !known.has(receipt.id))); shared();
+    }).catch(() => {}),
     projectFetch('/api/look', { signal: connection.signal }).then(response => response.json()).then(data => { imageAvailable = Boolean(data.available); drawAI(); update(); }),
-    projectFetch('/api/brief', { signal: connection.signal }).then(response => response.json()).then(data => { briefAvailable = Boolean(data.available); if (!briefAvailable) message('Prompt generation is unavailable. You can still write a prompt and download references.'); update(); })
-      .catch(() => message('Prompt generation could not be reached. You can still write a prompt and download references.')),
+    projectFetch('/api/brief', { signal: connection.signal }).then(response => response.json()).then(data => { briefAvailable = Boolean(data.available); if (!briefAvailable && !currentBrief()) message('Prompt generation is unavailable. You can still download storyboard pages.'); update(); })
+      .catch(() => { briefAvailable = false; if (!currentBrief()) message('Prompt generation could not be reached. You can still download storyboard pages.'); update(); }),
   ]);
   void (async () => {
     try {
       await new Promise(resolve => setTimeout(resolve, 0));
       // Cancelling image capture must still leave the creator's saved prompt available.
       const savedBrief = room?.outputs.find(output => output.kind === 'video-brief' && output.sceneId === doc.id && output.shotId === shot.id);
-      if (savedBrief) { const value = JSON.parse(await (await workspace.output(savedBrief.id)).text()); brief = value.brief; briefId = savedBrief.id; if (brief) brief.promptText ??= videoPrompt(shot,brief,value.direction ?? direction.value); }
-      await capture(controller!.signal); drawPages(); draw(); await loadReferences();
+      let legacyPrompt = false;
+      if (savedBrief) {
+        const value = JSON.parse(await (await workspace.output(savedBrief.id, room)).text());
+        brief = value.brief; briefId = savedBrief.id;
+        briefContext = value.source === renderer.sourceState ? value.context ?? null : null;
+        legacyPrompt = value.source === undefined && (value.direction ?? '') === direction.value && stylePreset() === 'scene';
+        if (brief) brief.promptText ??= videoPrompt(shot,brief,value.direction ?? direction.value);
+      }
+      await capture(controller!.signal); drawPages(); await loadReferences();
       const settings = workspace.lookSettings(doc.id);
       if (settings.styleId) style = await new Promise<string>((resolve, reject) => { void workspace.output(settings.styleId!).then(blob => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(blob); }, reject); });
       find('[data-style-status]').textContent = style ? 'Project style reference loaded' : '';
       const savedFrames = room?.outputs.filter(output => output.kind === 'look-frame' && output.sceneId === doc.id && output.shotId === shot.id) ?? [];
       const loaded = new Set<number>();
-      for (const output of savedFrames) { const value = JSON.parse(await (await workspace.output(output.id)).text()), frame = frames.find(frame => Math.abs(frame.time - value.time) < .001); if (frame && value.previs === frame.previs && !loaded.has(frame.time)) { frame.result = value.image; frame.state = 'done'; frame.savedId = output.id; loaded.add(frame.time); } }
-      if (loaded.size || brief) message('Saved prompt and matching reference images restored. If the shot has changed, regenerate the prompt.');
-      if (!loaded.size && !brief) message(`${frames.length} frames · ${pages.length} storyboard page${pages.length === 1 ? '' : 's'}. Generate a prompt or write your own below.`);
+      for (const output of savedFrames) { const value = JSON.parse(await (await workspace.output(output.id)).text()), frame = frames.find(frame => Math.abs(frame.time - value.time) < .001); if (frame && value.previs === frame.previs && !loaded.has(frame.time)) { frame.result = value.image; frame.savedId = output.id; loaded.add(frame.time); } }
+      if (legacyPrompt) briefContext = context();
+      message(briefAvailable === false && !currentBrief() ? 'Prompt generation is unavailable. You can still download storyboard pages.' :
+        brief && !currentBrief() ? 'A previous prompt is available. Generate a new one for this shot.' : '');
     } catch (error) { message(controller!.signal.aborted ? 'Preparation cancelled. Try again when ready.' : (error as Error).message); }
-    finally { loading = false; busy = false; if (!disposed) { draw(); showBrief(); update(); } }
+    finally { loading = false; busy = false; if (!disposed) { showBrief(); update(); } }
   })();
   return {
     get busy() { return busy || uploading; },

@@ -1,14 +1,17 @@
 #shotPanel { display: flex; flex-direction: column; max-width: calc(100% - 16px); max-height: calc(100% - 16px); }
-#shotPanel .shot-preview-header { flex: none; gap: 4px; padding: 6px; border-bottom: 1px solid var(--line-soft); cursor: grab; touch-action: none; user-select: none; }
-#shotPanel .shot-preview-header select { flex: 1; width: 0; }
+#shotPanel .shot-preview-header { flex: none; gap: 5px; padding: 7px 8px; border-bottom: 1px solid var(--film-line); background: #1c1b18; cursor: grab; touch-action: none; user-select: none; }
+#shotPanel .shot-preview-header select { flex: 1; width: 0; height: 28px; padding: 4px 8px; border: 1px solid var(--film-line); border-radius: 4px; background: var(--film-surface); color: var(--film-ink); font-family: var(--font-mono); font-size: 11px; box-shadow: inset 0 1px 2px #00000066; }
+#shotPanel .shot-preview-header select:focus { border-color: var(--film-amber); outline: none; }
+#shotPanel .shot-preview-header button { color: var(--film-muted); }
+#shotPanel .shot-preview-header button:hover:not(:disabled) { background: var(--film-surface); color: var(--film-ink); }
 #shotPanel .shot-heading { cursor: grab; touch-action: none; user-select: none; }
-#shotPanel .shot-preview-grip { width: 18px; color: var(--muted); cursor: grab; }
+#shotPanel .shot-preview-grip { width: 18px; color: var(--film-muted); cursor: grab; }
 #shotPanel .shot-preview-grip svg { width: 12px; height: 18px; }
-#shotPanel .shot-preview-collapse { width: 24px; color: var(--text-secondary); }
+#shotPanel .shot-preview-collapse { width: 24px; color: var(--film-muted); }
 #shotPanel.is-dragging, #shotPanel.is-dragging .shot-preview-header, #shotPanel.is-dragging .shot-heading, #shotPanel.is-dragging .shot-preview-grip { cursor: grabbing; }
 .shot-preview-body { min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
-.shot-footer-actions { display: flex; align-items: center; flex: none; gap: 2px; }
+.shot-footer-actions { display: flex; align-items: center; flex: none; gap: 3px; }
 .shot-footer > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.shot-footer-actions button { min-height: 28px; }
+.shot-footer-actions button { min-height: 26px; border: 1px solid var(--film-line); background: var(--film-surface); }
 .shot-footer-actions svg { width: 12px; height: 12px; }
 .camera-piloting .viewport-heading, .camera-piloting .view-navigation, .camera-piloting .viewport-caption { visibility: hidden; pointer-events: none; }

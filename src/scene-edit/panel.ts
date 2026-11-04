@@ -11,6 +11,7 @@ import { loadReference, saveReference, saveObservations, detachReference, reques
 import type { ReferenceContext } from '../reference/observations';
 import type { ReferenceInput } from '../reference/types';
 import { performanceTake, performanceKey, MAX_PERFORMANCE_TAKES, type PerformanceTarget } from '../performance/refinement';
+import type { ProjectContent } from '../types';
 
 /** Prompts that build a complete demo scene in one turn. */
 const STARTER_PROMPTS: [label: string, prompt: string][] = [
@@ -24,6 +25,24 @@ interface Options extends Omit<SessionOptions, 'changed'> {
   root: HTMLElement; book: ConversationBook; changed(): void; clearSelection(): void; removeSelection(id: string): void;
 }
 const esc = (text: string) => text.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+type Edit = NonNullable<AssistantMessage['edit']>;
+type Operation = Edit['operations'][number];
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+/** What a scene edit built, counted from its saved operations. */
+function sceneResult(edit: Edit, project: ProjectContent) {
+  const of = <T extends Operation['type']>(type: T) => edit.operations.filter((operation): operation is Extract<Operation, { type: T }> => operation.type === type);
+  const added = of('add_scene').at(-1), shots = of('add_shot'), duration = added?.duration ?? of('set_duration').at(-1)?.duration;
+  const sceneId = added?.sceneId ?? shots[0]?.sceneId ?? edit.sceneId;
+  const objects = of('add_object').length + of('instantiate_asset').length, cameras = of('add_camera').length + shots.filter(operation => 'fov' in operation.shot).length;
+  const stats = [objects && plural(objects, 'object'), cameras && plural(cameras, 'camera'), shots.length && plural(shots.length, 'shot'), duration && `${duration} s`].filter((stat): stat is string => !!stat);
+  return {
+    kicker: added ? 'Scene built' : shots.length ? 'Shots added' : 'Scene edited',
+    title: added?.name ?? project.scenes.find(scene => scene.id === sceneId)?.name ?? 'Scene',
+    stats: stats.length ? stats : [plural(edit.operations.length, 'change')],
+    sceneId, shotIds: shots.map(operation => operation.shot.id),
+  };
+}
 
 export class SceneEditPanel {
   readonly session: ConversationSession;
@@ -41,6 +60,8 @@ export class SceneEditPanel {
   private pendingAnimations = new Set<string>();
   private animationPickerContext = '';
   private progressOpen = new Set<string>();
+  private thumbnails = new Map<string, string>();
+  private thumbnailTimer: ReturnType<typeof setTimeout> | undefined;
   constructor(private readonly options: Options) {
     options.root.innerHTML = `
       <div class="conversation-heading"><button type="button" data-chat="history" aria-label="Conversation history" aria-expanded="false"><span class="conversation-title"></span><span class="chevron">${icon('chevron-down')}</span></button><button type="button" class="icon-button" data-chat="new" aria-label="New conversation" title="New conversation">${icon('plus')}</button><details class="conversation-menu"><summary aria-label="Conversation options" title="Conversation options">${icon('more')}</summary><div class="conversation-menu-content"><div class="conversation-model">Model <span id="museModel">Muse</span></div><button type="button" data-chat="diagnostics">${icon('download')} Download diagnostics</button></div></details></div>
@@ -133,6 +154,7 @@ export class SceneEditPanel {
       if (retry) void this.session.send(retry);
       if (refresh) void this.session.refresh(refresh);
       if (suggestion) { this.session.setDraft(suggestion); this.prompt.focus(); }
+      if (target.dataset.focusShot) this.focusShot(target.dataset.focusScene!, target.dataset.focusShot);
     });
     this.query('form').addEventListener('submit', event => { event.preventDefault(); void this.session.send(); });
     this.query<HTMLInputElement>('.chat-reference-file').addEventListener('change', event => { const file = (event.target as HTMLInputElement).files?.[0]; if (file) void this.attachReference(file).catch(() => {}); (event.target as HTMLInputElement).value = ''; });
@@ -245,13 +267,48 @@ export class SceneEditPanel {
   }
   private editCard(message: AssistantMessage): string {
     const edit = message.edit; if (!edit) return '';
-    if (edit.status === 'applied') return `<span class="chat-applied">${icon('check')} Applied earlier</span>`;
+    const { project, revision } = this.options.context(), recordings = edit.operations.filter(operation => operation.type === 'refine_take').length;
+    const result = recordings ? null : sceneResult(edit, project);
+    const head = result ? `<div class="result-head"><span class="result-kicker">${result.kicker}</span><strong class="result-title">${esc(result.title)}</strong><span class="result-stats">${result.stats.join(' · ')}</span></div>` : '';
+    if (edit.status === 'applied') return result
+      ? `<div class="change-card scene-result">${head}${this.resultShots(message.id, result, project)}<div class="result-footer"><span class="chat-applied">${icon('check')} Applied</span></div></div>`
+      : `<span class="chat-applied">${icon('check')} Applied earlier</span>`;
     if (edit.status === 'discarded') return '<span class="change-note">Not applied</span>';
-    if (edit.status === 'stale' || edit.revision !== this.options.context().revision)
+    if (edit.status === 'stale' || edit.revision !== revision)
       return `<div class="change-card"><div class="change-title">Scene changed since this suggestion</div><div class="change-description">Ask Muse for a new preview using the current scene.</div><div class="change-actions"><button type="button" data-refresh="${esc(message.id)}" ${this.session.busy ? 'disabled' : ''}>Update preview ${icon('external')}</button></div></div>`;
-    const reviewing = this.session.previewMessageId === message.id, recordings = edit.operations.filter(operation => operation.type === 'refine_take').length;
-    const title = recordings ? `${recordings} refined animation${recordings === 1 ? '' : 's'}` : `${edit.operations.length} scene ${edit.operations.length === 1 ? 'change' : 'changes'}`;
-    return `<div class="change-card"><div class="change-title">${title}</div><div class="change-description">${reviewing ? 'Preview only · not applied' : 'Ready to review'}</div>${reviewing ? `<div class="change-compare"><button type="button" data-before="${esc(message.id)}" aria-pressed="${!this.session.after}">Before</button><button type="button" data-after="${esc(message.id)}" aria-pressed="${this.session.after}">After</button></div>` : ''}<div class="change-actions">${recordings ? `<button type="button" data-play-review="${esc(message.id)}">${icon('play')} Play selection</button>` : ''}<button type="button" data-discard="${esc(message.id)}">Discard</button><button type="button" class="primary-button" ${reviewing ? `data-apply="${esc(message.id)}"` : `data-review="${esc(message.id)}"`}>${reviewing ? 'Apply changes' : 'Review changes'}</button></div></div>`;
+    const reviewing = this.session.previewMessageId === message.id;
+    return `<div class="change-card${result ? ' scene-result' : ''}">${head || `<div class="change-title">${plural(recordings, 'refined animation')}</div>`}<div class="change-description">${reviewing ? 'Preview only · not applied' : 'Ready to review'}</div>${reviewing ? `<div class="change-compare"><button type="button" data-before="${esc(message.id)}" aria-pressed="${!this.session.after}">Before</button><button type="button" data-after="${esc(message.id)}" aria-pressed="${this.session.after}">After</button></div>` : ''}<div class="change-actions">${recordings ? `<button type="button" data-play-review="${esc(message.id)}">${icon('play')} Play selection</button>` : ''}<button type="button" data-discard="${esc(message.id)}">Discard</button><button type="button" class="primary-button" ${reviewing ? `data-apply="${esc(message.id)}"` : `data-review="${esc(message.id)}"`}>${reviewing ? 'Apply changes' : 'Review changes'}</button></div></div>`;
+  }
+  private resultShots(messageId: string, result: ReturnType<typeof sceneResult>, project: ProjectContent): string {
+    const scene = project.scenes.find(item => item.id === result.sceneId);
+    const shots = scene ? scene.shots.filter(shot => result.shotIds.includes(shot.id)).sort((a, b) => a.start - b.start) : [];
+    if (!scene || !shots.length) return '';
+    return `<div class="result-shots">${shots.map((shot, index) => {
+      const key = `${messageId}:${shot.id}`, image = this.thumbnails.get(key);
+      return `<button type="button" data-focus-scene="${esc(scene.id)}" data-focus-shot="${esc(shot.id)}" title="Go to ${esc(shot.name)}">${image ? `<img src="${image}" alt=""/>` : `<span class="result-thumb" data-thumbnail="${esc(key)}"></span>`}<span class="result-shot-name"><b>${String(index + 1).padStart(2, '0')}</b>${esc(shot.name)}</span></button>`;
+    }).join('')}</div>`;
+  }
+  private focusShot(sceneId: string, shotId: string) {
+    const context = this.options.context(), shot = context.project.scenes.find(scene => scene.id === sceneId)?.shots.find(item => item.id === shotId);
+    if (!shot) return;
+    const selectedIds = sceneId === context.sceneId ? context.selectedIds ?? (context.selectedId ? [context.selectedId] : []) : [];
+    this.options.focus?.({ sceneId, shotId, selectedIds, time: shot.start });
+  }
+  private queueThumbnails() {
+    if (this.thumbnailTimer || !this.messages.querySelector('[data-thumbnail]')) return;
+    this.thumbnailTimer = setTimeout(() => {
+      this.thumbnailTimer = undefined;
+      const { project } = this.options.context();
+      let added = false;
+      for (const placeholder of this.messages.querySelectorAll<HTMLElement>('[data-thumbnail]')) {
+        const key = placeholder.dataset.thumbnail!, button = placeholder.closest<HTMLElement>('[data-focus-shot]')!;
+        const shot = project.scenes.find(scene => scene.id === button.dataset.focusScene)?.shots.find(item => item.id === button.dataset.focusShot);
+        if (!shot || this.thumbnails.has(key)) continue;
+        try { this.thumbnails.set(key, this.options.capture(project, button.dataset.focusScene!, shot.id, shot.start + shot.duration / 2, 'shot', true).dataUrl); added = true; }
+        catch { /* The stage is busy (dragging, recording); a later render tries again. */ }
+      }
+      if (added) this.render();
+    }, 150);
   }
   private evidenceCaption(snapshot: SceneSnapshot) {
     const shot = this.options.context().project.scenes.flatMap(scene => scene.shots).find(shot => shot.id === snapshot.shotId);
@@ -299,7 +356,7 @@ export class SceneEditPanel {
     this.renderedLastMessage = last?.id ?? '';
     this.query<HTMLButtonElement>('[type="submit"]').disabled = this.session.busy || !thread.draft.trim();
     this.query('[type="submit"]').hidden = this.session.busy; this.query('[data-chat="stop"]').hidden = !this.session.busy;
-    this.renderPicker(); this.refreshContext(); this.renderReference();
+    this.renderPicker(); this.refreshContext(); this.renderReference(); this.queueThumbnails();
   }
   refreshContext() {
     const { project, sceneId, shotId, selectedId, selectedIds } = this.options.context();

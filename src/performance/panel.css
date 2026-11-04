@@ -1,4 +1,4 @@
-#performanceBar { position: absolute; z-index: 12; left: 50%; bottom: 16px; transform: translateX(-50%); width: min(640px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow: auto; padding: 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-panel); background: var(--paper); box-shadow: var(--shadow-floating); font-size: var(--font-ui); }
+#performanceBar { position: absolute; z-index: 12; left: 50%; bottom: 16px; transform: translateX(-50%); width: min(640px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow: auto; padding: 14px; border: var(--ink-line); border-radius: var(--radius-panel); background: var(--paper); box-shadow: var(--viewport-shadow); font-size: var(--font-ui); }
 .performance-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .performance-subject { display: flex; align-items: center; flex: 1; min-width: 0; gap: 8px; }
 .performance-subject strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-ui); font-weight: 550; }
@@ -15,7 +15,7 @@
 #performanceBar .performance-secondary { border-color: var(--line); }
 #performanceBar kbd { margin-left: 5px; color: inherit; opacity: .7; }
 .record-button { margin-left: auto; border-color: var(--error-line); background: var(--record); color: var(--record-ink); }
-#performanceBar .record-button:hover { background: var(--error-surface); }
+#performanceBar .record-button:hover { background: var(--error-surface); color: var(--error); }
 .performance-active .viewport-heading { pointer-events: none; opacity: .35; }
 .performance-active .viewport-heading button { pointer-events: none; }
 .performance-active .viewport-caption { visibility: hidden; }
