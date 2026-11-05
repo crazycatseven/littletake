@@ -4,7 +4,7 @@
 
 | | |
 | --- | --- |
-| **▶ Demo video** | **[littletake.crazycat.ai/demo.mp4](https://littletake.crazycat.ai/demo.mp4)** |
+| **▶ Demo video** | **[littletake.crazycat.ai/demo](https://littletake.crazycat.ai/demo)** |
 | **Live demo** | **[littletake.crazycat.ai](https://littletake.crazycat.ai)** |
 
 Build and animate an editable low-poly scene, then use it to direct AI video.

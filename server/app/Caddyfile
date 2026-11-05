@@ -1,4 +1,10 @@
 {$LITTLETAKE_DOMAIN} {
+    redir /demo/ /demo 308
+    handle /demo {
+        root * /data/public
+        rewrite * /demo.html
+        file_server
+    }
     handle /demo.mp4 {
         root * /data/public
         file_server
