@@ -26,7 +26,8 @@
 .ae-measure strong { color:var(--text-secondary); font-size:12px; font-weight:500; font-variant-numeric:tabular-nums; }
 .ae-measure strong small,.ae-measure>span { color:var(--text-secondary); font-size:9px; }
 .ae-properties>label,.ae-component>label { display:flex; flex-direction:column; gap:7px; margin-bottom:14px; color:var(--text-secondary); font-size:11px; }
-.ae-properties>label>input:not([type=color]):not([type=range]),.ae-properties select,.ae-properties textarea,.ae-component input:not([type=checkbox]),.ae-add select { min-width:0; border:1px solid var(--line); border-radius:var(--radius-control); padding:7px 9px; background:var(--field); color:var(--text-secondary); font:inherit; }
+.ae-properties>label>input:not([type=color]):not([type=range]),.ae-properties select,.ae-properties textarea,.ae-component input:not([type=checkbox]),.ae-add select { min-width:0; border:1px solid var(--line); border-radius:var(--radius-control); padding:7px 9px; background-color:var(--field); color:var(--text-secondary); font:inherit; }
+.ae-properties select,.ae-add select { padding-right:26px; }
 .ae-properties textarea { min-height:75px; resize:vertical; }
 .ae-properties .entity-name { color:var(--ink); }
 .ae-part-id { color:var(--muted); font-size:9px; }
@@ -72,7 +73,6 @@
 .ae-pane .error { color:var(--error); }
 .asset-mode .bottom-panel>.bottom-panel-toolbar,.asset-mode .bottom-panel>.bottom-panel-body { opacity:.35; }
 .ae-timeline-note { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); padding:6px 12px; border-radius:var(--radius-control); background:var(--paper); color:var(--text-secondary); font-size:11px; pointer-events:none; }
-.ae-properties,.ae-chat { scrollbar-width:thin; scrollbar-color:var(--line-strong) transparent; }
 .asset-library-entry { position:relative; }
 .asset-library-entry>.asset-edit-button { width:100%; margin-top:3px; border:1px solid var(--line); border-radius:var(--radius-control); padding:6px; background:var(--surface-raised); color:var(--text-secondary); font-size:10px; }
 .asset-instance-edit { width:100%; margin:7px 0 12px; padding:8px; border:1px solid var(--line); border-radius:var(--radius-control); background:var(--surface-raised); color:var(--text-secondary); font-size:11px; }

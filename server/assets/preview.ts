@@ -25,6 +25,17 @@ export function measureSceneGeometry(scene: SceneDocument, assets: AssetDefiniti
   } finally { snapshot.dispose(); }
 }
 
+/** How each placed asset stands relative to the others: 0 degrees looks straight at it, 180 has its back to it. */
+export function assetFacing(scene:SceneDocument,time:number){
+  const actors=scene.objects.filter(object=>object.kind==='asset'&&!effectivelyHidden(scene,object.id));
+  if(actors.length<2||actors.length>6)return [];
+  const matrices=sceneWorldMatrices(scene,time),place=(id:string)=>new Vector3().setFromMatrixPosition(matrices.get(id)!);
+  return actors.map(actor=>{
+    const forward=new Vector3(0,0,1).transformDirection(matrices.get(actor.id)!).setY(0).normalize(),from=place(actor.id);
+    return {object:actor.name,towards:actors.filter(other=>other!==actor).map(other=>({object:other.name,degreesOffFront:Math.round(MathUtils.radToDeg(forward.angleTo(place(other.id).sub(from).setY(0).normalize())))}))};
+  });
+}
+
 /** Deterministic CPU previews for the expert. Uses the same Three geometry as the interactive stage. */
 export function renderAssetPreview(asset: AssetDefinition, jointAngles: Record<string, number> = {}): Uint8Array {
   const root = createAssetGroup(asset);
@@ -89,7 +100,8 @@ export function renderScenePreview(scene:SceneDocument,assets:AssetDefinition[],
     maskFramePixels(pixels,width*2,height*2,frameBounds??cameraData.frameBounds,false,owners);const bounds=objects.map(()=>({x0:width*2,y0:height*2,x1:0,y1:0,pixels:0}));for(let pixel=0;pixel<owners.length;pixel++){const id=owners[pixel];if(!id)continue;const box=bounds[id-1],x=pixel%(width*2),y=Math.floor(pixel/(width*2));box.x0=Math.min(box.x0,x);box.y0=Math.min(box.y0,y);box.x1=Math.max(box.x1,x+1);box.y1=Math.max(box.y1,y+1);box.pixels++;}
     return {...frame,view:overviewFrame?cameraData.name:'shot',camera:{position:camera.position.toArray(),screenRight:new Vector3(1,0,0).applyQuaternion(camera.quaternion).toArray(),screenUp:new Vector3(0,1,0).applyQuaternion(camera.quaternion).toArray()},objects:poses,visibleBoxes:Object.fromEntries(objects.map((object,index)=>{const box=bounds[index];return [object.id,box.pixels?{box:[box.x0/(width*2),box.y0/(height*2),box.x1/(width*2),box.y1/(height*2)],pixels:box.pixels/4}:null];})),image:encodePreviewPng(pixels,width,height)};
   });
-  const montage=new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${frames.length*384}"><rect width="100%" height="100%" fill="#f4f1ea"/>${results.map((frame,index)=>`<text x="8" y="${index*384+17}" font-size="13">FRAME ${index+1} · ${frame.view} · ${frame.time.toFixed(3)}s · geometry preview</text><image y="${index*384+24}" width="${width}" height="${height}" href="data:image/png;base64,${Buffer.from(frame.image).toString('base64')}"/>`).join('')}</svg>`).render().asPng();
+  const columns=frames.length>3?2:1,cell=(index:number)=>({x:index%columns*width,y:Math.floor(index/columns)*384});
+  const montage=new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="${width*columns}" height="${Math.ceil(frames.length/columns)*384}"><rect width="100%" height="100%" fill="#f4f1ea"/>${results.map((frame,index)=>`<text x="${cell(index).x+8}" y="${cell(index).y+17}" font-size="13">FRAME ${index+1} · ${frame.view} · ${frame.time.toFixed(3)}s · geometry preview</text><image x="${cell(index).x}" y="${cell(index).y+24}" width="${width}" height="${height}" href="data:image/png;base64,${Buffer.from(frame.image).toString('base64')}"/>`).join('')}</svg>`).render().asPng();
   return {image:montage,frameImages:results.map(frame=>frame.image),frames:results.map(({image,...frame})=>frame),...(measurements ? {measurements} : {})};
 }
 

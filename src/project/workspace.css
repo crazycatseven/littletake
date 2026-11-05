@@ -88,7 +88,6 @@
 .projects-count {
   padding:6px 11px;
   border:1px solid var(--line);
-  border-left:3px solid var(--accent);
   border-radius:4px;
   background:var(--field);
   color:var(--ink);
@@ -125,7 +124,7 @@
 .project-search:focus-within {border-color:var(--ink)}
 .project-search input:focus-visible {outline:0}
 .project-sort {display:flex;align-items:center;gap:10px;font-family:var(--font-mono);font-size:10.5px;color:var(--muted)}
-.project-sort select {padding:8px 10px;border:var(--ink-line);border-radius:var(--radius-control);background:var(--field);color:var(--ink);font:inherit;cursor:pointer;box-shadow:var(--shadow-card)}
+.project-sort select {padding:7px 28px 7px 10px;border:var(--ink-line);border-radius:var(--radius-control);background-color:var(--field);color:var(--ink);font:inherit;cursor:pointer;box-shadow:var(--shadow-card)}
 .project-cards {
   display:grid;
   grid-template-columns:repeat(3,minmax(0,1fr));
@@ -180,7 +179,7 @@
   font-family:var(--font-mono);
   font-size:10px;
   padding:4px 8px;
-  border-left:2px solid var(--film-amber);
+  border:1px solid #ffffff26;
   border-radius:3px;
   background:#161614d9;
   color:#f5f2eb}

@@ -88,6 +88,9 @@ export class MetaProvider implements AIProvider {
       if (response.status === 402) throw new AIError('credits_required', 'Muse needs API credits before it can finish this request.', 503);
       if (response.status === 401 || response.status === 403) throw new AIError('provider_auth', 'Muse is not authorized on this server.', 503);
       if (response.status === 429) throw new AIError('rate_limited', 'Muse is busy. Please wait a moment and try again.', 429);
+      // Only the error code is read, so callers can rephrase a request the content policy declined.
+      if (response.status === 400 && await response.json().then((value: { error?: { code?: unknown } }) => value.error?.code === 'content_policy_violation', () => false))
+        throw new AIError('content_blocked', 'Muse declined to generate this content.', 422);
       throw new AIError('provider_error', 'Muse could not finish this request. Please try again.');
     }
     try { return await response.json(); } catch { throw new AIError('invalid_response', 'Muse returned an unreadable response. Please try again.'); }

@@ -1,3 +1,4 @@
+import { Euler, MathUtils, Vector3 } from 'three';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCamera, createEmptyScene, createObject, evaluateFov } from '../src/model.ts';
@@ -34,6 +35,9 @@ test('drawn and Agent camera paths use world positions under parents and retain 
   near(worldTransform(path,camera.id,6).position,points[1]);assert.equal(evaluateFov(path.cameras[0],6),55);
   const aimed=applyProjectOperations(project,[{type:'set_camera_motion',sceneId:scene.id,id:camera.id,frames:points.map((position,i)=>({time:i*6,position,target:[5,1,2] as Vec3}))}],0).scenes[0];
   near(worldTransform(aimed,camera.id,6).position,points[1]);assert.equal(evaluateFov(aimed.cameras[0],6),55);
+  const orbit=applyProjectOperations(project,[{type:'set_camera_motion',sceneId:scene.id,id:camera.id,frames:([[0,1.5,3],[3,1.5,0],[0,1.5,-3]] as Vec3[]).map((position,i)=>({time:i*2,position,target:[0,1.5,0] as Vec3}))}],0).scenes[0];
+  const between=worldTransform(orbit,camera.id,.5),aiming=new Vector3(0,0,-1).applyEuler(new Euler(...between.rotation.map(MathUtils.degToRad) as Vec3));
+  assert.ok(aiming.angleTo(new Vector3(0,1.5,0).sub(new Vector3(...between.position)))<.05,'A camera keeps aiming at its target between keys.');
   assert.equal(project.scenes[0].cameras[0].track,null);
 });
 

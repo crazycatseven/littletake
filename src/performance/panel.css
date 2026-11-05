@@ -20,7 +20,7 @@
 .performance-active .viewport-heading button { pointer-events: none; }
 .performance-active .viewport-caption { visibility: hidden; }
 .performance-timing { display: flex; align-items: center; gap: 7px; font-size: var(--font-small); color: var(--text-secondary); }
-.performance-timing select { min-height: 32px; padding: 5px 8px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--field); color: var(--ink); font: inherit; }
+.performance-timing select { min-height: 32px; padding: 5px 26px 5px 8px; border: 1px solid var(--line); border-radius: var(--radius-control); background-color: var(--field); color: var(--ink); font: inherit; }
 .performance-recording-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .performance-time-label { font-size: var(--font-small); color: var(--muted); }
 #performanceClock { min-width: 68px; color: var(--ink); }

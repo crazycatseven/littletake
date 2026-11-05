@@ -16,6 +16,7 @@ For continuous planar backgrounds beneath irregular opaque surfaces, use a conti
 When scene design/concept and ORIGINAL reference photos are supplied, use them to preserve the specifically requested asset's identifying silhouette, proportions, palette and visual hierarchy. A generic box/tower with the right name does not satisfy a recognizable landmark. Required identifying geometry is not incidental detail that can be waived by calling it a proxy. Scene-wide photos are context; build only the requested reusable asset. For repeated environments vary massing, roof profiles and facade rhythm in accordance with the design rather than making a uniform grid.
 All primitive parts currently render opaque; color does not provide transparency. Represent clear glass by its surrounding frame and leave the transparent opening empty. Do not fill a window/door opening with a solid gray slab that blocks actors or sight lines. Use parent yaw groups with separate local pitch for radial assemblies, and attach/span anchors to keep segmented supports connected.
 For articulated proxy people, spherical hands cannot show fingers or a natural grip. A held prop touching/intersecting the appropriate hand and following it in the posed render is sufficient. Readable lettering, fine finger articulation and likeness are not required. Approve a usable rough proxy once the brief's silhouette, colors, dimensions and articulated attachments are met. If rejecting, state the observed defect; distinguish an unrendered proposed correction from an already verified change.
+This is white-box previs: a proxy only has to show where something is, how big, which way it faces and how it moves; its appearance comes later from a prompt. Use the fewest parts that do that, with no surface detail: no scales, teeth, spikes, claws, horns or armour plating. Unless extending a supplied base asset, a person or humanoid is one simple body shape (a cylinder or an ellipsoid), one small marker showing its front, and only the limbs the action needs as single jointed segments holding their props, about 3-10 parts in total. A creature is roughly 25-40 parts: smooth ellipsoids and tapering cones for body, neck, head, tail and legs, never boxes or bare cylinders. A neck or tail is 3-5 overlapping segments following a curve, with the head a distinct form carried forward rather than on a straight vertical post, jointed only where the action needs it. A wing, cape or fin is one or two spheres flattened on one axis on one arm bone with a flap hinge, never a rectangular slab. Use a mirror modifier for paired parts. Use one or two plain mid-tone colours, not near-black.
 ${TOOLKIT_INSTRUCTIONS}`;
 const reviewSchema = z.strictObject({ approved: z.boolean(), notes: z.string().min(1).max(1800), revisedRecipe: assetRecipeSchema.nullable().optional().default(null) });
 export interface AssetJob { [key: string]: unknown; id: string; status: 'running' | 'ready' | 'failed'; brief: string; startedAt: string; referenceContentStart?:number;attempts: { request: Omit<StructuredRequest, 'signal' | 'onOutput'>; rawOutput?: string; result?: unknown; error?: string }[]; asset?: { id: string }; error?: string }
@@ -32,7 +33,7 @@ export function assetJobReferences(job:AssetJob):AIContent[]{
   return request.content.slice(start);
 }
 
-export async function generateAsset(brief: string, provider: AIProvider, library: AssetLibrary, signal?: AbortSignal, options: {referenceImage?:string;references?:AIContent[];base?:AssetDefinition;resumeJobId?:string;onProgress?:ProgressListener} = {}): Promise<{ asset: AssetDefinition; job: AssetJob }> {
+export async function generateAsset(brief: string, provider: AIProvider, library: AssetLibrary, signal?: AbortSignal, options: {referenceImage?:string;references?:AIContent[];base?:AssetDefinition;resumeJobId?:string;onProgress?:ProgressListener;previs?:boolean} = {}): Promise<{ asset: AssetDefinition; job: AssetJob }> {
   let {base}=options;
   const references=options.references??(options.referenceImage?[{type:'image' as const,dataUrl:options.referenceImage}]:[]);
   const previous=options.resumeJobId?await library.readJob(options.resumeJobId) as AssetJob:undefined;
@@ -42,7 +43,7 @@ export async function generateAsset(brief: string, provider: AIProvider, library
   await library.saveJob(job);
   const build=(recipe:unknown)=>{const asset=createAsset(recipe,'asset-'+job.id,'generated',base?'preserve':'bottom-center');if(base?.template)asset.template=structuredClone(base.template);return validateAsset(asset);};
   const ask = async (request: Omit<StructuredRequest, 'signal' | 'onOutput'>) => {
-    request={...request,maxOutputTokens:request.maxOutputTokens??16_000};
+    request={...request,maxOutputTokens:request.maxOutputTokens??16_000,...(options.previs?{reasoningEffort:'medium' as const}:{})};
     signal?.throwIfAborted();if(!job.attempts.length)job.referenceContentStart=request.content.length-references.length;const attempt: AssetJob['attempts'][number] = { request }; job.attempts.push(attempt); await library.saveJob(job);
     try { const result = await provider.generateObject({ ...request, signal, onOutput: text => { attempt.rawOutput = text; } }); attempt.result = result; await library.saveJob(job); return result; }
     catch (error) { attempt.error = error instanceof Error ? error.message : 'Generation failed.'; await library.saveJob(job); throw error; }
@@ -63,6 +64,11 @@ export async function generateAsset(brief: string, provider: AIProvider, library
     }
     if (!asset) throw new Error('The expert could not produce valid geometry.');
     // Every revised recipe needs its own rendered review before publication.
+    const publish=async(current:AssetDefinition,notes:string,message:string)=>{
+      signal?.throwIfAborted(); await library.register(current);
+      job.status = 'ready'; job.asset = { id: current.id }; job.summary = assetSummary(current); job.review = notes; job.finishedAt = new Date().toISOString();
+      await library.saveJob(job); options.onProgress?.(newProgress(message, 'done')); return { asset:current, job };
+    };
     for (let review = 0; review < 3; review++) {
       options.onProgress?.(newProgress(`${review?'Rechecking':'Checking'} asset views and dimensions: ${asset.name}`));
       signal?.throwIfAborted(); const image = Buffer.from(await library.preview(asset)).toString('base64');
@@ -73,10 +79,11 @@ export async function generateAsset(brief: string, provider: AIProvider, library
       const posed = Object.keys(trialJointAngles).length ? Buffer.from(await library.preview(asset, trialJointAngles)).toString('base64') : null;
       const result = reviewSchema.parse(await ask({ instructions: EXPERT_INSTRUCTIONS, format: 'json_object', schema: z.toJSONSchema(reviewSchema), schemaName: 'proxy_asset_review',
         content: [{ type: 'text', text: JSON.stringify({ brief, recipe: asset, measurements: measureAsset(asset), trialJointAngles, posedMeasurements: posed ? measureAsset(asset, trialJointAngles) : null, previousReview: review ? job.attempts.at(-1)?.result : null, instruction: 'Inspect all three rendered views and measured local/asset joint axes. The first image shows the rest pose; when present the second shows trialJointAngles. Additional images are labeled reference context: they may include a generated scene concept followed by ORIGINAL reference photos/source frames. Distinguish the concept target from factual evidence; compare only the asset requested in the brief with relevant silhouettes and colors. Check moving-part clearance in the trial pose. Approve only if the brief is met. If approved, revisedRecipe=null. Otherwise supply a corrected complete recipe.' }) }, { type: 'image', dataUrl: 'data:image/png;base64,' + image }, ...(posed ? [{ type: 'image' as const, dataUrl: 'data:image/png;base64,' + posed }] : []),...references] }));
-      if (result.approved && result.revisedRecipe === null) {
-        signal?.throwIfAborted(); await library.register(asset);
-        job.status = 'ready'; job.asset = { id: asset.id }; job.summary = assetSummary(asset); job.review = result.notes; job.finishedAt = new Date().toISOString();
-        await library.saveJob(job); options.onProgress?.(newProgress(`${asset.name} passed its visual review and was saved to Assets.`, 'done')); return { asset, job };
+      if (result.approved && result.revisedRecipe === null) return await publish(asset,result.notes,`${asset.name} passed its visual review and was saved to Assets.`);
+      // White-box previs never stops for a model: apply its one correction if valid, and keep the result either way.
+      if (options.previs) {
+        try { if (result.revisedRecipe) asset = build(result.revisedRecipe); } catch { /* the last valid version stands */ }
+        return await publish(asset,result.notes,`${asset.name} was saved to Assets.`);
       }
       if (!result.revisedRecipe || review === 2) throw new Error('Asset review did not pass: ' + result.notes);
       asset = build(result.revisedRecipe);

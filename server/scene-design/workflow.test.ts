@@ -4,8 +4,11 @@ import {mkdtemp} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {MetaProvider} from '../ai/meta.ts';
+import {AIError,type AIProvider} from '../ai/provider.ts';
+import {AssetLibrary} from '../assets/library.ts';
+import {generateAsset} from '../assets/expert.ts';
 import {SceneDesigner,type SceneDesign} from './design.ts';
-import {researchScene,referencePhotos} from './research.ts';
+import {researchScene,referencePhotos,factualReferences} from './research.ts';
 import {fixturePNG,fixtureImage,fixturePlan,fixtureResearch,fixtureReferenceSelection,fixtureReview,envelope,researchEnvelope,researchFetchFixture} from './fixtures.ts';
 import {ProjectRoomStore} from '../projects/store.ts';
 import {createProject} from '../../src/project/storage.ts';
@@ -75,9 +78,13 @@ test('canonical scene roles reject unsuitable library geometry, cache the reject
 
 test('invented sources cannot satisfy reference search and scope-rejected concepts cannot unlock modeling',async()=>{
   let imageCalls=0;
-  await assert.rejects(researchScene('Whole place layout','Full original place',{name:'test',model:'test',async generateObject(request){if(request.schemaName==='scene_reference_selection')return {...fixtureReferenceSelection,layoutUsable:false,notes:'The aerial is too hazy to establish the whole shape.'};request.onResponse?.(researchEnvelope());return fixtureResearch;}},undefined,researchFetchFixture),/too hazy/);
+  // References only inform the design: photos that cannot establish the layout are dropped, never block it, and are not used as a standard.
+  const unusable=await researchScene('Whole place layout','Full original place',{name:'test',model:'test',async generateObject(request){if(request.schemaName==='scene_reference_selection')return {...fixtureReferenceSelection,layoutUsable:false,notes:'The aerial is too hazy to establish the whole shape.'};request.onResponse?.(researchEnvelope());return fixtureResearch;}},undefined,researchFetchFixture);
+  assert.equal(unusable.role,'inspiration');assert.equal(unusable.images.length,0);assert.match(unusable.findings,/too hazy/);
   const photo=(page:string,purpose?:'layout'|'identity'|'detail')=>({page,purpose,title:page,url:page,credit:'',image:fixtureImage});const old={images:[photo('old-1'),photo('old-2'),photo('old-3'),photo('old-4')]},targeted={images:[photo('new-layout','layout'),photo('new-identity','identity'),photo('new-detail','detail')]};assert.deepEqual(referencePhotos([old,targeted] as any).map(photo=>photo.page),['new-layout','new-identity','new-detail','old-1'],'Targeted layout evidence cannot be hidden by an older full image allowance.');
-  await assert.rejects(researchScene('named place','Original requested place',{name:'test',model:'test',async generateObject(request){request.onResponse?.(envelope(fixtureResearch));return fixtureResearch;}},undefined,researchFetchFixture),/actual search evidence/);
+  // Invented sources are never trusted: unverified findings are dropped and the design follows the request instead.
+  const unverified=await researchScene('named place','Original requested place',{name:'test',model:'test',async generateObject(request){request.onResponse?.(envelope(fixtureResearch));return fixtureResearch;}},undefined,researchFetchFixture);
+  assert.equal(unverified.role,'inspiration');assert.deepEqual(unverified.sources,[]);assert.equal(unverified.images.length,0);assert.doesNotMatch(unverified.findings,new RegExp(fixtureResearch.findings.slice(0,20).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
   const records:unknown[]=[],provider=new MetaProvider({apiKey:'private-test-key',model:'test'},(async(_url,init)=>{
     const body=JSON.parse(String(init?.body));if(body.tools?.[0]?.type==='web_search')return Response.json(researchEnvelope());
     if(body.instructions?.startsWith('Select ORIGINAL visual references'))return Response.json(envelope(fixtureReferenceSelection));
@@ -86,4 +93,23 @@ test('invented sources cannot satisfy reference search and scope-rejected concep
   }) as typeof fetch),designer=new SceneDesigner(provider,'Complete named place',undefined,undefined,records,researchFetchFixture);
   await assert.rejects(designer.plan('place','A generic tiny substitute.'),/does not yet match/);assert.equal(imageCalls,2);assert.equal(designer.designs.get('place')?.status,'failed');assert.equal(records.length,1);
   await assert.rejects(designer.plan('place','Try the same failed job again.'),/do not restart/);assert.equal(imageCalls,2);
+});
+
+test('an imagined scene takes the previs path: no photo search or concept review, and nothing a reviewer or content filter says stops the build',async()=>{
+  const schemas:string[]=[];let photoFetches=0,images=0;
+  const provider:AIProvider={name:'test',model:'test',async generateObject(request){
+    schemas.push(request.schemaName!);
+    if(request.schemaName==='scene_reference_research'){request.onResponse?.(researchEnvelope());return {...fixtureResearch,imagined:true};}
+    if(request.schemaName==='proxy_asset_recipe')return {name:'Knight',description:'A rough knight proxy.',tags:['knight'],parts:[{id:'body',name:'Body',parentId:null,kind:'cube',position:[0,.5,0],rotation:[0,0,0],size:[1,1,1],color:'#888888',joint:null}]};
+    if(request.schemaName==='proxy_asset_review')return {approved:false,notes:'The sword grip is slightly offset.',revisedRecipe:null};
+    return fixturePlan;
+  },async generateImage(){images++;throw new AIError('content_blocked','declined');}};
+  const designer=new SceneDesigner(provider,'A knight faces a dragon',undefined,undefined,[],(async(...args:Parameters<typeof fetch>)=>{photoFetches++;return researchFetchFixture(...args);}) as typeof fetch);
+  const design=await designer.plan('scene','A standoff.');
+  assert.equal(design.status,'ready');assert.equal(design.concept,undefined,'A declined concept is skipped after one rephrased attempt.');assert.equal(images,2);
+  assert.equal(photoFetches,0,'No image search for an imagined scene.');assert.deepEqual(schemas,['scene_reference_research','scene_design_plan'],'No selection or concept review was paid for.');assert.equal(factualReferences(design.research),false);
+  const library=new AssetLibrary(await mkdtemp(path.join(tmpdir(),'littletake-previs-')));
+  const {asset,job}=await generateAsset('A knight',provider,library,undefined,{previs:true});
+  assert.equal(job.status,'ready','A failed self-check keeps the last version instead of blocking the scene.');assert.ok((await library.list()).some(item=>item.id===asset.id));
+  assert.equal(job.attempts.length,2,'One build and one self-check.');
 });

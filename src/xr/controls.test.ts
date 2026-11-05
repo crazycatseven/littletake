@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { XRControls, translatedGrab, rotatedGrab } from './controls';
 import { XRMenu, XR_MENU_TOGGLE, XR_MENU_DRAG, XR_TIMELINE_DRAG, XR_ADD_KEY, XR_DELETE_KEY, xrMenuSvg, xrMenuHandleSvg } from './menu';
+import { XR_FEEDBACK } from './feedback';
 import type { Transform } from '../types';
 import { XR_ASSETS, XR_ASSET_PREVIOUS, XR_ASSET_NEXT, XR_ASSET_PLACE, XR_ASSET_DELETE } from './assets';
 
@@ -820,12 +821,12 @@ test('XR feedback distinguishes hover, selection and held objects, then clears o
     controls.start(session as unknown as XRSession, new THREE.Vector3(0, 0, -3));
     fire('connected', { gripSpace: {}, targetRaySpace: {} }); controls.update(frame);
     const pointer = controllers[0].getObjectByName('XR pointer')!;
-    assert.equal(pointer.visible, true); assert.ok(colors().includes('c9f86b'));
+    assert.equal(pointer.visible, true); assert.ok(colors().includes(XR_FEEDBACK.ready.slice(1)));
     fire('selectstart'); fire('selectend'); controllers[0].rotation.y = Math.PI / 2; controls.update(frame);
-    assert.ok(colors().includes('62dded')); assert.ok(!colors().includes('c9f86b'));
+    assert.ok(colors().includes(XR_FEEDBACK.selected.slice(1))); assert.ok(!colors().includes(XR_FEEDBACK.ready.slice(1)));
     controllers[0].quaternion.identity(); fire('squeezestart'); grips[0].position.x = .1; controls.update(frame);
-    assert.ok(colors().includes('ffbd66')); assert.equal(target.position.x, .1);
-    tracked = false; controls.update(frame); assert.equal(pointer.visible, false); assert.ok(!colors().includes('ffbd66'));
+    assert.ok(colors().includes(XR_FEEDBACK.held.slice(1))); assert.equal(target.position.x, .1);
+    tracked = false; controls.update(frame); assert.equal(pointer.visible, false); assert.ok(!colors().includes(XR_FEEDBACK.held.slice(1)));
     controls.stop(); assert.equal(controls.feedbackRoot.visible, false); assert.equal(pointer.visible, false);
   } finally {
     controls.dispose(); target.geometry.dispose(); (target.material as THREE.Material).dispose();

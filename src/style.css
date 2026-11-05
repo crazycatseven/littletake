@@ -53,7 +53,7 @@
 .reference-assumptions h4 { margin: 0; font-size: 9px; font-weight: 500; }
 .reference-assumptions ul { max-height: 95px; overflow-y: auto; margin: 7px 0 0; padding-left: 15px; font-size: 10px; line-height: 1.65; }
 .reference-assumptions li + li { margin-top: 5px; }
-.reference-error { margin: 16px 0 0; border-left: 2px solid var(--error-line); padding: 7px 10px; background: var(--error-surface); color: var(--error); font-size: 11px; line-height: 1.6; }
+.reference-error { margin: 16px 0 0; border: 1px solid var(--error-line); border-radius: var(--radius-control); padding: 7px 10px; background: var(--error-surface); color: var(--error); font-size: 11px; line-height: 1.6; }
 .reference-footer { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-top: 23px; padding-top: 16px; border-top: 1px solid var(--line); }
 .reference-footer > span { max-width: 330px; color: var(--text-secondary); font-size: 10px; line-height: 1.6; }
 .reference-footer > div { display: flex; flex-shrink: 0; gap: 8px; }

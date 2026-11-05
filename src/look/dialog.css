@@ -3,9 +3,10 @@
 .look-settings { padding:0; margin:0; border:0; }
 .look-field { display:grid; gap:6px; color:var(--muted); font-size:12px; }
 .look-field select,.look-field textarea,.look-field input[type=file],.look-brief textarea,.muse-link-result input {
-  display:block; width:100%; box-sizing:border-box; padding:8px 10px; color:var(--ink); background:var(--field);
+  display:block; width:100%; box-sizing:border-box; padding:8px 10px; color:var(--ink); background-color:var(--field);
   border:1px solid var(--line); border-radius:var(--radius-control); font:inherit; font-size:12px;
 }
+.look-field select { padding-right:28px; }
 .look-field textarea,.look-brief textarea { resize:vertical; line-height:1.55; }
 .look-options,.look-brief { margin:12px 0; }
 .look-options summary,.look-brief summary,.look-handoffs summary { width:fit-content; cursor:pointer; color:var(--text-secondary); font-size:12px; padding:4px 0; }

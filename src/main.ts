@@ -51,6 +51,9 @@ import type { SceneSnapshot } from './scene-edit/operations';
 import { type ProjectDocument, createProject, parseProject, serializeProject, MAX_PROJECT_SIZE } from './project/storage';
 import { Workspace } from './project/workspace';
 import { MAX_ARCHIVE_BYTES } from './project/room';
+import { installCustomSelects } from './ui/select';
+
+installCustomSelects();
 
 const esc = (value: string) => value.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
@@ -66,7 +69,7 @@ app.innerHTML = `
 <div class="storage-warning" id="storageWarning" role="alert" hidden><span></span><button data-action="export-project">Download your changes</button><button data-action="recover-storage" hidden>Download saved data</button><button data-action="open">Open project</button><button data-action="reload">Reload</button></div>
 <main class="workspace">
   <aside class="library-panel">
-    <div class="scene-switcher"><button data-action="open-scenes" title="Open Assets / Scenes">${icon('folder')} Assets / Scenes</button><div><select id="sceneSelect" aria-label="Active scene"></select><input id="sceneName" aria-label="Scene name" maxlength="120" placeholder="No scene yet" hidden/><button data-action="rename-scene" aria-label="Rename scene" title="Rename scene">${icon('rename')}</button><button data-action="add-scene" aria-label="New scene" title="New empty scene">${icon('plus')}</button></div></div>
+    <div class="scene-switcher"><div class="scene-switcher-head"><button data-action="open-scenes" title="Open Assets / Scenes">${icon('folder')} Assets / Scenes</button><div class="scene-switcher-actions"><button data-action="rename-scene" aria-label="Rename scene" title="Rename scene">${icon('rename')}</button><button data-action="add-scene" aria-label="New scene" title="New empty scene">${icon('plus')}</button></div></div><div><select id="sceneSelect" aria-label="Active scene"></select><input id="sceneName" aria-label="Scene name" maxlength="120" placeholder="No scene yet" hidden/></div></div>
     <div class="library-tabs" role="tablist" aria-label="Library"><button id="objectsTab" role="tab" aria-controls="objectsPanel" aria-selected="true" data-library="objects">Objects<span id="objectCount"></span></button><button id="assetsTab" role="tab" aria-controls="assetPanel" aria-selected="false" data-library="assets">${icon('plus')}Add</button></div>
     <div id="objectsPanel" class="library-page" role="tabpanel" aria-labelledby="objectsTab"><input id="hierarchySearch" class="hierarchy-search" type="search" aria-label="Search objects" placeholder="Search objects…"/><div class="hierarchy-tools"><span id="selectionCount">0 selected</span><button data-action="hide-selection" title="Hide selected objects · H" aria-label="Hide selected objects">${icon('hidden')}</button><button data-action="show-selection" title="Show selected objects" aria-label="Show selected objects">${icon('eye')}</button></div><div id="outliner" class="outliner" aria-label="Scene objects"></div><button class="hierarchy-footer" id="visibilitySummary" data-action="show-all">All objects visible</button></div>
   </aside>

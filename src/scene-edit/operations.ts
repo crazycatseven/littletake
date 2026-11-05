@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Matrix4, Vector3 } from 'three';
+import { CatmullRomCurve3, Matrix4, Vector3 } from 'three';
 import { MAX_SCENE_OBJECTS,createEmptyScene, ensureAnimation, evaluateTransform, sceneEntity, setTransformMotion } from '../model.ts';
 import { validateProjectContent } from '../project/model.ts';
 import type { ProjectContent, SceneEntity, Transform, Vec3 } from '../types.ts';
@@ -91,6 +91,16 @@ export function aimedCameraTransform(position:Vec3,target:Vec3):Transform{
   const eye=new Vector3(...position),look=new Vector3(...target);
   if(eye.distanceToSquared(look)<1e-8)throw new Error('Camera position and target must differ.');
   return {position:[...position],rotation:eulerDegrees(new Matrix4().lookAt(eye,look,new Vector3(0,1,0))),scale:[1,1,1]};
+}
+
+/** Camera keys are waypoints: a smooth path through them, aimed along a smooth path through their targets. */
+function cameraPath(frames:{time:number;position:Vec3;target:Vec3}[]){
+  const curve=(points:Vec3[])=>new CatmullRomCurve3(points.map(point=>new Vector3(...point)),false,'centripetal');
+  const path=curve(frames.map(frame=>frame.position)),aim=curve(frames.map(frame=>frame.target));
+  return frames.slice(1).flatMap((next,index)=>{
+    const from=frames[index],steps=Math.max(1,Math.ceil((next.time-from.time)/.2));
+    return Array.from({length:steps},(_,step)=>{const at=(index+step/steps)/(frames.length-1);return {time:from.time+(next.time-from.time)*step/steps,position:path.getPoint(at).toArray() as Vec3,target:aim.getPoint(at).toArray() as Vec3};});
+  }).concat(frames.at(-1)!);
 }
 
 function poseTarget(item: SceneEntity, target: z.infer<typeof pose>) {
@@ -205,7 +215,7 @@ export function applyProjectOperations(source: ProjectContent, operations: Scene
       case 'set_camera_motion': {
         const camera=find(operation.id);if(!('fov' in camera))throw new Error('Select a camera.');
         if(operation.frames.some((frame,i,all)=>i>0&&frame.time<=all[i-1].time))throw new Error('Camera keys must be in strictly increasing absolute scene time.');
-          setTransformMotion(camera,recordedTrack(operation.frames.map(frame=>({time:frame.time,transform:localTransform(doc,camera.id,{...aimedCameraTransform(frame.position,frame.target),scale:worldTransform(doc,camera.id,frame.time).scale},frame.time)}))),time);break;
+          setTransformMotion(camera,recordedTrack(cameraPath(operation.frames).map(frame=>({time:frame.time,transform:localTransform(doc,camera.id,{...aimedCameraTransform(frame.position,frame.target),scale:worldTransform(doc,camera.id,frame.time).scale},frame.time)}))),time);break;
       }
       case 'rename': (doc.shots.find(shot => shot.id === operation.id) ?? find(operation.id)).name = operation.name; break;
       case 'set_parent': Object.assign(doc,reparentScene(doc,[operation.id],operation.parentId,time));break;

@@ -7,7 +7,7 @@ import { AIError, type AIContent, type AIProvider, type StructuredRequest, type 
 import { AssetLibrary } from './library.ts';
 import { generateAsset,assetJobReferences,type AssetJob } from './expert.ts';
 import {MAX_SCENE_OBJECTS,evaluateJointAngles,evaluateTransform} from '../../src/model.ts';
-import {renderScenePreview,measureSceneGeometry} from './preview.ts';
+import {renderScenePreview,measureSceneGeometry,assetFacing} from './preview.ts';
 import { worldMatrices } from '../../src/assets/toolkit/transforms.ts';
 import { inspectSpatial, solveSpatial } from '../../src/spatial/methods.ts';
 import { spatialOperationSchema, spatialQuerySchema } from '../../src/spatial/schema.ts';
@@ -18,7 +18,33 @@ import { appearanceContent, type AppearanceImage } from '../../src/appearance/mo
 import { newProgress, type ProgressListener } from '../../src/scene-edit/progress.ts';
 import { reviewScene } from '../scene-edit-review.ts';
 import { SceneDesigner,AUTHORING_COORDINATES,type SceneDesignPersistence } from '../scene-design/design.ts';
-import {referencePixels,referencePhotos} from '../scene-design/research.ts';
+import {referencePixels,referencePhotos,factualReferences} from '../scene-design/research.ts';
+
+const PREVIS_WORKFLOW='White-box previs of an imagined scene: it only has to show who is where, how big, facing whom, and how each shot is composed. Atmosphere, weather, materials, lighting mood and fine detail are not built; a prompt describes them later. Work quickly: generate only the assetBriefs roles, each as a simple proxy with baseAssetId null, never a variant of a built-in figure. Establish the place with a few large plain primitives at near, middle and far distance so the frame has depth and scale, without clutter. Leave the default scene look unless the user asked for another. Place everything, make each character face whom it confronts, set a few cameras and shots, call render_scene once and finish with its scenePreviewId. If a review lists problems, fix them once and render again; that render is final. Never finish a build request with operations=[]: if a model could not be made, use a simple primitive or built-in figure in its place and say so.';
+
+/** Where placed assets leave the frame: facts for the director, not a verdict. */
+function framingNotes(scene:Parameters<typeof renderScenePreview>[0],frames:ReturnType<typeof renderScenePreview>['frames']){
+  const subjects=scene.objects.filter(object=>object.kind==='asset');
+  if(subjects.length>6)return [];
+  return frames.filter(frame=>frame.view==='shot').flatMap(frame=>subjects.flatMap(subject=>{
+    const seen=frame.visibleBoxes[subject.id];
+    if(!seen)return [{time:frame.time,object:subject.name,note:'not in frame'}];
+    const edges=[seen.box[0]<=.002&&'left',seen.box[1]<=.002&&'top',seen.box[2]>=.998&&'right',seen.box[3]>=.998&&'bottom'].filter(Boolean);
+    return edges.length?[{time:frame.time,object:subject.name,note:'cut off at '+edges.join(', ')}]:[];
+  }));
+}
+
+/** A moving camera is checked along its whole move, not only at the times the director asked for. */
+function coverCameraMoves(scene:Parameters<typeof renderScenePreview>[0],frames:{shotId:string;time:number}[]){
+  const covered=[...frames];
+  for(const shot of scene.shots){
+    const camera=scene.cameras.find(item=>item.id===shot.cameraId);
+    if(!frames.some(frame=>frame.shotId===shot.id)||!(camera?.track||Object.values(camera?.animation?.curves??{}).some(keys=>keys?.length)))continue;
+    const parts=Math.min(5,Math.ceil(shot.duration/2));
+    for(let part=0;part<=parts;part++){const time=Math.min(shot.start+shot.duration*part/parts,shot.start+shot.duration);if(!covered.some(frame=>frame.shotId===shot.id&&Math.abs(frame.time-time)<shot.duration/parts/2))covered.push({shotId:shot.id,time});}
+  }
+  return covered.sort((a,b)=>a.time-b.time);
+}
 import {SpatialScene,fitCameraToBounds,boxData} from '../../src/spatial/geometry.ts';
 import {Box3,Vector3} from 'three';
 
@@ -107,6 +133,7 @@ export class AssetTools {
   private seenResults = new Set<string>();
   private seenErrors = new Set<string>();
   private stalledRounds = 0;
+  private previsReviewed = new Set<string>();
   private input:unknown[]=[];
   private contentCount=0;
   private references:AIContent[]=[];
@@ -153,7 +180,7 @@ export class AssetTools {
         const stored=await this.library.list(),ready=new Map<string,AssetDefinition>();for(const fit of design.assetFits??[])if(fit.approved){const asset=stored.find(asset=>asset.id===fit.asset.id);if(asset&&JSON.stringify(asset)===JSON.stringify(fit.asset)){ready.set(fit.role,asset);this.readAssets.set(asset.id,asset);}}
         const regionModules=(design.plan!.regions??[]).flatMap(region=>{const asset=region.designAsset?ready.get(region.designAsset):undefined;if(!asset)return [];const size=[region.max[0]-region.min[0],region.max[1]-region.min[1]];return [{region:region.name,designAsset:region.designAsset,assetId:this.toolAsset(asset).id,regionSizeXZ:size,moduleSizeXZ:[asset.bounds.size[0],asset.bounds.size[2]],nominalGridAtScaleOne:region.usage==='repeat'?[Math.ceil(size[0]/asset.bounds.size[0]),1,Math.ceil(size[1]/asset.bounds.size[2])]:undefined}];});
         const existingScene=this.project.scenes.find(scene=>scene.id===args.sceneId),regionCoverage=existingScene?this.designer.measureRegions(existingScene,measureSceneGeometry(existingScene,this.project.assets??[],0).objects):[];
-        response={result:{planned:true,regionCoverage,regionCoverageTime:0,regionCoverageConvention:'Union of matching module WORLD X/Z bounding rectangles clipped to each repeating region. This is only an upper bound: empty space INSIDE a prefab is included. Overlapping copies are counted once. Sparse source geometry needs visual inspection even when this bound reaches 1.',sceneId:args.sceneId,originalRequest:this.intent,...design.plan,readyAssets:[...ready].map(([designAsset,asset])=>({designAsset,asset:this.toolAsset(assetSummary(asset))})),missingAssetRoles:design.plan!.assetBriefs.filter(role=>!ready.has(role.name)).map(role=>role.name),regionModules,regionModuleConvention:'Region and module dimensions are already authoring metres. Nominal grid is a footprint measurement at scale=1, NOT a quality verdict or placement command. Respect existing buildings, voids, roads and landmarks; use enough correctly scaled modules to match each region, inspect actual density and vary massing. instantiate_asset.repeat prepares independent copies in one call.',sourceReferences:design.research.map(({id,findings,sources,images})=>({referenceId:id,findings,sources,photos:images.map(({image:_,...photo})=>photo)})),imageOrder:'Scene concept first, then original reference photos. A generated concept is a design target, not measured ground truth.',applied:false},image:design.concept!.image,images:referencePhotos(design.research).map(image=>image.image)};break;
+        response={result:{planned:true,...(factualReferences(design.research)?{}:{previsWorkflow:PREVIS_WORKFLOW}),regionCoverage,regionCoverageTime:0,regionCoverageConvention:'Union of matching module WORLD X/Z bounding rectangles clipped to each repeating region. This is only an upper bound: empty space INSIDE a prefab is included. Overlapping copies are counted once. Sparse source geometry needs visual inspection even when this bound reaches 1.',sceneId:args.sceneId,originalRequest:this.intent,...design.plan,readyAssets:[...ready].map(([designAsset,asset])=>({designAsset,asset:this.toolAsset(assetSummary(asset))})),missingAssetRoles:design.plan!.assetBriefs.filter(role=>!ready.has(role.name)).map(role=>role.name),regionModules,regionModuleConvention:'Region and module dimensions are already authoring metres. Nominal grid is a footprint measurement at scale=1, NOT a quality verdict or placement command. Respect existing buildings, voids, roads and landmarks; use enough correctly scaled modules to match each region, inspect actual density and vary massing. instantiate_asset.repeat prepares independent copies in one call.',sourceReferences:design.research.map(({id,findings,sources,images})=>({referenceId:id,findings,sources,photos:images.map(({image:_,...photo})=>photo)})),imageOrder:'Scene concept first, then original reference photos. A generated concept is a design target, not measured ground truth.',applied:false},...(design.concept?{image:design.concept.image}:{}),images:referencePhotos(design.research).map(image=>image.image)};break;
       }
       case 'search_scene_references':{
         const args=schemas.search_scene_references.parse(raw),found=await this.designer.search(args.query,signal);
@@ -181,32 +208,36 @@ export class AssetTools {
       case 'render_scene':{
         const args=schemas.render_scene.parse(raw),plan=editPlanSchema.parse(this.hydrate({summary:'Transient scene inspection',requestedViews:[],objectCounts:[],operations:args.operations})),candidate=applyProjectOperations(this.project,plan.operations,args.applyTime??0),scene=candidate.scenes.find(scene=>scene.id===args.sceneId);
         if(!scene)throw new Error('The candidate operations must create or retain the inspected scene.');
-        this.designer.assertAssetsReady(scene.id,new Set(scene.objects.flatMap(object=>object.asset?[object.asset.id]:[])),candidate.assets??[]);
+        const sceneDesign=this.designer.designs.get(scene.id),previs=Boolean(sceneDesign)&&!factualReferences(sceneDesign!.research);
+        if(!previs)this.designer.assertAssetsReady(scene.id,new Set(scene.objects.flatMap(object=>object.asset?[object.asset.id]:[])),candidate.assets??[]);
         if (!args.frames.length && scene.shots.length) throw new Error('Supply at least one frame from every scene shot; an empty frame list cannot inspect framing.');
-        const brief=this.scenePlans.get(scene.id),preview=renderScenePreview(scene,candidate.assets??[],args.frames,this.frameBounds,Boolean(brief)),operations=JSON.stringify(plan.operations),applyTime=args.applyTime??0;
+        const brief=this.scenePlans.get(scene.id),preview=renderScenePreview(scene,candidate.assets??[],coverCameraMoves(scene,args.frames),this.frameBounds,Boolean(brief)),operations=JSON.stringify(plan.operations),applyTime=args.applyTime??0;
         let review: { approved: boolean; notes: string } | undefined;
-        if (brief) {
+        // A previs candidate is reviewed once; the review advises and the result is always usable.
+        if (brief&&!(previs&&this.previsReviewed.has(scene.id))) {
           const candidateKey=JSON.stringify([scene.id,preview.frameImages.map(image=>Buffer.from(image).toString('base64')).sort()]);
           if(this.rejectedCandidates.has(candidateKey))throw new Error('These exact rendered views were already rejected. Renaming objects or changing an unobserved time is not new visual evidence. Change the observed geometry/framing before another paid review.');
           this.onProgress?.(newProgress('Reviewing the scene layout, silhouettes and shot framing…'));
           review=await reviewScene({prompt:this.intent,brief,scene,assets:candidate.assets??[],preview,references:this.references,design:this.designer.designs.get(scene.id)},this.provider,signal,this.diagnostic);
-          this.onProgress?.(newProgress(review.approved?'Scene visual review passed.':'Scene needs revision: '+review.notes,review.approved?'done':'error'));
-          if(!review.approved)this.rejectedCandidates.add(candidateKey);
+          this.onProgress?.(newProgress(review.approved?'Scene visual review passed.':(previs?'Scene review notes: ':'Scene needs revision: ')+review.notes,review.approved||previs?'done':'error'));
+          if(previs)this.previsReviewed.add(scene.id);else if(!review.approved)this.rejectedCandidates.add(candidateKey);
         }
         const prior=this.inspectedScenes.get(scene.id),covered=prior?.operations===operations&&prior.applyTime===applyTime?new Set(prior.shots):new Set<string>();for(const frame of args.frames)covered.add(frame.shotId);
-        this.inspectedScenes.set(scene.id,{operations,applyTime,shots:covered,approved:review?.approved??false,brief,reviewNotes:review?.notes});
+        this.inspectedScenes.set(scene.id,{operations,applyTime,shots:covered,approved:previs||(review?.approved??false),brief,reviewNotes:review?.notes});
         const scenePreviewId='scene-preview-'+(this.scenePreviews.size+1),inspections=new Map([...this.inspectedScenes].filter(([,inspection])=>inspection.operations===operations&&inspection.applyTime===applyTime).map(([key,inspection])=>[key,{...inspection,shots:new Set(inspection.shots)}]));
         this.scenePreviews.set(scenePreviewId,{operations,applyTime,plan:structuredClone(plan.operations),scenes:inspections,image:'data:image/png;base64,'+Buffer.from(preview.image).toString('base64')});
-        response={result:{scenePreviewId,sceneId:scene.id,applied:false,regionCoverage:preview.measurements?this.designer.measureRegions(scene,preview.measurements.objects):[],regionCoverageConvention:'World X/Z bounding-rectangle union is an UPPER bound, not mesh density or a quality verdict. Sparse internals can make actual coverage lower; compare the original reference and actual pixels.',...(review?{review}:{}),...(preview.measurements?{measurements:preview.measurements}:{}),frameBounds:this.frameBounds??[0,0,1,1],renderer:'CPU geometry preview; final WebGL video verifies lighting and motion. Only the measured original image region counts as visible; matte bars contain no scene evidence.',frames:preview.frames,instruction:review&&!review.approved?'Fix the visible defects, then render the complete revised candidate again. This rejected candidate cannot finish the build.':'To finalize exactly this inspected candidate, return scenePreviewId with operations=[]. Do not retype or revise its operations in the final reply; inspect any revision first.'},image:'data:image/png;base64,'+Buffer.from(preview.image).toString('base64')};break;
+        response={result:{scenePreviewId,sceneId:scene.id,applied:false,regionCoverage:preview.measurements?this.designer.measureRegions(scene,preview.measurements.objects):[],regionCoverageConvention:'World X/Z bounding-rectangle union is an UPPER bound, not mesh density or a quality verdict. Sparse internals can make actual coverage lower; compare the original reference and actual pixels.',...(review?{review}:{}),...(preview.measurements?{measurements:preview.measurements}:{}),framing:framingNotes(scene,preview.frames),facing:assetFacing(scene,args.frames[0]?.time??0),facingConvention:'degreesOffFront 0 looks straight at the other object, 180 has its back to it.',frameBounds:this.frameBounds??[0,0,1,1],renderer:'CPU geometry preview; final WebGL video verifies lighting and motion. Only the measured original image region counts as visible; matte bars contain no scene evidence.',frames:preview.frames,instruction:previs&&review&&!review.approved?'Fix the problems in these notes once and render again; that render is final and is not reviewed again.':review&&!review.approved?'Fix the visible defects, then render the complete revised candidate again. This rejected candidate cannot finish the build.':'To finalize exactly this inspected candidate, return scenePreviewId with operations=[]. Do not retype or revise its operations in the final reply; inspect any revision first.'},image:'data:image/png;base64,'+Buffer.from(preview.image).toString('base64')};break;
       }
       case 'generate_asset': {
         const args = schemas.generate_asset.parse(withoutBase(raw));
         if (!this.searches.has(args.searchId)) throw new Error('Search the library and use its returned searchId before generating.');
-        const base=args.baseAssetId?this.readAssets.get(args.baseAssetId):undefined;
+        let base=args.baseAssetId?this.readAssets.get(args.baseAssetId):undefined;
         if(args.baseAssetId&&!base)throw new Error('Read the base asset before delegating its variant.');
         const frame=args.referenceFrameId?this.referenceTools?.context?.source.frames.find(frame=>frame.id===args.referenceFrameId):undefined;
         if(args.referenceFrameId&&!frame)throw new Error('Use an exact attached reference frame ID for the asset expert.');
         const design=args.sceneId?this.designer.designs.get(args.sceneId):this.designer.designs.size===1?[...this.designer.designs.values()][0]:undefined;
+        // White-box previs builds a simple proxy, not a variant of a detailed built-in figure.
+        if(base?.id.startsWith('builtin-')&&design&&!factualReferences(design.research))base=undefined;
         if(args.sceneId&&design?.status!=='ready')throw new Error('Use the accepted scene design before delegating its assets.');
         const role=design?this.designer.assetRole(design.sceneId,args.designAsset):undefined;
         let visibleDefects:string|undefined,rejectedSceneImage:string|undefined;
@@ -227,7 +258,7 @@ export class AssetTools {
         if(rejectedSceneImage)designReferences.push({type:'text',text:'ACTUAL REJECTED SCENE RENDER: this is the existing geometry in context, not an original reference or a concept. Check the stated defect against this image and the base recipe; correct ONLY this requested asset, without reproducing the entire scene.'},{type:'image',dataUrl:rejectedSceneImage});
         const brief=(role?'CANONICAL SCENE-DESIGN ROLE: '+role.name+'\n'+role.brief:args.brief)+(visibleDefects?'\nPUBLIC OBSERVED DEFECTS FROM ACTUAL SCENE RENDER: '+visibleDefects+'\nRequested asset correction: '+args.reason+'\nPreserve the ORIGINAL USER REQUEST and required identity. Correct this base asset only; do not reduce scope. A canonical brief can contain a mistaken simplification: original reference shape and user scope take precedence over that simplification.':'');
         let generated;
-        try{generated=await generateAsset(brief, this.provider, this.library, signal,{references:frame?[{type:'image',dataUrl:frame.dataUrl},...appearanceContent(this.appearance)]:designReferences.length?[...designReferences,...appearanceContent(this.appearance)]:this.references,base,resumeJobId:args.resumeJobId,onProgress:this.onProgress});}
+        try{generated=await generateAsset(brief, this.provider, this.library, signal,{references:frame?[{type:'image',dataUrl:frame.dataUrl},...appearanceContent(this.appearance)]:designReferences.length?[...designReferences,...appearanceContent(this.appearance)]:this.references,base,resumeJobId:args.resumeJobId,onProgress:this.onProgress,previs:Boolean(design)&&!factualReferences(design!.research)});}
         catch(error){if(error instanceof AIError&&error.code==='asset_generation_failed')this.failedModeling.set(taskKey,error.message);throw error;}
         const {asset,job}=generated;
         if(design&&role){if(visibleDefects&&base)this.designer.rejectAsset(design.sceneId,role.name,base,visibleDefects);await this.designer.generatedFor(design.sceneId,role.name,asset);}
@@ -337,7 +368,7 @@ export class AssetTools {
       this.onProgress?.(newProgress(this.activity));
       const turn:NonNullable<SceneEditDiagnostic['toolTurns']>[number]={input:structuredClone(input),output:null};(this.diagnostic?.toolTurns??(this.diagnostic?this.diagnostic.toolTurns=[]:[])).push(turn);
       let response;
-      try{response=await this.provider.generateToolTurn!({ instructions: request.instructions + '\n' + ASSET_DIRECTOR_INSTRUCTIONS+'\n'+SCRIPT_CONTRACT+(this.referenceTools?.available?'\n'+REFERENCE_TOOL_INSTRUCTIONS:'')+(this.reconstruction?'\nThis turn follows the REFERENCE RECONSTRUCTION CONTRACT and its existing observation/video-review workflow. Do not call plan_scene or add a separate generic new-set review. Use the reference contract and exact render_scene receipts.':''), input, tools:[...assetToolDefinitions,...scriptToolDefinitions,...(this.referenceTools?.available?this.referenceTools.definitions():[])], schema: request.schema, signal: request.signal,reasoningEffort:this.scenePlans.size?'high':request.reasoningEffort,parallelCalls:true,onResponse:output=>{turn.output=output;} });turn.output??=response.output;}
+      try{response=await this.provider.generateToolTurn!({ instructions: request.instructions + '\n' + ASSET_DIRECTOR_INSTRUCTIONS+'\n'+SCRIPT_CONTRACT+(this.referenceTools?.available?'\n'+REFERENCE_TOOL_INSTRUCTIONS:'')+(this.reconstruction?'\nThis turn follows the REFERENCE RECONSTRUCTION CONTRACT and its existing observation/video-review workflow. Do not call plan_scene or add a separate generic new-set review. Use the reference contract and exact render_scene receipts.':''), input, tools:[...assetToolDefinitions,...scriptToolDefinitions,...(this.referenceTools?.available?this.referenceTools.definitions():[])], schema: request.schema, signal: request.signal,reasoningEffort:this.scenePlans.size?([...this.designer.designs.values()].every(item=>!factualReferences(item.research))?'medium':'high'):request.reasoningEffort,parallelCalls:true,onResponse:output=>{turn.output=output;} });turn.output??=response.output;}
       catch(error){turn.error={code:error instanceof AIError?error.code:'tool_turn_failed',message:error instanceof Error?error.message:'Tool turn failed.'};throw error;}
       input.push(...response.output);
       if (!response.calls.length) {
