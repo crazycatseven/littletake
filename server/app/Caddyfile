@@ -1,6 +1,12 @@
 {$LITTLETAKE_DOMAIN} {
-    @compressible not path /api/scene-edit
-    encode @compressible zstd gzip
-    reverse_proxy app:8080
+    handle /demo.mp4 {
+        root * /data/public
+        file_server
+    }
+    handle {
+        @compressible not path /api/scene-edit
+        encode @compressible zstd gzip
+        reverse_proxy app:8080
+    }
     header Referrer-Policy same-origin
 }
