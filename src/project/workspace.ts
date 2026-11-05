@@ -17,9 +17,10 @@ import { downloadStoryboardImage, renderStoryboards } from '../look/storyboard';
 
 /** Finished projects a newcomer can open as their own copy. Files live in public/examples. */
 const EXAMPLES = [
-  { slug: 'knight-vs-dragon', name: 'Knight vs dragon', detail: 'One sentence to Muse: a set, two animated characters and three camera shots that cut in sequence.' },
-  { slug: 'golden-gate-flight', name: 'Dragon over the Golden Gate', detail: 'A 12 s flight under the bridge with a high wide, a chase and a low shot.' },
+  { slug: 'knight-vs-dragon', name: 'Knight vs dragon', detail: 'A small knight faces a giant dragon on an ash field: 171 objects and three camera shots.' },
+  { slug: 'golden-gate-flight', name: 'Dragon over the Golden Gate', detail: 'A five-shot, 16 s chase along and under the bridge: 438 objects in one scene.' },
   { slug: 'hotel-lobby-from-clip', name: 'Hotel lobby from a film clip', detail: 'Rebuilt from a 12 s reference video: three people, three shots, one shared set.' },
+  { slug: 'little-car-big-jump', name: 'Little Car, Big Jump', detail: 'Built from an empty project, one sentence at a time: a car, a city street, a ramp and a three-shot jump.' },
 ] as const;
 
 interface WorkspaceOptions {
