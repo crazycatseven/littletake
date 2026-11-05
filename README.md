@@ -2,11 +2,14 @@
 
 > The scene is the prompt.
 
+| | |
+| --- | --- |
+| **▶ Demo video** | **[littletake.crazycat.ai/demo.mp4](https://littletake.crazycat.ai/demo.mp4)** |
+| **Live demo** | **[littletake.crazycat.ai](https://littletake.crazycat.ai)** |
+
 Build and animate an editable low-poly scene, then use it to direct AI video.
 
 Built for the **Meta Global AI Developer Hackathon** by Zhening Zhu, Qingxuan Yan and Xiang Chang. Powered by Muse.
-
-**Try it:** [littletake.crazycat.ai](https://littletake.crazycat.ai)
 
 ## Why
 
