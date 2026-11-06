@@ -10,11 +10,13 @@
     "verify:jobs": "tsx --test server/reference/jobs/verify.ts",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4176 --strictPort",
-    "test": "tsx --test tests/*.test.ts src/**/*.test.ts server/**/*.test.ts"
+    "test": "tsx --test tests/*.test.ts src/**/*.test.ts server/**/*.test.ts",
+    "mcp": "tsx server/mcp/server.ts"
   },
   "dependencies": {
     "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
     "@meta-sam/parser": "0.1.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@resvg/resvg-js": "^2.6.2",
     "lucide": "1.66.0",
     "mediabunny": "1.62.1",
