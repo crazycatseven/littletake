@@ -68,7 +68,7 @@ export class ShotRenderer {
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
   private roots = new Map<string, THREE.Object3D>();
-  private assets: AssetDefinition[];
+  readonly assets: AssetDefinition[];
   private geometries = new Map<THREE.BufferGeometry, THREE.BufferGeometry>();
   private materials = new Map<THREE.Material, THREE.Material>();
   private textures = new Map<THREE.Texture, THREE.Texture>();

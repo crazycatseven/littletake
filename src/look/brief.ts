@@ -6,6 +6,7 @@ import { zipFiles } from './zip';
 import { videoManifestSchema, videoPrompt } from './handoff';
 import type { StoryboardFrame, StoryboardPage } from './storyboard';
 import { appearanceFile, appearanceInstructions, type AppearanceImage } from '../appearance/model';
+import type { ShotFacts } from './h3';
 
 export interface VideoBrief { prompt: string; camera: string; beats: { at: number; action: string }[]; negative: string; model: string; promptText?: string }
 /** A frame sent to the brief writer; `at` is seconds from the start of the shot. */
@@ -24,7 +25,7 @@ function motionInShot(doc:SceneDocument,object: SceneObject, shot: Shot) {
   return first < 0 ? null : { start: round(shot.duration * first / steps), end: round(shot.duration * last / steps), from: rounded(poses[first].position), to: rounded(poses[last].position) };
 }
 
-export function briefInput(doc: SceneDocument, shot: Shot, direction: string, frames: BriefFrame[], appearance: AppearanceImage[] = []) {
+export function briefInput(doc: SceneDocument, shot: Shot, direction: string, frames: BriefFrame[], appearance: AppearanceImage[] = [], framing?: ShotFacts) {
   const camera = doc.cameras.find(item => item.id === shot.cameraId)!, end = shot.start + shot.duration;
   const times = Array.from({length: 9}, (_, index) => shot.start + shot.duration * index / 8);
   const cameraPose = (time: number) => { const pose = worldTransform(doc,camera.id,time); return { position: rounded(pose.position), rotation: rounded(pose.rotation) }; };
@@ -38,11 +39,13 @@ export function briefInput(doc: SceneDocument, shot: Shot, direction: string, fr
     subjects: [...seen.values()].slice(0, 40).map(({ object, position, depth }) => ({ id: object.id, name: object.name.trim().slice(0, 80), kind: object.asset ? 'asset' : object.kind, position, depth, motion: motionInShot(doc,object, shot),
       samples: times.map(time => { const pose = worldTransform(doc,object.id,time); return { at: round(time-shot.start), position: rounded(pose.position), rotation: rounded(pose.rotation), scale: rounded(pose.scale), joints: Object.fromEntries(Object.entries(evaluateJointAngles(object,time)).slice(0,64).map(([key,value])=>[key,round(value)])) }; }) })),
     frames, appearance,
+    ...(framing ? { framing: { size: framing.size, angle: framing.angle, overShoulder: framing.overShoulder, move: framing.move } } : {}),
   };
 }
 
-export function briefMarkdown(shot: Shot, brief: VideoBrief, direction: string): string {
+export function briefMarkdown(shot: Shot, brief: VideoBrief, direction: string, h3?: string): string {
   return [`# ${shot.name} · video brief`, '', '## Prompt for Muse', '', videoPrompt(shot, brief, direction), '',
+    ...(h3 ? ['## Prompt for MiniMax H3', '', 'Use with the depth pass of this shot. Effects are left out of the depth pass, so the prompt names them.', '', '```', h3, '```', ''] : []),
     `Prepared in LittleTake · ${brief.model}. Attach first-frame, storyboard pages in order, the object images listed in appearance-references.md when present, and any optional style images. Source stills are included separately.`, ''].join('\n');
 }
 
@@ -50,7 +53,7 @@ const bytesOf = (dataURL: string) => Uint8Array.from(atob(dataURL.slice(dataURL.
 const extensionOf = (dataURL: string) => ({ 'image/webp': 'webp', 'image/png': 'png', 'image/jpeg': 'jpg' } as Record<string, string>)[dataURL.slice(5, dataURL.indexOf(';'))] ?? 'bin';
 
 /** One folder per shot: first frame, chronological storyboards, original stills, exact prompt and timing manifest. */
-export async function videoPackage(doc: SceneDocument, shot: Shot, brief: VideoBrief, direction: string, frames: StoryboardFrame[], storyboards: StoryboardPage[] = [], references: { image: string; role: 'style' | 'character' | 'scene'; label: string }[] = [], appearance: AppearanceImage[] = [], storyboardStyle: 'proxy' | 'ai' = 'proxy'): Promise<Blob> {
+export async function videoPackage(doc: SceneDocument, shot: Shot, brief: VideoBrief, direction: string, frames: StoryboardFrame[], storyboards: StoryboardPage[] = [], references: { image: string; role: 'style' | 'character' | 'scene'; label: string }[] = [], appearance: AppearanceImage[] = [], storyboardStyle: 'proxy' | 'ai' = 'proxy', h3?: string): Promise<Blob> {
   if (storyboardStyle === 'ai' && (!frames.length || frames.some(frame => !frame.look))) throw new Error('Generate every selected panel before exporting the AI storyboard.');
   const folder = (shot.name.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'shot') + '-video-package';
   const files: { name: string; data: Uint8Array }[] = [], listed: { file: string; at: number; kind: 'look' | 'previs'; note?: string }[] = [];
@@ -85,6 +88,6 @@ export async function videoPackage(doc: SceneDocument, shot: Shot, brief: VideoB
     models: { brief: brief.model, look: listed.some(item => item.kind === 'look') ? 'muse-image-1.0' : null },
     usage: 'Copy the exact full prompt from brief.md. Attach first-frame and every storyboard page in numeric order, plus the appearance reference images listed in appearance-references.md if present. Their bindings identify which subject each image depicts, and which image is primary. Read storyboards left to right, then top to bottom; the manifest maps each panel to shot-relative seconds. Source stills are also available. AI panels are native-resolution crops of the original sheet, without enhancement. Optional style images guide the overall look. Do not send a video as input or reproduce the grid, labels or a slideshow.',
   });
-  files.unshift({ name: `${folder}/brief.md`, data: new TextEncoder().encode(briefMarkdown(shot, brief, direction)) }, { name: `${folder}/manifest.json`, data: new TextEncoder().encode(JSON.stringify(manifest, null, 2)) });
+  files.unshift({ name: `${folder}/brief.md`, data: new TextEncoder().encode(briefMarkdown(shot, brief, direction, h3)) }, { name: `${folder}/manifest.json`, data: new TextEncoder().encode(JSON.stringify(manifest, null, 2)) });
   return new Blob([zipFiles(files) as Uint8Array<ArrayBuffer>], { type: 'application/zip' });
 }
