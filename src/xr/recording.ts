@@ -5,7 +5,10 @@ import { transformSchema } from '../performance/motion';
 import type { SceneEntity, Transform } from '../types';
 import { eulerDegrees } from '../rotation';
 
-export const XR_RECORDING_HZ = 2;
+/** Fixed recording rate. High enough that a fast or curved move keeps its shape; processRecording then keeps only the keys the path needs. */
+export const XR_RECORDING_HZ = 30;
+/** Half-width of the smoothing window. Removes 8-12 Hz hand tremor without rounding off deliberate turns. */
+const SMOOTH_SECONDS = .1;
 
 export type XRRecordAction = 'record' | 'preview' | 'apply' | 'discard';
 export interface XRRecordingState {
@@ -26,18 +29,19 @@ export function interpolatePose(a: Transform, b: Transform, t: number): Transfor
     rotation: rotation(quaternion(a).slerp(quaternion(b), t)), scale: [...a.scale] };
 }
 
-/** Centered five-sample filter followed by bounded position/quaternion error reduction. */
+/** Centered triangular filter over about SMOOTH_SECONDS each side, followed by bounded position/quaternion error reduction. */
 export function processRecording(raw: PoseSample[], positionTolerance = .02, angleTolerance = MathUtils.degToRad(3)): PoseSample[] {
   if (raw.length < 2) throw new Error('Record a longer movement.');
+  const spacing = (raw.at(-1)!.time - raw[0].time) / (raw.length - 1), reach = Math.max(1, Math.round(SMOOTH_SECONDS / Math.max(spacing, 1e-6)));
   const smooth = raw.map((sample, i) => {
     if (i === 0 || i === raw.length - 1) return structuredClone(sample);
     const p = new Vector3(), q = new Quaternion(0, 0, 0, 0), reference = quaternion(sample.transform);
     let total = 0;
     // Shrink symmetrically near endpoints: a clipped window would introduce
     // artificial acceleration and extra keys even on an exact straight line.
-    const radius = Math.min(2, i, raw.length - 1 - i);
+    const radius = Math.min(reach, i, raw.length - 1 - i);
     for (let j = i - radius; j <= i + radius; j++) {
-      const weight = 3 - Math.abs(j - i), next = quaternion(raw[j].transform);
+      const weight = radius + 1 - Math.abs(j - i), next = quaternion(raw[j].transform);
       const sign = reference.dot(next) < 0 ? -1 : 1;
       p.addScaledVector(new Vector3(...raw[j].transform.position), weight);
       q.set(q.x + next.x * weight * sign, q.y + next.y * weight * sign, q.z + next.z * weight * sign, q.w + next.w * weight * sign);
