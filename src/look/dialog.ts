@@ -7,6 +7,7 @@ import type { Shot } from '../types';
 import { briefInput, videoPackage, type BriefFrame, type VideoBrief } from './brief';
 import { BRIEF_LIMITS, downloadStoryboardImage, referenceJPEG, renderStoryboards, storyboardTimes, type StoryboardPage } from './storyboard';
 import { framedObjects, inPicture } from './subjects';
+import { h3Prompt, shotFacts } from './h3';
 import type { Workspace } from '../project/workspace';
 import { copyText } from '../clipboard';
 import { MUSE_URL, museInstruction, videoPrompt, type HandoffReceipt } from './handoff';
@@ -32,6 +33,8 @@ function toJPEG(source: CanvasImageSource, width: number, height: number, max: n
 export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer, shot: Shot, workspace: Workspace, onBusyChange: () => void) {
   shot = structuredClone(shot);
   const doc = renderer.document, camera = doc.cameras.find(item => item.id === shot.cameraId)!;
+  // Measured once from the previs: shot size, angle, over-the-shoulder relation, camera move and effect timing.
+  const facts = shotFacts(doc, shot, renderer.assets);
   dialog.className = 'muse-preparation';
   dialog.innerHTML = `<div class="board-modes" role="tablist" aria-label="Storyboard type">
       <button role="tab" data-board-mode="proxy" aria-selected="true">Proxy storyboard</button><button role="tab" data-board-mode="ai" aria-selected="false">${icon('sparkles')} AI storyboard</button></div>
@@ -45,7 +48,7 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
         <section class="look-appearance" hidden><h3>Object references</h3><div class="look-appearance-images"></div></section>
       </details>
       <div class="look-generate"><button data-generate-board hidden>${icon('sparkles')} <span>Generate storyboard</span></button><button data-brief>${icon('sparkles')} <span>Generate prompt</span></button></div>
-      <details class="look-brief" hidden><summary>Video prompt</summary><textarea aria-label="Generated video prompt" data-prompt rows="6" maxlength="12000"></textarea><button data-copy>${icon('duplicate')} Copy prompt</button></details>
+      <details class="look-brief" hidden><summary>Video prompt</summary><textarea aria-label="Generated video prompt" data-prompt rows="6" maxlength="12000"></textarea><button data-copy>${icon('duplicate')} Copy prompt</button><label class="look-field">Prompt for MiniMax H3 <textarea aria-label="MiniMax H3 prompt" data-h3 rows="6" readonly></textarea><small>Use with this shot's depth pass. Effects are left out of the depth pass, so this prompt names them.</small></label><button data-copy-h3>${icon('duplicate')} Copy H3 prompt</button></details>
     </fieldset><p class="look-message" role="status"></p><button data-cancel hidden>Cancel</button></div></div>
     <footer class="look-footer"><div class="look-actions">
       <button data-package>${icon('download')} Download package</button><button data-page hidden>Download image</button>
@@ -172,6 +175,7 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
     const hasPrompt = !!brief && !!videoPrompt(shot,brief,direction.value).trim();
     prompt.readOnly = busy || uploading || loading || !workspace.canEdit;
     find<HTMLButtonElement>('[data-copy]').disabled = busy || uploading || !hasPrompt;
+    find<HTMLButtonElement>('[data-copy-h3]').disabled = busy || uploading || !hasPrompt;
     const canPrepare = currentBrief() || (briefAvailable && workspace.canEdit);
     const unavailable = busy || uploading || loading || !!appearanceError;
     find<HTMLButtonElement>('[data-package]').disabled = unavailable || !ready || !canPrepare;
@@ -195,6 +199,7 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
   };
   const showBrief = () => {
     prompt.value = brief ? videoPrompt(shot,brief,direction.value) : '';
+    find<HTMLTextAreaElement>('[data-h3]').value = brief ? h3Prompt(facts, brief) : '';
   };
   const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => { const image = new Image(); image.onload = () => resolve(image); image.onerror = () => reject(new Error('A frame could not be read.')); image.src = src; });
   const linkField = find<HTMLInputElement>('[data-link]');
@@ -283,6 +288,7 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
     saveTimer = setTimeout(() => { void savePrompt().catch(error => message(`Prompt is available here, but could not be saved. ${error.message}`)); }, 600);
     update();
   };
+  find('[data-copy-h3]').onclick = () => { if (brief) copyText(h3Prompt(facts, brief), dialog).then(() => message('H3 prompt copied. Use it with this shot\'s depth pass.'), () => { find<HTMLTextAreaElement>('[data-h3]').select(); message('Select and copy the prompt.'); }); };
   find('[data-copy]').onclick = () => { if (brief) copyText(videoPrompt(shot,brief,direction.value), dialog).then(() => message('Full prompt copied. Attach the reference images in Muse.'), () => { prompt.select(); message('Select and copy the prompt.'); }); };
   const ensureBrief = async (signal: AbortSignal, regenerate = false): Promise<VideoBrief> => {
     if (brief && currentBrief() && !regenerate) return brief;
@@ -301,7 +307,7 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
       const image = await loadImage(page.image);
       sent.push({ at: page.frames[0].at, image: referenceJPEG(image, image.naturalWidth, image.naturalHeight), kind: 'storyboard', tiles: page.frames });
     }
-    const body = JSON.stringify({ ...briefInput(doc, shot, direction.value, sent, appearance), stylePreset: stylePreset(), moments: moments() });
+    const body = JSON.stringify({ ...briefInput(doc, shot, direction.value, sent, appearance, facts), stylePreset: stylePreset(), moments: moments() });
     if (new Blob([body]).size > BRIEF_LIMITS.maxBodyBytes) throw new Error('These references are too large for prompt generation.');
     signal.throwIfAborted();
     const response = await projectFetch('/api/brief', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal });
@@ -327,7 +333,7 @@ export function mountMusePreparation(dialog: HTMLElement, renderer: ShotRenderer
     const signal = controller!.signal;
     const instruction = await ensureBrief(signal);
     return videoPackage(doc, shot, instruction, direction.value, await sourceFrames(signal), activePages(),
-      style ? [{ image: style, role: 'style', label: 'Style reference' }] : [], appearance, mode);
+      style ? [{ image: style, role: 'style', label: 'Style reference' }] : [], appearance, mode, h3Prompt(facts, instruction));
   };
   find('[data-publish]').onclick = async () => {
     if (busy || uploading || loading) return;
