@@ -20,6 +20,44 @@ export function objectCameraView(root: THREE.Object3D, cameraPosition: THREE.Vec
   return { azimuth, elevation };
 }
 
+export interface DepthRange { near: number; far: number }
+/** Whether a pixel of a render-target read (rows bottom-up) lies inside a normalised [left, top, right, bottom] crop. */
+export function pixelInCrop(pixel: number, width: number, height: number, crop: readonly number[]): boolean {
+  const x = (pixel % width + .5) / width, y = 1 - (Math.floor(pixel / width) + .5) / height;
+  return x >= crop[0] && x <= crop[2] && y >= crop[1] && y <= crop[3];
+}
+/** Wide range used only to measure where a shot's geometry actually sits. */
+const DEPTH_LOG_RANGE: DepthRange = { near: .05, far: 2000 };
+
+/** Camera-distance shader. 'log' packs distance for measuring; 'disparity' is normalised inverse depth (near = 1), the form depth video models are trained on. */
+function depthMaterial(mode: 'log' | 'disparity', range: DepthRange): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: { near: { value: range.near }, far: { value: range.far } },
+    defines: mode === 'log' ? { DEPTH_LOG: '' } : {},
+    side: THREE.DoubleSide,
+    vertexShader: `#include <common>
+#include <skinning_pars_vertex>
+varying float vDepth;
+void main() {
+#include <skinbase_vertex>
+#include <begin_vertex>
+#include <skinning_vertex>
+#include <project_vertex>
+  vDepth = -mvPosition.z;
+}`,
+    fragmentShader: `uniform float near; uniform float far; varying float vDepth;
+void main() {
+#ifdef DEPTH_LOG
+  float v = log(max(vDepth, near) / near) / log(far / near);
+#else
+  float d = clamp(vDepth, near, far);
+  float v = (1.0 / d - 1.0 / far) / (1.0 / near - 1.0 / far);
+#endif
+  gl_FragColor = vec4(vec3(clamp(v, 0.0, 1.0)), 1.0);
+}`,
+  });
+}
+
 /** An export owns its geometry, materials, camera and poses; the live editor keeps running independently. */
 export class ShotRenderer {
   readonly document: SceneDocument;
@@ -112,6 +150,49 @@ export class ShotRenderer {
     if (this.camera.fov !== fov||this.camera.far!==far) { this.camera.fov = fov;this.camera.far=far; this.camera.updateProjectionMatrix(); }
     renderCameraFrame(this.renderer,this.scene,this.camera,camera.frameBounds);
     return this.canvas;
+  }
+  /** Depth range of the visible geometry over the given times, as camera distances in metres (1st to 99th percentile of pixels).
+   * One range per export keeps the depth video from flickering as objects enter or leave the frame. */
+  depthRange(samples: { time: number; cameraId: string }[]): DepthRange {
+    const target = new THREE.WebGLRenderTarget(160, 90), pixels = new Uint8Array(160 * 90 * 4), values: number[] = [];
+    const material = depthMaterial('log', DEPTH_LOG_RANGE);
+    try {
+      for (const { time, cameraId } of samples) {
+        this.render(time, cameraId);
+        this.withOverride(material, () => { this.renderer.setRenderTarget(target); this.renderer.setClearColor(0x000000, 0); this.renderer.clear(); this.renderer.render(this.scene, this.camera); });
+        this.renderer.setRenderTarget(null);
+        this.renderer.readRenderTargetPixels(target, 0, 0, 160, 90, pixels);
+        // Count only pixels inside the camera's crop, the same area renderDepth keeps; rows are read bottom-up.
+        const crop = this.document.cameras.find(item => item.id === cameraId)?.frameBounds ?? [0, 0, 1, 1];
+        for (let index = 0; index < pixels.length; index += 4) {
+          if (pixels[index + 3] > 0 && pixelInCrop(index / 4, 160, 90, crop)) values.push(DEPTH_LOG_RANGE.near * Math.exp(pixels[index] / 255 * Math.log(DEPTH_LOG_RANGE.far / DEPTH_LOG_RANGE.near)));
+        }
+      }
+    } finally { target.dispose(); material.dispose(); this.renderer.setClearColor(0x000000, 1); }
+    if (!values.length) return { near: 1, far: 100 };
+    values.sort((a, b) => a - b);
+    const near = Math.max(.05, values[Math.floor(values.length * .01)]), far = Math.max(near * 1.5, values[Math.min(values.length - 1, Math.floor(values.length * .99))]);
+    return { near, far };
+  }
+  /** Inverse-depth frame for depth-controlled video models: near is white, far and sky are black. Pose comes from the normal render. */
+  renderDepth(time: number, range: DepthRange, cameraId = this.cameraId): HTMLCanvasElement {
+    this.render(time, cameraId);
+    const material = depthMaterial('disparity', range), camera = this.document.cameras.find(item => item.id === cameraId)!;
+    try { this.withOverride(material, () => { this.renderer.setClearColor(0x000000, 1); renderCameraFrame(this.renderer, this.scene, this.camera, camera.frameBounds); }); }
+    finally { material.dispose(); }
+    return this.canvas;
+  }
+  /** Draw every mesh with one material, without background, fog or lines; restores the scene afterwards. */
+  private withOverride(material: THREE.Material, draw: () => void): void {
+    const saved = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>(), hidden: THREE.Object3D[] = [], background = this.scene.background, fog = this.scene.fog;
+    try {
+      this.scene.background = null; this.scene.fog = null;
+      this.scene.traverse(node => {
+        if (node instanceof THREE.Mesh) { saved.set(node, node.material); node.material = material; }
+        else if ((node instanceof THREE.Line || node instanceof THREE.Points || node instanceof THREE.Sprite) && node.visible) { node.visible = false; hidden.push(node); }
+      });
+      draw();
+    } finally { for (const [node, original] of saved) node.material = original; for (const node of hidden) node.visible = true; this.scene.background = background; this.scene.fog = fog; }
   }
   /** Render visible target pixels with normal depth occlusion, for composition checks. */
   renderObjectMask(id: string, time: number): HTMLCanvasElement {
