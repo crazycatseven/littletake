@@ -1,12 +1,15 @@
 import { z } from 'zod';
 import { Euler, MathUtils, Quaternion, Vector3 } from 'three';
-import type { Transform } from '../types.ts';
+import type { SceneDocument, Transform } from '../types.ts';
 import { applyTransformModifiers } from './transform.ts';
 import { scriptComponentSchema } from '../scripts/model.ts';
 import { appearanceComponentSchema } from '../appearance/model.ts';
 
+/** Kinds of visual effect. An effect is drawn in previews but left out of control passes such as depth, and named in the video brief instead. */
+export const effectKinds = ['fire', 'smoke', 'spark', 'magic', 'liquid', 'light', 'other'] as const;
 export const componentSchema = z.discriminatedUnion('type', [
   appearanceComponentSchema,
+  z.strictObject({ type: z.literal('effect'), enabled: z.boolean(), kind: z.enum(effectKinds) }),
   scriptComponentSchema,
   z.strictObject({ type: z.literal('movement'), enabled: z.boolean(), mode: z.enum(['walk', 'drive', 'free']), space: z.enum(['local', 'world']), speed: z.number().min(.1).max(20), turnSpeed: z.number().min(1).max(360) }),
   z.strictObject({ type: z.literal('hinge'), enabled: z.boolean(), speed: z.number().min(1).max(360) }),
@@ -30,6 +33,9 @@ export interface ComponentScript {
 export const componentScripts: Record<ObjectComponent['type'], ComponentScript> = {
   appearanceReference: { title: 'Appearance Reference', description: 'Bind reference images to this object for Muse and Render.', fields: [], actions: [], help: () => 'References define appearance. The proxy still defines placement and motion.' },
   script: { title:'Script Component', description:'A project controller written by you or Muse.',addable:false,fields:[],actions:[{id:'control',label:'Start Control'}],help:()=> 'Project script · keyboard and mouse input · recorded to property keys.' },
+  effect: { title: 'Effect', description: 'Fire, smoke, sparks, magic and similar. Left out of the depth pass; the video brief names it instead.', actions: [],
+    fields: [{ key: 'kind', label: 'Effect', options: { fire: 'Fire', smoke: 'Smoke', spark: 'Sparks', magic: 'Magic', liquid: 'Liquid', light: 'Light', other: 'Other' } }],
+    help: () => 'The shape shows where and when the effect happens. Depth and other control passes skip it so the video model paints the effect itself.' },
   followPath: { title:'Follow Path', description:'Move along an editable 3D path using Progress keyframes.', fields:[], actions:[], help:()=> 'Animate Progress in the scene timeline. Edit the path to reshape the motion.' },
   movement: {
     title: 'Movement Controller', description: 'Walk, drive, or move objects with the keyboard.', actions: [{ id: 'control', label: 'Start Control' }],
@@ -74,6 +80,17 @@ export function updateComponents(components: ObjectComponent[] | undefined, pose
   componentScripts[controller.type].update?.(controller, pose, keys, dt, runtime);
   applyTransformModifiers(before, pose, components);
   pose.position = pose.position.map(value => MathUtils.clamp(value, -990, 990)) as Transform['position'];
+}
+
+/** Objects that are effects, directly or through an effect ancestor. */
+export function effectObjectIds(doc: Pick<SceneDocument, 'objects'>): Set<string> {
+  const parents = new Map(doc.objects.map(object => [object.id, object.parentId])), direct = new Set(doc.objects.filter(object => object.components?.some(c => c.type === 'effect' && c.enabled)).map(object => object.id));
+  const ids = new Set<string>();
+  for (const object of doc.objects) {
+    const seen = new Set<string>();
+    for (let id: string | undefined = object.id; id && !seen.has(id); id = parents.get(id)) { seen.add(id); if (direct.has(id)) { ids.add(object.id); break; } }
+  }
+  return ids;
 }
 
 export function componentAddReason(components: ObjectComponent[], type: ObjectComponent['type']): string {

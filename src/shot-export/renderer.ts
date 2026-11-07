@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { evaluateFov, evaluateJointAngles } from '../model';
 import { poseAssetJoints, type AssetDefinition } from '../assets/model';
 import { DEFAULT_SCENE_LOOK } from '../scene-edit/look';
+import { effectObjectIds } from '../components/model';
 
 import type { SceneDocument, Transform } from '../types';
 import {renderCameraFrame} from '../scene-snapshot';
@@ -158,7 +159,7 @@ export class ShotRenderer {
     const material = depthMaterial('log', DEPTH_LOG_RANGE);
     try {
       for (const { time, cameraId } of samples) {
-        this.render(time, cameraId);
+        this.render(time, cameraId); this.hideEffects();
         this.withOverride(material, () => { this.renderer.setRenderTarget(target); this.renderer.setClearColor(0x000000, 0); this.renderer.clear(); this.renderer.render(this.scene, this.camera); });
         this.renderer.setRenderTarget(null);
         this.renderer.readRenderTargetPixels(target, 0, 0, 160, 90, pixels);
@@ -176,12 +177,14 @@ export class ShotRenderer {
   }
   /** Inverse-depth frame for depth-controlled video models: near is white, far and sky are black. Pose comes from the normal render. */
   renderDepth(time: number, range: DepthRange, cameraId = this.cameraId): HTMLCanvasElement {
-    this.render(time, cameraId);
+    this.render(time, cameraId); this.hideEffects();
     const material = depthMaterial('disparity', range), camera = this.document.cameras.find(item => item.id === cameraId)!;
     try { this.withOverride(material, () => { this.renderer.setClearColor(0x000000, 1); renderCameraFrame(this.renderer, this.scene, this.camera, camera.frameBounds); }); }
     finally { material.dispose(); }
     return this.canvas;
   }
+  /** Effects (fire, smoke, sparks) stay out of control passes: as depth they read as solid objects, so the video model paints a cone instead of fire. The next render() restores them. */
+  private hideEffects(): void { for (const id of effectObjectIds(this.document)) { const root = this.roots.get(id); if (root) root.visible = false; } }
   /** Draw every mesh with one material, without background, fog or lines; restores the scene afterwards. */
   private withOverride(material: THREE.Material, draw: () => void): void {
     const saved = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>(), hidden: THREE.Object3D[] = [], background = this.scene.background, fog = this.scene.fog;

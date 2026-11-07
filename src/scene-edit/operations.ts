@@ -5,6 +5,7 @@ import { validateProjectContent } from '../project/model.ts';
 import type { ProjectContent, SceneEntity, Transform, Vec3 } from '../types.ts';
 import { trackPoses, motionSchema, recordedTrack } from '../performance/motion.ts';
 import { sceneLookSchema } from './look.ts';
+import { componentsSchema, effectKinds, type ObjectComponent } from '../components/model.ts';
 import { assetSchema, validateAsset,validateJointAngles } from '../assets/model.ts';
 
 import { instantiateAsset } from '../assets/library.ts';
@@ -70,6 +71,7 @@ export const operationSchema = z.discriminatedUnion('type', [
   z.strictObject({ sceneId: id, type: z.literal('rename'), id, name }),
   z.strictObject({ sceneId: id, type: z.literal('set_parent'), id, parentId: id.nullable() }),
   z.strictObject({ sceneId: id, type: z.literal('set_color'), id, color }),
+  z.strictObject({ sceneId: id, type: z.literal('set_effect'), id, effect: z.enum(effectKinds).nullable() }),
   z.strictObject({ sceneId: id, type: z.literal('add_object'), object: z.strictObject({ id, name, kind: z.enum(['cube', 'sphere', 'cylinder', 'cone', 'plane', 'human']), color, transform, track: track.nullable() }) }),
   z.strictObject({ sceneId: id, type: z.literal('remove_object'), id }),
   z.strictObject({ sceneId: id, type: z.literal('set_duration'), duration: z.number().min(1).max(60) }),
@@ -222,6 +224,13 @@ export function applyProjectOperations(source: ProjectContent, operations: Scene
       case 'set_color': {
         const item = find(operation.id); if (!('color' in item)) throw new Error('The camera has no material.');
         item.color = operation.color; break;
+      }
+      case 'set_effect': {
+        const item = find(operation.id); if (!('kind' in item)) throw new Error('Only a scene object can be an effect.');
+        const components: ObjectComponent[] = (item.components ?? []).filter(component => component.type !== 'effect');
+        if (operation.effect) components.push({ type: 'effect', enabled: true, kind: operation.effect });
+        if (components.length) item.components = componentsSchema.parse(components); else delete item.components;
+        break;
       }
       case 'add_object': doc.objects.push(structuredClone(operation.object)); break;
       case 'instantiate_asset': {
