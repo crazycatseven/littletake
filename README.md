@@ -25,6 +25,7 @@ AI video models are powerful, but describing actions, camera movement and the re
 - **Direct the look.** Attach appearance references and generate storyboards with Muse Image.
 - **Hand it off.** Export PNG frames, WebM previs and a video brief for an AI video model, then import the finished video.
 - **Step inside.** Experimental [WebXR](docs/webxr.md) for working in the scene in VR.
+- **Let your agent direct.** An [MCP server](server/mcp/README.md) lets Claude Code, Claude Desktop or Codex edit a project live.
 
 ## How it uses Meta models
 
@@ -61,4 +62,4 @@ npm run build && npm start   # run the production server
 | `public/` | Static assets and examples |
 | `docs/` | Documentation |
 
-More detail: [deployment and storage](server/app/README.md), [spatial operations](src/spatial/README.md), [script components](src/scripts/README.md), [asset toolkit](src/assets/toolkit/README.md), [local geometry tools](server/reference/geometry/README.md).
+More detail: [deployment and storage](server/app/README.md), [spatial operations](src/spatial/README.md), [script components](src/scripts/README.md), [asset toolkit](src/assets/toolkit/README.md), [local geometry tools](server/reference/geometry/README.md), [MCP server](server/mcp/README.md).
