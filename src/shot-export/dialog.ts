@@ -2,7 +2,7 @@ import { icon } from '../icons';
 import './dialog.css';
 import type { Shot } from '../types';
 import { exportPNG, exportVideo, videoExportIssue } from './export';
-import type { ShotRenderer } from './renderer';
+import type { DepthRange, ShotRenderer } from './renderer';
 import type { Workspace } from '../project/workspace';
 import { MAX_OUTPUT_BYTES } from '../project/room';
 import { newId } from '../id';
@@ -22,6 +22,7 @@ export function openShotExport(renderer: ShotRenderer, shot: Shot, time: number,
     <div><fieldset class="export-settings">
     <label>Resolution<select aria-label="Export resolution"><option value="1920">1920 × 1080</option><option value="1280">1280 × 720</option></select></label>
     <label data-video hidden>Frame rate<select aria-label="Export frame rate"><option value="24">24 fps</option><option value="30">30 fps</option></select></label>
+    <label data-video hidden>Pass<select aria-label="Export pass"><option value="color">Color</option><option value="depth">Depth (for AI video)</option></select></label>
     <p class="export-range"></p></fieldset>
     <div class="export-progress" hidden><progress max="1" value="0"></progress><span role="status"></span></div><p class="export-message" role="status" aria-live="polite"></p>
     <div class="export-actions"><button data-cancel hidden>Cancel render</button><button data-render class="primary-button">Render still</button><a data-download class="primary-button" hidden>Download PNG</a></div></div></div><div id="renderMusePanel" role="tabpanel" aria-labelledby="renderMuseTab" hidden></div>`;
@@ -50,7 +51,7 @@ export function openShotExport(renderer: ShotRenderer, shot: Shot, time: number,
     timeline.setLocked(busy);
     const previewShot = format === 'muse' ? shot : shotAtTime(scene, timeline.time);
     find('[data-shot]').textContent = previewShot ? [previewShot.name, scene.cameras.find(c => c.id === previewShot.cameraId)?.name].filter(Boolean).join(' · ') : scene.cameras[0].name;
-    find('[data-video]').hidden = format !== 'video';
+    dialog.querySelectorAll<HTMLElement>('[data-video]').forEach(element => { element.hidden = format !== 'video'; });
     find('.export-range').textContent = format === 'image' ? 'PNG image' : 'WebM video · No audio';
     const issue = format === 'video' ? videoExportIssue() : null;
     const render = find<HTMLButtonElement>('[data-render]'); render.textContent = busy ? 'Rendering…' : format === 'image' ? 'Render still' : 'Render video'; render.disabled = busy || !!issue;
@@ -88,7 +89,22 @@ export function openShotExport(renderer: ShotRenderer, shot: Shot, time: number,
     const title = outputShot?.name ?? scene.name;
     try {
       renderer.resize(width, width * 9 / 16); preview.replaceChildren(renderer.canvas);
-      const blob = format === 'image' ? await exportPNG(sceneRenderer, at) : await exportVideo(sceneRenderer, range, fps, controller.signal, (done, total) => {
+      const depth = format === 'video' && find<HTMLSelectElement>('[aria-label="Export pass"]').value === 'depth';
+      // One depth range per shot, measured across the exported part of it, so brightness means the same distance in every frame of a shot.
+      const cameraAt = (time: number) => shotAtTime(scene, time)?.cameraId ?? scene.cameras[0].id;
+      const depthRanges = new Map<string, DepthRange>(), end = range.start + range.duration;
+      const depthRangeAt = (time: number): DepthRange => {
+        const shot = shotAtTime(scene, time), key = shot?.id ?? '';
+        let found = depthRanges.get(key);
+        if (!found) {
+          const from = Math.max(range.start, shot?.start ?? range.start), to = Math.min(end, shot ? shot.start + shot.duration : end);
+          found = renderer.depthRange(Array.from({ length: 8 }, (_, index) => { const at = from + (to - from) * (index + .5) / 8; return { time: at, cameraId: shot?.cameraId ?? cameraAt(at) }; }));
+          depthRanges.set(key, found);
+        }
+        return found;
+      };
+      const output = depth ? { canvas: renderer.canvas, render: (time: number) => renderer.renderDepth(time, depthRangeAt(time), cameraAt(time)) } : sceneRenderer;
+      const blob = format === 'image' ? await exportPNG(sceneRenderer, at) : await exportVideo(output, range, fps, controller.signal, (done, total) => {
         find('.export-message').textContent = done === total ? 'Finalizing video…' : 'Rendering camera motion…';
         find<HTMLProgressElement>('progress').value = done / total;
         find('.export-progress span').textContent = `${done} / ${total} frames · ${Math.round(done / total * 100)}%`;
@@ -96,7 +112,7 @@ export function openShotExport(renderer: ShotRenderer, shot: Shot, time: number,
       controller.signal.throwIfAborted();
       url = URL.createObjectURL(blob);
       const fileBase = title.replace(/[^\p{L}\p{N}_-]+/gu, '-').replace(/^-|-$/g, '') || 'render';
-      const filename = fileBase + (format === 'image' ? `-${at.toFixed(2)}s.png` : `-${range.start.toFixed(2)}-${(range.start + range.duration).toFixed(2)}s.webm`);
+      const filename = fileBase + (format === 'image' ? `-${at.toFixed(2)}s.png` : `-${range.start.toFixed(2)}-${(range.start + range.duration).toFixed(2)}s${depth ? '-depth' : ''}.webm`);
       const download = find<HTMLAnchorElement>('[data-download]'); download.href = url; download.download = filename; download.hidden = false; download.textContent = format === 'image' ? 'Download PNG' : 'Download video';
       const result = document.createElement(format === 'image' ? 'img' : 'video'); result.src = url;
       if (result instanceof HTMLVideoElement) { result.controls = true; result.preload = 'metadata'; } else result.alt = 'Rendered shot frame';
@@ -105,7 +121,7 @@ export function openShotExport(renderer: ShotRenderer, shot: Shot, time: number,
       find('.export-message').textContent = 'Adding to Renders…';
       try {
         if (blob.size > MAX_OUTPUT_BYTES) throw new Error('This render exceeds the 64 MB project limit. Download it to keep a copy.');
-        await workspace.putOutput({ id: newId(), kind: 'shot-render', sceneId: scene.id, shotId: outputShot?.id ?? '', name: `${title} · ${format === 'image' ? at.toFixed(2) + 's still' : range.start.toFixed(2) + '–' + (range.start + range.duration).toFixed(2) + 's video'}`.slice(0,160), mime: format === 'image' ? 'image/png' : 'video/webm' }, blob, room);
+        await workspace.putOutput({ id: newId(), kind: 'shot-render', sceneId: scene.id, shotId: outputShot?.id ?? '', name: `${title} · ${format === 'image' ? at.toFixed(2) + 's still' : range.start.toFixed(2) + '–' + (range.start + range.duration).toFixed(2) + (depth ? 's depth video' : 's video')}`.slice(0,160), mime: format === 'image' ? 'image/png' : 'video/webm' }, blob, room);
         find('.export-message').textContent = `${filename} · ${(blob.size / 1024 / 1024).toFixed(2)} MB · Added to Renders`;
       } catch (error) {
         find('.export-message').textContent = `Rendered, but could not save to Renders. ${(error as Error).message} Your download is still available.`;
