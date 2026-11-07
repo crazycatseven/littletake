@@ -21,6 +21,11 @@ export function objectCameraView(root: THREE.Object3D, cameraPosition: THREE.Vec
 }
 
 export interface DepthRange { near: number; far: number }
+/** Whether a pixel of a render-target read (rows bottom-up) lies inside a normalised [left, top, right, bottom] crop. */
+export function pixelInCrop(pixel: number, width: number, height: number, crop: readonly number[]): boolean {
+  const x = (pixel % width + .5) / width, y = 1 - (Math.floor(pixel / width) + .5) / height;
+  return x >= crop[0] && x <= crop[2] && y >= crop[1] && y <= crop[3];
+}
 /** Wide range used only to measure where a shot's geometry actually sits. */
 const DEPTH_LOG_RANGE: DepthRange = { near: .05, far: 2000 };
 
@@ -157,7 +162,11 @@ export class ShotRenderer {
         this.withOverride(material, () => { this.renderer.setRenderTarget(target); this.renderer.setClearColor(0x000000, 0); this.renderer.clear(); this.renderer.render(this.scene, this.camera); });
         this.renderer.setRenderTarget(null);
         this.renderer.readRenderTargetPixels(target, 0, 0, 160, 90, pixels);
-        for (let index = 0; index < pixels.length; index += 4) if (pixels[index + 3] > 0) values.push(DEPTH_LOG_RANGE.near * Math.exp(pixels[index] / 255 * Math.log(DEPTH_LOG_RANGE.far / DEPTH_LOG_RANGE.near)));
+        // Count only pixels inside the camera's crop, the same area renderDepth keeps; rows are read bottom-up.
+        const crop = this.document.cameras.find(item => item.id === cameraId)?.frameBounds ?? [0, 0, 1, 1];
+        for (let index = 0; index < pixels.length; index += 4) {
+          if (pixels[index + 3] > 0 && pixelInCrop(index / 4, 160, 90, crop)) values.push(DEPTH_LOG_RANGE.near * Math.exp(pixels[index] / 255 * Math.log(DEPTH_LOG_RANGE.far / DEPTH_LOG_RANGE.near)));
+        }
       }
     } finally { target.dispose(); material.dispose(); this.renderer.setClearColor(0x000000, 1); }
     if (!values.length) return { near: 1, far: 100 };
