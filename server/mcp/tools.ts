@@ -87,7 +87,7 @@ export function littleTakeTools(room: LittleTakeRoom): Tool[] {
         if (!query.success) throw new Error(issues(query.error));
         return inspectSpatial(projectContent(project), query.data);
       } },
-    { name: 'check_visibility', description: 'How much of an object, or of its parts whose ID starts with partPrefix (e.g. "shield"), a camera sees at a time: share inside the frame and share actually visible (not hidden behind any object), plus its on-screen box. Camera defaults to the shot playing at that time.',
+    { name: 'check_visibility', description: 'How much of an object, or of its parts whose ID starts with partPrefix (e.g. "shield"), a camera sees at a time: share inside the frame and share actually visible (not hidden behind any object), the share of the frame it covers, plus its on-screen box. Camera defaults to the shot playing at that time.',
       inputSchema: { type: 'object', properties: { sceneId: { type: 'string' }, id: { type: 'string' }, time: { type: 'number' }, cameraId: { type: 'string' }, partPrefix: { type: 'string' } }, required: ['id', 'time'], additionalProperties: false },
       run: async args => { const project = await current();
         return checkVisibility(projectContent(project), sceneOf(project, args.sceneId), number(args.time, 'time'), text(args.id, 'id'), { cameraId: args.cameraId as string | undefined, partPrefix: args.partPrefix as string | undefined }); } },
