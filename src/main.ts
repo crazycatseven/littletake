@@ -309,7 +309,7 @@ function switchShot(id:string){
   pause();flushFieldEdit();
   if(editPreview)previewShotId=id;
   else{sceneEditor?.session.contextChanged();project.activeShotId=id;}
-  selection.active=shot.cameraId;time=shot.start;setBottomPanelTab('timeline');setSidePanel('inspector');
+  selection.active=shot.cameraId;time=shot.start;setBottomPanelTab('timeline');if($('#sceneAI').hidden)setSidePanel('inspector');
   renderNavigation();renderInspector();renderSelection();renderTime();syncStage();if(!editPreview)persist();
 }
 function addScene(){
@@ -1369,11 +1369,25 @@ $('#timelineTracks').addEventListener('pointercancel',()=>finishTimelineDrag(tru
 $('#timeRuler').addEventListener('keydown',event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();pause();seek(snapFrame(time+(event.key==='ArrowRight'?1/fps():-1/fps())));}else if(event.key==='Home'){event.preventDefault();pause();seek(0);}else if(event.key==='End'){event.preventDefault();pause();seek(doc.duration);}});
 $('#inspector').addEventListener('pointerover',event=>{const target=event.target as HTMLElement,input=target.closest<HTMLInputElement>('[data-pose],#cameraFov,[data-component-field="offset"],[data-joint-path]'),button=target.closest<HTMLElement>('[data-key-group]');hoveredProperty=input?(input.dataset.jointPath as PropertyGroup|| (input.id==='cameraFov'?'fov':input.dataset.pose as PropertyGroup||'pivot')):button?.dataset.keyGroup as PropertyGroup??null;});
 $('#inspector').addEventListener('pointerleave',()=>{hoveredProperty=null;});
+let lastPointerArea:'muse'|'side'|'stage'='stage',typingUntil=0;const typedAt:number[]=[];
+document.addEventListener('pointerdown',event=>{const target=event.target as HTMLElement;lastPointerArea=target.closest('#sceneAI')?'muse':target.closest('.inspector-panel')?'side':'stage';typedAt.length=0;typingUntil=0;},true);
+/** Letters typed outside a text field are shortcuts, unless the person last clicked the Muse panel (they go into the Muse box) or is plainly typing a sentence: three letters within 1.5 s pause shortcuts until a click or a 1.5 s pause. */
+function typingGuard(event:KeyboardEvent,target:HTMLElement):boolean{
+  if(event.ctrlKey||event.metaKey||event.altKey||event.repeat||event.key.length!==1||performanceSession||document.querySelector('dialog[open]'))return false;
+  if(target.closest('input,textarea,select,[contenteditable=true]'))return false;
+  const prompt=document.querySelector<HTMLTextAreaElement>('#sceneInstruction');
+  if(lastPointerArea==='muse'&&prompt&&!$('#sceneAI').hidden&&!prompt.disabled){prompt.focus();return true;}
+  const now=event.timeStamp;while(typedAt.length&&now-typedAt[0]>1500)typedAt.shift();
+  if(event.key!==' ')typedAt.push(now);
+  if(now<typingUntil||typedAt.length>=3){typingUntil=now+1500;event.preventDefault();status('Shortcuts paused while typing. Click the Muse box to write a request.');return true;}
+  return false;
+}
 window.addEventListener('keydown',event=>{
   if(stage?.presentingXR)return;
   if(assetEditor)return;
   if(event.defaultPrevented||storageError||editPreview||event.isComposing)return;
   const target=event.target as HTMLElement;
+  if(typingGuard(event,target))return;
   if(event.code==='KeyI'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!performanceSession&&!document.querySelector('dialog[open]')){
     const input=target instanceof HTMLInputElement?target:null,group=input?(input.dataset.jointPath as PropertyGroup|| (input.id==='cameraFov'?'fov':input.dataset.pose?input.dataset.pose as PropertyGroup:input.dataset.componentField==='offset'?'pivot':null)):hoveredProperty,item=entity();
     if(group&&item){event.preventDefault();pause();try{
